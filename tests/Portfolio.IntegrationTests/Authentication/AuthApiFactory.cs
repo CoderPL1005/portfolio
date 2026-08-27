@@ -10,6 +10,8 @@ using Portfolio.Application.Features.Auth.GetCurrentAdmin;
 using Portfolio.Application.Features.Auth.Login;
 using Portfolio.Application.Features.Auth.Logout;
 using Portfolio.Application.Features.Auth.Refresh;
+using Portfolio.Application.Features.PortfolioContent;
+using Portfolio.Application.Features.PortfolioContent.GetPublicPortfolio;
 
 namespace Portfolio.IntegrationTests.Authentication;
 
@@ -35,10 +37,12 @@ public sealed class AuthApiFactory : WebApplicationFactory<Program>
             services.RemoveAll<IRequestHandler<RefreshCommand, RefreshResult>>();
             services.RemoveAll<IRequestHandler<LogoutCommand, bool>>();
             services.RemoveAll<IRequestHandler<GetCurrentAdminQuery, CurrentAdminResult>>();
+            services.RemoveAll<IRequestHandler<GetPublicPortfolioQuery, PortfolioHomeResult>>();
             services.AddScoped<IRequestHandler<LoginCommand, LoginResult>, FakeLoginHandler>();
             services.AddScoped<IRequestHandler<RefreshCommand, RefreshResult>, FakeRefreshHandler>();
             services.AddScoped<IRequestHandler<LogoutCommand, bool>, FakeLogoutHandler>();
             services.AddScoped<IRequestHandler<GetCurrentAdminQuery, CurrentAdminResult>, FakeCurrentAdminHandler>();
+            services.AddScoped<IRequestHandler<GetPublicPortfolioQuery, PortfolioHomeResult>, FakePublicPortfolioHandler>();
         });
     }
 
@@ -79,5 +83,14 @@ public sealed class AuthApiFactory : WebApplicationFactory<Program>
                 "admin@example.com",
                 "Portfolio Admin",
                 new DateTimeOffset(2026, 8, 27, 4, 0, 0, TimeSpan.Zero)));
+    }
+
+    public sealed class FakePublicPortfolioHandler : IRequestHandler<GetPublicPortfolioQuery, PortfolioHomeResult>
+    {
+        public Task<PortfolioHomeResult> HandleAsync(GetPublicPortfolioQuery request, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new PortfolioHomeResult(
+                new PublicProfileResult("Owner", null, null, null, null, null, null, null,
+                    null, null, null, null, null),
+                [], [], [], [], [], [], [], []));
     }
 }
