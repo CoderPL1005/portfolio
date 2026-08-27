@@ -23,6 +23,11 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Portfolio.Api\Portfolio.Api.csproj" />
     <ProjectReference Include="..\..\src\Portfolio.Application\Portfolio.Application.csproj" />
+    <ProjectReference Include="..\..\src\Portfolio.Infrastructure\Portfolio.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="..\..\seed\portfolio.seed.json" Link="seed\portfolio.seed.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
