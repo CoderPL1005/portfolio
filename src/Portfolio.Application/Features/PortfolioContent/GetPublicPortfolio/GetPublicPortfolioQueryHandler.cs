@@ -3,6 +3,7 @@ using Portfolio.Application.Common.Abstractions.Messaging;
 using Portfolio.Application.Common.Abstractions.Persistence;
 using Portfolio.Application.Common.Exceptions;
 using Portfolio.Application.Features.Phase4B;
+using Portfolio.Application.Features.Phase4C;
 using Portfolio.Application.Features.Projects;
 
 namespace Portfolio.Application.Features.PortfolioContent.GetPublicPortfolio;
@@ -72,8 +73,21 @@ public sealed class GetPublicPortfolioQueryHandler(IApplicationDbContext dbConte
                 item.Id, item.Name, item.Category, item.ExperienceLevel, item.Description,
                 item.Technology != null && item.Technology.IsActive ? item.TechnologyId : null))
             .ToListAsync(cancellationToken);
+        var journey = await dbContext.JourneyItems.AsNoTracking()
+            .Where(item => item.IsPublished)
+            .OrderBy(item => item.DisplayOrder).ThenBy(item => item.Id)
+            .Select(item => new PublicJourneyResult(item.Id, item.Title, item.Subtitle,
+                item.Description, item.OccurredAt, item.IconKey))
+            .ToListAsync(cancellationToken);
+        var socialLinks = await dbContext.SocialLinks.AsNoTracking()
+            .Where(item => item.IsVisible)
+            .OrderBy(item => item.DisplayOrder).ThenBy(item => item.Id)
+            .Select(item => new PublicSocialLinkResult(item.Id, item.Platform, item.Label,
+                item.Url, item.IconKey))
+            .ToListAsync(cancellationToken);
 
         return new PortfolioHomeResult(
-            profile, experiences, featuredProjects, skills, educations, trainings, certificates, [], []);
+            profile, experiences, featuredProjects, skills, educations, trainings, certificates,
+            journey, socialLinks);
     }
 }

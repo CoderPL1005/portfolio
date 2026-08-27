@@ -1,6 +1,10 @@
 using System.Net;
+using System.Net.Http.Json;
+using System.Net.Http.Headers;
+using Microsoft.Extensions.DependencyInjection;
 using System.Text.Json;
 using Portfolio.Api.Controllers;
+using Portfolio.Application.Common.Abstractions.Authentication;
 using Portfolio.IntegrationTests.Authentication;
 
 namespace Portfolio.IntegrationTests.PortfolioContent;
@@ -63,6 +67,11 @@ public sealed class Phase4AuthorizationTests(AuthApiFactory factory) : IClassFix
         AssertProperties<ProjectSectionRequest>("SectionType", "Title", "Subtitle", "ContentMarkdown", "Content", "DisplayOrder", "IsVisible");
         AssertProperties<AttachProjectMediaRequest>("MediaAssetId", "MediaRole", "Caption", "DisplayOrder");
         AssertProperties<UpdateProjectMediaRequest>("MediaRole", "Caption", "DisplayOrder");
+        AssertProperties<JourneyRequest>("Title", "Subtitle", "Description", "OccurredAt", "IconKey", "DisplayOrder", "IsPublished");
+        AssertProperties<SocialLinkRequest>("Platform", "Label", "Url", "IconKey", "DisplayOrder", "IsVisible");
+        AssertProperties<SiteSettingsRequest>("SiteName", "FooterText", "ShowAvailability", "EnableContactForm", "ShowDownloadCv", "ShowJourney", "ShowAiAgent", "DefaultSeoTitle", "DefaultSeoDescription");
+        AssertProperties<ContactRequest>("Name", "Email", "Subject", "Message");
+        AssertProperties<ContactStatusRequest>("Status");
     }
 
     [Fact]
@@ -72,6 +81,39 @@ public sealed class Phase4AuthorizationTests(AuthApiFactory factory) : IClassFix
         Assert.Equal(HttpStatusCode.OK, list.StatusCode); Assert.Equal(HttpStatusCode.OK, detail.StatusCode);
         using var listBody = JsonDocument.Parse(await list.Content.ReadAsStringAsync()); using var detailBody = JsonDocument.Parse(await detail.Content.ReadAsStringAsync());
         Assert.Equal("project", listBody.RootElement.GetProperty("data")[0].GetProperty("slug").GetString()); Assert.Equal("project", detailBody.RootElement.GetProperty("data").GetProperty("slug").GetString());
+    }
+
+    [Fact]
+    public async Task Public_contact_is_anonymous_and_rate_limited_after_three_requests_per_minute()
+    {
+        var client = factory.CreateClient(); var statuses = new List<HttpStatusCode>();
+        for (var index = 0; index < 4; index++)
+        {
+            var response = await client.PostAsJsonAsync("/api/v1/public/contact", new { name = "Sender", email = "sender@example.com", subject = "Hello", message = "Message" }); statuses.Add(response.StatusCode);
+        }
+        Assert.Equal([HttpStatusCode.Created, HttpStatusCode.Created, HttpStatusCode.Created, HttpStatusCode.TooManyRequests], statuses);
+    }
+
+    [Fact]
+    public async Task Contact_delete_route_is_not_exposed()
+    {
+        var response = await factory.CreateClient().DeleteAsync("/api/v1/admin/contact-messages/11111111-1111-1111-1111-111111111111");
+        Assert.Equal(HttpStatusCode.MethodNotAllowed, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Authenticated_site_settings_get_and_update_use_typed_contract()
+    {
+        var client = AuthenticatedClient(); var get = await client.GetAsync("/api/v1/admin/site-settings");
+        var update = await client.PutAsJsonAsync("/api/v1/admin/site-settings", new { siteName = "Updated", footerText = "Footer", showAvailability = true, enableContactForm = true, showDownloadCv = true, showJourney = true, showAiAgent = false, defaultSeoTitle = "SEO", defaultSeoDescription = "Description" });
+        Assert.Equal(HttpStatusCode.OK, get.StatusCode); Assert.Equal(HttpStatusCode.OK, update.StatusCode); using var body = JsonDocument.Parse(await update.Content.ReadAsStringAsync()); Assert.Equal("Updated", body.RootElement.GetProperty("data").GetProperty("siteName").GetString());
+    }
+
+    [Fact]
+    public async Task Authenticated_dashboard_returns_persisted_metric_contract_shape()
+    {
+        var response = await AuthenticatedClient().GetAsync("/api/v1/admin/dashboard");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode); using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync()); Assert.Equal(1, body.RootElement.GetProperty("data").GetProperty("projects").GetInt32()); Assert.Equal(6, body.RootElement.GetProperty("data").GetProperty("knowledge").GetProperty("indexed").GetInt32());
     }
 
     public static TheoryData<string, string> AdminRoutes => new()
@@ -127,11 +169,35 @@ public sealed class Phase4AuthorizationTests(AuthApiFactory factory) : IClassFix
         ,{ "POST", "/api/v1/admin/projects/11111111-1111-1111-1111-111111111111/media" }
         ,{ "PUT", "/api/v1/admin/projects/11111111-1111-1111-1111-111111111111/media/22222222-2222-2222-2222-222222222222" }
         ,{ "DELETE", "/api/v1/admin/projects/11111111-1111-1111-1111-111111111111/media/22222222-2222-2222-2222-222222222222" }
+        ,{ "GET", "/api/v1/admin/journey" }
+        ,{ "GET", "/api/v1/admin/journey/11111111-1111-1111-1111-111111111111" }
+        ,{ "POST", "/api/v1/admin/journey" }
+        ,{ "PUT", "/api/v1/admin/journey/11111111-1111-1111-1111-111111111111" }
+        ,{ "DELETE", "/api/v1/admin/journey/11111111-1111-1111-1111-111111111111" }
+        ,{ "PUT", "/api/v1/admin/journey/reorder" }
+        ,{ "GET", "/api/v1/admin/social-links" }
+        ,{ "POST", "/api/v1/admin/social-links" }
+        ,{ "PUT", "/api/v1/admin/social-links/11111111-1111-1111-1111-111111111111" }
+        ,{ "DELETE", "/api/v1/admin/social-links/11111111-1111-1111-1111-111111111111" }
+        ,{ "PUT", "/api/v1/admin/social-links/reorder" }
+        ,{ "GET", "/api/v1/admin/site-settings" }
+        ,{ "PUT", "/api/v1/admin/site-settings" }
+        ,{ "GET", "/api/v1/admin/contact-messages" }
+        ,{ "GET", "/api/v1/admin/contact-messages/11111111-1111-1111-1111-111111111111" }
+        ,{ "PATCH", "/api/v1/admin/contact-messages/11111111-1111-1111-1111-111111111111/status" }
+        ,{ "GET", "/api/v1/admin/dashboard" }
     };
 
     private static void AssertProperties<T>(params string[] expected)
     {
         var actual = typeof(T).GetProperties().Select(property => property.Name).Order().ToArray();
         Assert.Equal(expected.Order().ToArray(), actual);
+    }
+
+    private HttpClient AuthenticatedClient()
+    {
+        var client = factory.CreateClient(); using var scope = factory.Services.CreateScope();
+        var token = scope.ServiceProvider.GetRequiredService<IJwtTokenService>().CreateAccessToken(AuthApiFactory.AdminId, "admin@example.com").Value;
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token); return client;
     }
 }

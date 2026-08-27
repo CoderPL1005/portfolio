@@ -20,17 +20,17 @@ internal sealed class ContentTestDbContext(DbContextOptions<ContentTestDbContext
     public DbSet<ProjectSection> ProjectSections => Set<ProjectSection>();
     public DbSet<ProjectMedia> ProjectMedia => Set<ProjectMedia>();
     public DbSet<Skill> Skills => Set<Skill>();
+    public DbSet<JourneyItem> JourneyItems => Set<JourneyItem>();
+    public DbSet<SocialLink> SocialLinks => Set<SocialLink>();
+    public DbSet<SiteSetting> SiteSettings => Set<SiteSetting>();
+    public DbSet<ContactMessage> ContactMessages => Set<ContactMessage>();
+    public DbSet<KnowledgeDocument> KnowledgeDocuments => Set<KnowledgeDocument>();
+    public DbSet<ChatSession> ChatSessions => Set<ChatSession>();
 
     DbSet<AdminUser> IApplicationDbContext.AdminUsers => throw new NotSupportedException();
     DbSet<AdminRefreshToken> IApplicationDbContext.AdminRefreshTokens => throw new NotSupportedException();
-    DbSet<JourneyItem> IApplicationDbContext.JourneyItems => throw new NotSupportedException();
-    DbSet<SocialLink> IApplicationDbContext.SocialLinks => throw new NotSupportedException();
-    DbSet<SiteSetting> IApplicationDbContext.SiteSettings => throw new NotSupportedException();
-    DbSet<ContactMessage> IApplicationDbContext.ContactMessages => throw new NotSupportedException();
     DbSet<AgentSetting> IApplicationDbContext.AgentSettings => throw new NotSupportedException();
-    DbSet<KnowledgeDocument> IApplicationDbContext.KnowledgeDocuments => throw new NotSupportedException();
     DbSet<KnowledgeChunk> IApplicationDbContext.KnowledgeChunks => throw new NotSupportedException();
-    DbSet<ChatSession> IApplicationDbContext.ChatSessions => throw new NotSupportedException();
     DbSet<ChatMessage> IApplicationDbContext.ChatMessages => throw new NotSupportedException();
     DbSet<ChatMessageSource> IApplicationDbContext.ChatMessageSources => throw new NotSupportedException();
     DbSet<ChatMessageFeedback> IApplicationDbContext.ChatMessageFeedback => throw new NotSupportedException();
@@ -38,11 +38,9 @@ internal sealed class ContentTestDbContext(DbContextOptions<ContentTestDbContext
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Ignore<AdminUser>(); modelBuilder.Ignore<AdminRefreshToken>();
-        modelBuilder.Ignore<JourneyItem>();
-        modelBuilder.Ignore<SocialLink>(); modelBuilder.Ignore<SiteSetting>();
-        modelBuilder.Ignore<ContactMessage>(); modelBuilder.Ignore<AgentSetting>();
-        modelBuilder.Ignore<KnowledgeDocument>(); modelBuilder.Ignore<KnowledgeChunk>();
-        modelBuilder.Ignore<ChatSession>(); modelBuilder.Ignore<ChatMessage>();
+        modelBuilder.Ignore<AgentSetting>();
+        modelBuilder.Ignore<KnowledgeChunk>();
+        modelBuilder.Ignore<ChatMessage>();
         modelBuilder.Ignore<ChatMessageSource>(); modelBuilder.Ignore<ChatMessageFeedback>();
 
         modelBuilder.Entity<MediaAsset>().HasKey(item => item.Id);
@@ -75,5 +73,20 @@ internal sealed class ContentTestDbContext(DbContextOptions<ContentTestDbContext
         modelBuilder.Entity<ProjectMedia>().HasOne(item => item.MediaAsset).WithMany().HasForeignKey(item => item.MediaAssetId);
         modelBuilder.Entity<Skill>().HasKey(item => item.Id);
         modelBuilder.Entity<Skill>().HasOne(item => item.Technology).WithMany().HasForeignKey(item => item.TechnologyId);
+        modelBuilder.Entity<JourneyItem>().HasKey(item => item.Id);
+        modelBuilder.Entity<SocialLink>().HasKey(item => item.Id);
+        modelBuilder.Entity<SiteSetting>().HasKey(item => item.Key);
+        modelBuilder.Entity<SiteSetting>().Property(item => item.Value).HasConversion(
+            value => value.RootElement.GetRawText(), value => System.Text.Json.JsonDocument.Parse(
+                value, default(System.Text.Json.JsonDocumentOptions)));
+        modelBuilder.Entity<ContactMessage>().HasKey(item => item.Id);
+        modelBuilder.Entity<KnowledgeDocument>().HasKey(item => item.Id);
+        modelBuilder.Entity<KnowledgeDocument>().Property(item => item.Metadata).HasConversion(
+            value => value.RootElement.GetRawText(), value => System.Text.Json.JsonDocument.Parse(
+                value, default(System.Text.Json.JsonDocumentOptions)));
+        modelBuilder.Entity<ChatSession>().HasKey(item => item.Id);
+        modelBuilder.Entity<ChatSession>().Property(item => item.Metadata).HasConversion(
+            value => value.RootElement.GetRawText(), value => System.Text.Json.JsonDocument.Parse(
+                value, default(System.Text.Json.JsonDocumentOptions)));
     }
 }

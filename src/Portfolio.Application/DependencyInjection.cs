@@ -20,6 +20,12 @@ using Portfolio.Application.Features.Phase4B;
 using Portfolio.Application.Features.Projects;
 using Portfolio.Application.Features.Skills;
 using Portfolio.Application.Features.Technologies;
+using Portfolio.Application.Features.ContactMessages;
+using Portfolio.Application.Features.Dashboard;
+using Portfolio.Application.Features.Journey;
+using Portfolio.Application.Features.Phase4C;
+using Portfolio.Application.Features.SiteSettings;
+using Portfolio.Application.Features.SocialLinks;
 
 namespace Portfolio.Application;
 
@@ -129,6 +135,35 @@ public static class DependencyInjection
         services.AddScoped<IRequestValidator<ReorderProjectSectionsCommand>, ReorderProjectSectionsCommandValidator>();
         services.AddScoped<IRequestValidator<AttachProjectMediaCommand>, AttachProjectMediaCommandValidator>();
         services.AddScoped<IRequestValidator<UpdateProjectMediaCommand>, UpdateProjectMediaCommandValidator>();
+
+        services.AddScoped<IRequestHandler<GetJourneyItemsQuery, IReadOnlyCollection<JourneyResult>>, GetJourneyItemsQueryHandler>();
+        services.AddScoped<IRequestHandler<GetJourneyItemQuery, JourneyResult>, GetJourneyItemQueryHandler>();
+        services.AddScoped<IRequestHandler<CreateJourneyItemCommand, JourneyResult>, CreateJourneyItemCommandHandler>();
+        services.AddScoped<IRequestHandler<UpdateJourneyItemCommand, JourneyResult>, UpdateJourneyItemCommandHandler>();
+        services.AddScoped<IRequestHandler<DeleteJourneyItemCommand, bool>, DeleteJourneyItemCommandHandler>();
+        services.AddScoped<IRequestHandler<ReorderJourneyItemsCommand, bool>, ReorderJourneyItemsCommandHandler>();
+        services.AddScoped<IRequestValidator<CreateJourneyItemCommand>, CreateJourneyItemCommandValidator>();
+        services.AddScoped<IRequestValidator<UpdateJourneyItemCommand>, UpdateJourneyItemCommandValidator>();
+        services.AddScoped<IRequestValidator<ReorderJourneyItemsCommand>, ReorderJourneyItemsCommandValidator>();
+        services.AddScoped<IRequestHandler<GetSocialLinksQuery, IReadOnlyCollection<SocialLinkResult>>, GetSocialLinksQueryHandler>();
+        services.AddScoped<IRequestHandler<CreateSocialLinkCommand, SocialLinkResult>, CreateSocialLinkCommandHandler>();
+        services.AddScoped<IRequestHandler<UpdateSocialLinkCommand, SocialLinkResult>, UpdateSocialLinkCommandHandler>();
+        services.AddScoped<IRequestHandler<DeleteSocialLinkCommand, bool>, DeleteSocialLinkCommandHandler>();
+        services.AddScoped<IRequestHandler<ReorderSocialLinksCommand, bool>, ReorderSocialLinksCommandHandler>();
+        services.AddScoped<IRequestValidator<CreateSocialLinkCommand>, CreateSocialLinkCommandValidator>();
+        services.AddScoped<IRequestValidator<UpdateSocialLinkCommand>, UpdateSocialLinkCommandValidator>();
+        services.AddScoped<IRequestValidator<ReorderSocialLinksCommand>, ReorderSocialLinksCommandValidator>();
+        services.AddScoped<IRequestHandler<GetSiteSettingsQuery, SiteSettingsResult>, GetSiteSettingsQueryHandler>();
+        services.AddScoped<IRequestHandler<UpdateSiteSettingsCommand, SiteSettingsResult>, UpdateSiteSettingsCommandHandler>();
+        services.AddScoped<IRequestValidator<UpdateSiteSettingsCommand>, UpdateSiteSettingsCommandValidator>();
+        services.AddScoped<IRequestHandler<SubmitContactMessageCommand, ContactSubmissionResult>, SubmitContactMessageCommandHandler>();
+        services.AddScoped<IRequestHandler<GetContactMessagesQuery, PagedResult<ContactMessageResult>>, GetContactMessagesQueryHandler>();
+        services.AddScoped<IRequestHandler<GetContactMessageQuery, ContactMessageResult>, GetContactMessageQueryHandler>();
+        services.AddScoped<IRequestHandler<UpdateContactMessageStatusCommand, ContactMessageResult>, UpdateContactMessageStatusCommandHandler>();
+        services.AddScoped<IRequestValidator<SubmitContactMessageCommand>, SubmitContactMessageCommandValidator>();
+        services.AddScoped<IRequestValidator<GetContactMessagesQuery>, GetContactMessagesQueryValidator>();
+        services.AddScoped<IRequestValidator<UpdateContactMessageStatusCommand>, UpdateContactMessageStatusCommandValidator>();
+        services.AddScoped<IRequestHandler<GetDashboardQuery, DashboardResult>, GetDashboardQueryHandler>();
 
         return services;
     }
