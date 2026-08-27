@@ -9,6 +9,8 @@ describe('application routes', () => {
     expect(publicShell?.children?.map((route) => route.path)).toEqual([
       '', 'projects', 'projects/:slug', 'experience', 'skills', 'journey', 'contact',
     ]);
+    expect(publicShell?.children?.every((route) => route.loadComponent)).toBe(true);
+    expect(publicShell?.children?.every((route) => route.loadComponent !== placeholderReference)).toBe(true);
   });
 
   it('defines a guarded lazy admin login and admin shell', () => {
@@ -29,3 +31,5 @@ describe('application routes', () => {
     expect(wildcard?.loadComponent).toBeTypeOf('function');
   });
 });
+
+const placeholderReference = routes.find((route) => route.path === 'admin')?.children?.[0].loadComponent;

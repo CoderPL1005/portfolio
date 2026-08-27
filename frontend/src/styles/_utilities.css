@@ -1,3 +1,21 @@
 *, *::before, *::after { box-sizing: border-box; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 :focus-visible { outline: 2px solid var(--color-primary); outline-offset: 3px; }
+.public-page { width: min(100%, var(--container-max)); margin: 0 auto; padding: clamp(3rem, 7vw, 6rem) var(--page-gutter); }
+.page-heading { max-width: 48rem; margin-bottom: clamp(2rem, 5vw, 4rem); }
+.eyebrow { color: var(--color-primary); font-size: .75rem; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
+.page-heading h1, .section-heading h2 { margin: .5rem 0 1rem; line-height: 1.05; }
+.page-heading h1 { font-size: clamp(2.5rem, 7vw, 5.5rem); }
+.page-heading p, .section-heading p { color: var(--color-text-muted); font-size: 1.05rem; }
+.section-block { padding: clamp(3rem, 7vw, 6rem) 0; border-top: 1px solid var(--color-border); }
+.section-heading { display: flex; justify-content: space-between; align-items: end; gap: 1rem; margin-bottom: 2rem; }
+.section-heading a, .text-link { color: var(--color-primary); font-weight: 700; }
+.card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr)); gap: 1.25rem; }
+.chip-list { display: flex; flex-wrap: wrap; gap: .45rem; padding: 0; margin: 1rem 0 0; list-style: none; }
+.chip-list li, .chip { padding: .35rem .65rem; border: 1px solid var(--color-border); border-radius: 999px; color: var(--color-text-muted); font-size: .76rem; overflow-wrap: anywhere; }
+.state-panel { min-height: 14rem; display: grid; place-items: center; gap: 1rem; text-align: center; }
+.retry-button, .primary-button, .secondary-button { display: inline-flex; justify-content: center; align-items: center; border-radius: var(--radius-md); padding: .75rem 1.1rem; font: inherit; font-weight: 700; cursor: pointer; text-decoration: none; }
+.primary-button { border: 1px solid var(--color-primary); background: var(--color-primary); color: var(--color-on-primary); }
+.secondary-button, .retry-button { border: 1px solid var(--color-border); background: var(--color-surface); color: var(--color-text); }
+.pre-line { white-space: pre-line; overflow-wrap: anywhere; }
+@media (max-width: 640px) { .section-heading { align-items: flex-start; flex-direction: column; } }

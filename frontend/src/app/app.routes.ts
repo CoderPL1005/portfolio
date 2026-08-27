@@ -49,13 +49,13 @@ export const routes: Routes = [
     loadComponent: () =>
       import('./layout/public-layout/public-layout.component').then((m) => m.PublicLayoutComponent),
     children: [
-      { path: '', pathMatch: 'full', loadComponent: placeholder, data: { title: 'Home', eyebrow: 'Public portfolio' } },
-      { path: 'projects', loadComponent: placeholder, data: { title: 'Projects', eyebrow: 'Public portfolio' } },
-      { path: 'projects/:slug', loadComponent: placeholder, data: { title: 'Project detail', eyebrow: 'Public portfolio' } },
-      { path: 'experience', loadComponent: placeholder, data: { title: 'Experience', eyebrow: 'Public portfolio' } },
-      { path: 'skills', loadComponent: placeholder, data: { title: 'Skills', eyebrow: 'Public portfolio' } },
-      { path: 'journey', loadComponent: placeholder, data: { title: 'Journey', eyebrow: 'Public portfolio' } },
-      { path: 'contact', loadComponent: placeholder, data: { title: 'Contact', eyebrow: 'Public portfolio' } },
+      { path: '', pathMatch: 'full', loadComponent: () => import('./features/public/home/home-page.component').then(m => m.HomePageComponent) },
+      { path: 'projects', loadComponent: () => import('./features/public/projects/projects-page.component').then(m => m.ProjectsPageComponent) },
+      { path: 'projects/:slug', loadComponent: () => import('./features/public/project-detail/project-detail-page.component').then(m => m.ProjectDetailPageComponent) },
+      { path: 'experience', loadComponent: () => import('./features/public/experience/experience-page.component').then(m => m.ExperiencePageComponent) },
+      { path: 'skills', loadComponent: () => import('./features/public/skills/skills-page.component').then(m => m.SkillsPageComponent) },
+      { path: 'journey', loadComponent: () => import('./features/public/journey/journey-page.component').then(m => m.JourneyPageComponent) },
+      { path: 'contact', loadComponent: () => import('./features/public/contact/contact-page.component').then(m => m.ContactPageComponent) },
     ],
   },
   {
