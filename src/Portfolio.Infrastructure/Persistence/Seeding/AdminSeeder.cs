@@ -1,11 +1,15 @@
-using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Portfolio.Application.Common.Abstractions.Authentication;
+using Portfolio.Application.Common.Abstractions.Persistence;
 using Portfolio.Domain.Entities;
 
 namespace Portfolio.Infrastructure.Persistence.Seeding;
 
-public sealed class AdminSeeder(ApplicationDbContext dbContext, IConfiguration configuration)
+public sealed class AdminSeeder(
+    IApplicationDbContext dbContext,
+    IConfiguration configuration,
+    IPasswordHasher passwordHasher)
 {
     public async Task<bool> SeedAsync(CancellationToken cancellationToken = default)
     {
@@ -27,7 +31,7 @@ public sealed class AdminSeeder(ApplicationDbContext dbContext, IConfiguration c
             Id = Guid.NewGuid(), Email = credentials.Email, FullName = credentials.FullName,
             IsActive = true
         };
-        admin.PasswordHash = new PasswordHasher<AdminUser>().HashPassword(admin, credentials.Password);
+        admin.PasswordHash = passwordHasher.Hash(credentials.Password);
         dbContext.AdminUsers.Add(admin);
         await dbContext.SaveChangesAsync(cancellationToken);
         return true;
