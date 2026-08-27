@@ -12,6 +12,8 @@ using Portfolio.Application.Features.Auth.Logout;
 using Portfolio.Application.Features.Auth.Refresh;
 using Portfolio.Application.Features.PortfolioContent;
 using Portfolio.Application.Features.PortfolioContent.GetPublicPortfolio;
+using Portfolio.Application.Features.Phase4B;
+using Portfolio.Application.Features.Projects;
 
 namespace Portfolio.IntegrationTests.Authentication;
 
@@ -38,11 +40,15 @@ public sealed class AuthApiFactory : WebApplicationFactory<Program>
             services.RemoveAll<IRequestHandler<LogoutCommand, bool>>();
             services.RemoveAll<IRequestHandler<GetCurrentAdminQuery, CurrentAdminResult>>();
             services.RemoveAll<IRequestHandler<GetPublicPortfolioQuery, PortfolioHomeResult>>();
+            services.RemoveAll<IRequestHandler<GetPublicProjectsQuery, IReadOnlyCollection<PublicProjectListItem>>>();
+            services.RemoveAll<IRequestHandler<GetPublicProjectBySlugQuery, PublicProjectDetail>>();
             services.AddScoped<IRequestHandler<LoginCommand, LoginResult>, FakeLoginHandler>();
             services.AddScoped<IRequestHandler<RefreshCommand, RefreshResult>, FakeRefreshHandler>();
             services.AddScoped<IRequestHandler<LogoutCommand, bool>, FakeLogoutHandler>();
             services.AddScoped<IRequestHandler<GetCurrentAdminQuery, CurrentAdminResult>, FakeCurrentAdminHandler>();
             services.AddScoped<IRequestHandler<GetPublicPortfolioQuery, PortfolioHomeResult>, FakePublicPortfolioHandler>();
+            services.AddScoped<IRequestHandler<GetPublicProjectsQuery, IReadOnlyCollection<PublicProjectListItem>>, FakePublicProjectsHandler>();
+            services.AddScoped<IRequestHandler<GetPublicProjectBySlugQuery, PublicProjectDetail>, FakePublicProjectDetailHandler>();
         });
     }
 
@@ -92,5 +98,17 @@ public sealed class AuthApiFactory : WebApplicationFactory<Program>
                 new PublicProfileResult("Owner", null, null, null, null, null, null, null,
                     null, null, null, null, null),
                 [], [], [], [], [], [], [], []));
+    }
+
+    public sealed class FakePublicProjectsHandler : IRequestHandler<GetPublicProjectsQuery, IReadOnlyCollection<PublicProjectListItem>>
+    {
+        public Task<IReadOnlyCollection<PublicProjectListItem>> HandleAsync(GetPublicProjectsQuery request, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyCollection<PublicProjectListItem>>([new(Guid.Parse("11111111-1111-1111-1111-111111111111"), "project", "Project", null, null, null, "ACTIVE", true, null, [])]);
+    }
+
+    public sealed class FakePublicProjectDetailHandler : IRequestHandler<GetPublicProjectBySlugQuery, PublicProjectDetail>
+    {
+        public Task<PublicProjectDetail> HandleAsync(GetPublicProjectBySlugQuery request, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new PublicProjectDetail(Guid.Parse("11111111-1111-1111-1111-111111111111"), request.Slug, "Project", null, null, null, null, null, null, null, "ACTIVE", null, null, null, new(null, null), [], [], []));
     }
 }

@@ -15,14 +15,14 @@ internal sealed class ContentTestDbContext(DbContextOptions<ContentTestDbContext
     public DbSet<Education> Educations => Set<Education>();
     public DbSet<Training> Trainings => Set<Training>();
     public DbSet<Certificate> Certificates => Set<Certificate>();
+    public DbSet<Project> Projects => Set<Project>();
+    public DbSet<ProjectTechnology> ProjectTechnologies => Set<ProjectTechnology>();
+    public DbSet<ProjectSection> ProjectSections => Set<ProjectSection>();
+    public DbSet<ProjectMedia> ProjectMedia => Set<ProjectMedia>();
+    public DbSet<Skill> Skills => Set<Skill>();
 
     DbSet<AdminUser> IApplicationDbContext.AdminUsers => throw new NotSupportedException();
     DbSet<AdminRefreshToken> IApplicationDbContext.AdminRefreshTokens => throw new NotSupportedException();
-    DbSet<Project> IApplicationDbContext.Projects => throw new NotSupportedException();
-    DbSet<ProjectTechnology> IApplicationDbContext.ProjectTechnologies => throw new NotSupportedException();
-    DbSet<ProjectSection> IApplicationDbContext.ProjectSections => throw new NotSupportedException();
-    DbSet<ProjectMedia> IApplicationDbContext.ProjectMedia => throw new NotSupportedException();
-    DbSet<Skill> IApplicationDbContext.Skills => throw new NotSupportedException();
     DbSet<JourneyItem> IApplicationDbContext.JourneyItems => throw new NotSupportedException();
     DbSet<SocialLink> IApplicationDbContext.SocialLinks => throw new NotSupportedException();
     DbSet<SiteSetting> IApplicationDbContext.SiteSettings => throw new NotSupportedException();
@@ -38,9 +38,7 @@ internal sealed class ContentTestDbContext(DbContextOptions<ContentTestDbContext
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Ignore<AdminUser>(); modelBuilder.Ignore<AdminRefreshToken>();
-        modelBuilder.Ignore<Project>(); modelBuilder.Ignore<ProjectTechnology>();
-        modelBuilder.Ignore<ProjectSection>(); modelBuilder.Ignore<ProjectMedia>();
-        modelBuilder.Ignore<Skill>(); modelBuilder.Ignore<JourneyItem>();
+        modelBuilder.Ignore<JourneyItem>();
         modelBuilder.Ignore<SocialLink>(); modelBuilder.Ignore<SiteSetting>();
         modelBuilder.Ignore<ContactMessage>(); modelBuilder.Ignore<AgentSetting>();
         modelBuilder.Ignore<KnowledgeDocument>(); modelBuilder.Ignore<KnowledgeChunk>();
@@ -60,5 +58,22 @@ internal sealed class ContentTestDbContext(DbContextOptions<ContentTestDbContext
         modelBuilder.Entity<Training>().HasKey(item => item.Id);
         modelBuilder.Entity<Certificate>().HasKey(item => item.Id);
         modelBuilder.Entity<Certificate>().HasOne(item => item.CertificateMedia).WithMany().HasForeignKey(item => item.CertificateMediaId);
+        modelBuilder.Entity<Project>().HasKey(item => item.Id);
+        modelBuilder.Entity<Project>().HasOne(item => item.ThumbnailMedia).WithMany().HasForeignKey(item => item.ThumbnailMediaId);
+        modelBuilder.Entity<ProjectTechnology>().HasKey(item => new { item.ProjectId, item.TechnologyId });
+        modelBuilder.Entity<ProjectTechnology>().HasOne(item => item.Project).WithMany().HasForeignKey(item => item.ProjectId);
+        modelBuilder.Entity<ProjectTechnology>().HasOne(item => item.Technology).WithMany().HasForeignKey(item => item.TechnologyId);
+        modelBuilder.Entity<ProjectSection>().HasKey(item => item.Id);
+        modelBuilder.Entity<ProjectSection>().Property(item => item.ContentJson)
+            .HasConversion(
+                value => value.RootElement.GetRawText(),
+                value => System.Text.Json.JsonDocument.Parse(
+                    value, default(System.Text.Json.JsonDocumentOptions)));
+        modelBuilder.Entity<ProjectSection>().HasOne(item => item.Project).WithMany().HasForeignKey(item => item.ProjectId);
+        modelBuilder.Entity<ProjectMedia>().HasKey(item => item.Id);
+        modelBuilder.Entity<ProjectMedia>().HasOne(item => item.Project).WithMany().HasForeignKey(item => item.ProjectId);
+        modelBuilder.Entity<ProjectMedia>().HasOne(item => item.MediaAsset).WithMany().HasForeignKey(item => item.MediaAssetId);
+        modelBuilder.Entity<Skill>().HasKey(item => item.Id);
+        modelBuilder.Entity<Skill>().HasOne(item => item.Technology).WithMany().HasForeignKey(item => item.TechnologyId);
     }
 }

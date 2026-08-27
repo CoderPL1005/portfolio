@@ -70,7 +70,7 @@ internal static class ContentValidation
         ICollection<ValidationFailure> failures,
         IReadOnlyCollection<ReorderItem> items)
     {
-        if (items.Count == 0)
+        if (items is null || items.Count == 0)
         {
             failures.Add(new("items", "At least one reorder item is required."));
             return;

@@ -27,7 +27,7 @@ public sealed class Phase4AuthorizationTests(AuthApiFactory factory) : IClassFix
 
     [Theory]
     [MemberData(nameof(AdminRoutes))]
-    public async Task Every_phase_4a_admin_route_rejects_anonymous_callers(string method, string route)
+    public async Task Every_implemented_phase_4_admin_route_rejects_anonymous_callers(string method, string route)
     {
         using var request = new HttpRequestMessage(new HttpMethod(method), route);
         if (method is "POST" or "PUT")
@@ -56,6 +56,22 @@ public sealed class Phase4AuthorizationTests(AuthApiFactory factory) : IClassFix
         AssertProperties<CertificateRequest>("Name", "Issuer", "IssuedAt", "ExpiresAt", "CredentialId",
             "CredentialUrl", "CertificateMediaId", "DisplayOrder", "IsPublished");
         AssertProperties<ReorderRequest>("Items");
+        AssertProperties<TechnologyRequest>("Name", "Category", "IconKey", "WebsiteUrl", "DisplayOrder", "IsActive");
+        AssertProperties<SkillRequest>("Name", "Category", "ExperienceLevel", "Description", "TechnologyId", "DisplayOrder", "IsPublished");
+        AssertProperties<ProjectRequest>("Slug", "Title", "Subtitle", "ShortDescription", "OverviewMarkdown", "Role", "TeamSize", "StartDate", "EndDate", "Status", "GithubUrl", "LiveUrl", "ThumbnailMediaId", "Featured", "IsPublished", "DisplayOrder", "SeoTitle", "SeoDescription", "TechnologyIds");
+        AssertProperties<ProjectTechnologiesRequest>("Items");
+        AssertProperties<ProjectSectionRequest>("SectionType", "Title", "Subtitle", "ContentMarkdown", "Content", "DisplayOrder", "IsVisible");
+        AssertProperties<AttachProjectMediaRequest>("MediaAssetId", "MediaRole", "Caption", "DisplayOrder");
+        AssertProperties<UpdateProjectMediaRequest>("MediaRole", "Caption", "DisplayOrder");
+    }
+
+    [Fact]
+    public async Task Public_project_routes_are_anonymous_and_use_contract_envelopes()
+    {
+        var client = factory.CreateClient(); var list = await client.GetAsync("/api/v1/public/projects?featured=true"); var detail = await client.GetAsync("/api/v1/public/projects/project");
+        Assert.Equal(HttpStatusCode.OK, list.StatusCode); Assert.Equal(HttpStatusCode.OK, detail.StatusCode);
+        using var listBody = JsonDocument.Parse(await list.Content.ReadAsStringAsync()); using var detailBody = JsonDocument.Parse(await detail.Content.ReadAsStringAsync());
+        Assert.Equal("project", listBody.RootElement.GetProperty("data")[0].GetProperty("slug").GetString()); Assert.Equal("project", detailBody.RootElement.GetProperty("data").GetProperty("slug").GetString());
     }
 
     public static TheoryData<string, string> AdminRoutes => new()
@@ -86,6 +102,31 @@ public sealed class Phase4AuthorizationTests(AuthApiFactory factory) : IClassFix
         { "PUT", "/api/v1/admin/certificates/11111111-1111-1111-1111-111111111111" },
         { "DELETE", "/api/v1/admin/certificates/11111111-1111-1111-1111-111111111111" },
         { "PUT", "/api/v1/admin/certificates/reorder" }
+        ,{ "GET", "/api/v1/admin/technologies" }
+        ,{ "POST", "/api/v1/admin/technologies" }
+        ,{ "PUT", "/api/v1/admin/technologies/11111111-1111-1111-1111-111111111111" }
+        ,{ "DELETE", "/api/v1/admin/technologies/11111111-1111-1111-1111-111111111111" }
+        ,{ "GET", "/api/v1/admin/skills" }
+        ,{ "POST", "/api/v1/admin/skills" }
+        ,{ "PUT", "/api/v1/admin/skills/11111111-1111-1111-1111-111111111111" }
+        ,{ "DELETE", "/api/v1/admin/skills/11111111-1111-1111-1111-111111111111" }
+        ,{ "PUT", "/api/v1/admin/skills/reorder" }
+        ,{ "GET", "/api/v1/admin/projects" }
+        ,{ "GET", "/api/v1/admin/projects/11111111-1111-1111-1111-111111111111" }
+        ,{ "POST", "/api/v1/admin/projects" }
+        ,{ "PUT", "/api/v1/admin/projects/11111111-1111-1111-1111-111111111111" }
+        ,{ "DELETE", "/api/v1/admin/projects/11111111-1111-1111-1111-111111111111" }
+        ,{ "PUT", "/api/v1/admin/projects/reorder" }
+        ,{ "PUT", "/api/v1/admin/projects/11111111-1111-1111-1111-111111111111/technologies" }
+        ,{ "GET", "/api/v1/admin/projects/11111111-1111-1111-1111-111111111111/sections" }
+        ,{ "POST", "/api/v1/admin/projects/11111111-1111-1111-1111-111111111111/sections" }
+        ,{ "PUT", "/api/v1/admin/projects/11111111-1111-1111-1111-111111111111/sections/22222222-2222-2222-2222-222222222222" }
+        ,{ "DELETE", "/api/v1/admin/projects/11111111-1111-1111-1111-111111111111/sections/22222222-2222-2222-2222-222222222222" }
+        ,{ "PUT", "/api/v1/admin/projects/11111111-1111-1111-1111-111111111111/sections/reorder" }
+        ,{ "GET", "/api/v1/admin/projects/11111111-1111-1111-1111-111111111111/media" }
+        ,{ "POST", "/api/v1/admin/projects/11111111-1111-1111-1111-111111111111/media" }
+        ,{ "PUT", "/api/v1/admin/projects/11111111-1111-1111-1111-111111111111/media/22222222-2222-2222-2222-222222222222" }
+        ,{ "DELETE", "/api/v1/admin/projects/11111111-1111-1111-1111-111111111111/media/22222222-2222-2222-2222-222222222222" }
     };
 
     private static void AssertProperties<T>(params string[] expected)

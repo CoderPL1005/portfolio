@@ -1,5 +1,7 @@
 namespace Portfolio.Application.Features.PortfolioContent;
 
+using Portfolio.Application.Features.Phase4B;
+
 public sealed record MediaSummary(Guid Id, string PublicUrl, string FileName, string? AltText);
 public sealed record TechnologySummary(Guid Id, string Name, string Category, string? IconKey);
 
@@ -57,8 +59,8 @@ public sealed record PublicCertificateResult(
 public sealed record PortfolioHomeResult(
     PublicProfileResult Profile,
     IReadOnlyCollection<PublicExperienceResult> Experiences,
-    IReadOnlyCollection<object> FeaturedProjects,
-    IReadOnlyCollection<object> Skills,
+    IReadOnlyCollection<PublicProjectListItem> FeaturedProjects,
+    IReadOnlyCollection<PublicSkillResult> Skills,
     IReadOnlyCollection<PublicEducationResult> Educations,
     IReadOnlyCollection<PublicTrainingResult> Trainings,
     IReadOnlyCollection<PublicCertificateResult> Certificates,

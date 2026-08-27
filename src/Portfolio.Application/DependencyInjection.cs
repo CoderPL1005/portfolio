@@ -16,6 +16,10 @@ using Portfolio.Application.Features.PortfolioContent.GetPublicPortfolio;
 using Portfolio.Application.Features.Profile.GetAdminProfile;
 using Portfolio.Application.Features.Profile.UpdateProfile;
 using Portfolio.Application.Features.Trainings;
+using Portfolio.Application.Features.Phase4B;
+using Portfolio.Application.Features.Projects;
+using Portfolio.Application.Features.Skills;
+using Portfolio.Application.Features.Technologies;
 
 namespace Portfolio.Application;
 
@@ -80,6 +84,51 @@ public static class DependencyInjection
         services.AddScoped<IRequestValidator<CreateCertificateCommand>, CreateCertificateCommandValidator>();
         services.AddScoped<IRequestValidator<UpdateCertificateCommand>, UpdateCertificateCommandValidator>();
         services.AddScoped<IRequestValidator<ReorderCertificatesCommand>, ReorderCertificatesCommandValidator>();
+
+        services.AddScoped<IRequestHandler<GetTechnologiesQuery, IReadOnlyCollection<TechnologyResult>>, GetTechnologiesQueryHandler>();
+        services.AddScoped<IRequestHandler<CreateTechnologyCommand, TechnologyResult>, CreateTechnologyCommandHandler>();
+        services.AddScoped<IRequestHandler<UpdateTechnologyCommand, TechnologyResult>, UpdateTechnologyCommandHandler>();
+        services.AddScoped<IRequestHandler<DeleteTechnologyCommand, bool>, DeleteTechnologyCommandHandler>();
+        services.AddScoped<IRequestValidator<CreateTechnologyCommand>, CreateTechnologyCommandValidator>();
+        services.AddScoped<IRequestValidator<UpdateTechnologyCommand>, UpdateTechnologyCommandValidator>();
+
+        services.AddScoped<IRequestHandler<GetSkillsQuery, IReadOnlyCollection<SkillResult>>, GetSkillsQueryHandler>();
+        services.AddScoped<IRequestHandler<CreateSkillCommand, SkillResult>, CreateSkillCommandHandler>();
+        services.AddScoped<IRequestHandler<UpdateSkillCommand, SkillResult>, UpdateSkillCommandHandler>();
+        services.AddScoped<IRequestHandler<DeleteSkillCommand, bool>, DeleteSkillCommandHandler>();
+        services.AddScoped<IRequestHandler<ReorderSkillsCommand, bool>, ReorderSkillsCommandHandler>();
+        services.AddScoped<IRequestValidator<CreateSkillCommand>, CreateSkillCommandValidator>();
+        services.AddScoped<IRequestValidator<UpdateSkillCommand>, UpdateSkillCommandValidator>();
+        services.AddScoped<IRequestValidator<ReorderSkillsCommand>, ReorderSkillsCommandValidator>();
+
+        services.AddScoped<IRequestHandler<GetProjectsQuery, PagedResult<ProjectListItemResult>>, GetProjectsQueryHandler>();
+        services.AddScoped<IRequestHandler<GetProjectQuery, ProjectResult>, GetProjectQueryHandler>();
+        services.AddScoped<IRequestHandler<CreateProjectCommand, ProjectResult>, CreateProjectCommandHandler>();
+        services.AddScoped<IRequestHandler<UpdateProjectCommand, ProjectResult>, UpdateProjectCommandHandler>();
+        services.AddScoped<IRequestHandler<DeleteProjectCommand, bool>, DeleteProjectCommandHandler>();
+        services.AddScoped<IRequestHandler<ReorderProjectsCommand, bool>, ReorderProjectsCommandHandler>();
+        services.AddScoped<IRequestHandler<ReplaceProjectTechnologiesCommand, IReadOnlyCollection<ProjectTechnologyResult>>, ReplaceProjectTechnologiesCommandHandler>();
+        services.AddScoped<IRequestHandler<GetProjectSectionsQuery, IReadOnlyCollection<ProjectSectionResult>>, GetProjectSectionsQueryHandler>();
+        services.AddScoped<IRequestHandler<CreateProjectSectionCommand, ProjectSectionResult>, CreateProjectSectionCommandHandler>();
+        services.AddScoped<IRequestHandler<UpdateProjectSectionCommand, ProjectSectionResult>, UpdateProjectSectionCommandHandler>();
+        services.AddScoped<IRequestHandler<DeleteProjectSectionCommand, bool>, DeleteProjectSectionCommandHandler>();
+        services.AddScoped<IRequestHandler<ReorderProjectSectionsCommand, bool>, ReorderProjectSectionsCommandHandler>();
+        services.AddScoped<IRequestHandler<GetProjectMediaQuery, IReadOnlyCollection<ProjectMediaResult>>, GetProjectMediaQueryHandler>();
+        services.AddScoped<IRequestHandler<AttachProjectMediaCommand, ProjectMediaResult>, AttachProjectMediaCommandHandler>();
+        services.AddScoped<IRequestHandler<UpdateProjectMediaCommand, ProjectMediaResult>, UpdateProjectMediaCommandHandler>();
+        services.AddScoped<IRequestHandler<DeleteProjectMediaCommand, bool>, DeleteProjectMediaCommandHandler>();
+        services.AddScoped<IRequestHandler<GetPublicProjectsQuery, IReadOnlyCollection<PublicProjectListItem>>, GetPublicProjectsQueryHandler>();
+        services.AddScoped<IRequestHandler<GetPublicProjectBySlugQuery, PublicProjectDetail>, GetPublicProjectBySlugQueryHandler>();
+        services.AddScoped<IRequestValidator<GetProjectsQuery>, GetProjectsQueryValidator>();
+        services.AddScoped<IRequestValidator<CreateProjectCommand>, CreateProjectCommandValidator>();
+        services.AddScoped<IRequestValidator<UpdateProjectCommand>, UpdateProjectCommandValidator>();
+        services.AddScoped<IRequestValidator<ReorderProjectsCommand>, ReorderProjectsCommandValidator>();
+        services.AddScoped<IRequestValidator<ReplaceProjectTechnologiesCommand>, ReplaceProjectTechnologiesCommandValidator>();
+        services.AddScoped<IRequestValidator<CreateProjectSectionCommand>, CreateProjectSectionCommandValidator>();
+        services.AddScoped<IRequestValidator<UpdateProjectSectionCommand>, UpdateProjectSectionCommandValidator>();
+        services.AddScoped<IRequestValidator<ReorderProjectSectionsCommand>, ReorderProjectSectionsCommandValidator>();
+        services.AddScoped<IRequestValidator<AttachProjectMediaCommand>, AttachProjectMediaCommandValidator>();
+        services.AddScoped<IRequestValidator<UpdateProjectMediaCommand>, UpdateProjectMediaCommandValidator>();
 
         return services;
     }
