@@ -1,0 +1,416 @@
+@startuml
+title Personal Portfolio + Personal RAG Agent — PostgreSQL Schema V1
+
+hide circle
+skinparam linetype ortho
+skinparam shadowing false
+skinparam classAttributeIconSize 0
+
+package "Authentication" {
+  entity admin_users {
+    * id : uuid <<PK>>
+    --
+    email : varchar(255)
+    password_hash : text
+    full_name : varchar(255)
+    is_active : boolean
+    last_login_at : timestamptz
+    created_at : timestamptz
+    updated_at : timestamptz
+  }
+
+  entity admin_refresh_tokens {
+    * id : uuid <<PK>>
+    --
+    admin_user_id : uuid <<FK>>
+    token_hash : text
+    expires_at : timestamptz
+    revoked_at : timestamptz
+    replaced_by_token_id : uuid <<FK>>
+    created_at : timestamptz
+  }
+}
+
+package "Portfolio / CMS" {
+  entity media_assets {
+    * id : uuid <<PK>>
+    --
+    storage_key : text
+    public_url : text
+    file_name : varchar(255)
+    mime_type : varchar(150)
+    file_size : bigint
+    alt_text : varchar(500)
+    media_type : varchar(30)
+    created_at : timestamptz
+    updated_at : timestamptz
+  }
+
+  entity profiles {
+    * id : uuid <<PK>>
+    --
+    singleton_key : smallint
+    full_name : varchar(255)
+    professional_title : varchar(255)
+    secondary_title : varchar(255)
+    hero_headline : varchar(500)
+    hero_summary : text
+    about_markdown : text
+    email : varchar(255)
+    phone : varchar(50)
+    location : varchar(255)
+    university : varchar(255)
+    major : varchar(255)
+    availability_status : varchar(150)
+    profile_image_id : uuid <<FK>>
+    cv_media_id : uuid <<FK>>
+    is_published : boolean
+    created_at : timestamptz
+    updated_at : timestamptz
+  }
+
+  entity experiences {
+    * id : uuid <<PK>>
+    --
+    company_name : varchar(255)
+    role_title : varchar(255)
+    location : varchar(255)
+    start_date : date
+    end_date : date
+    is_current : boolean
+    summary : text
+    responsibilities_markdown : text
+    company_url : text
+    display_order : int
+    is_published : boolean
+    created_at : timestamptz
+    updated_at : timestamptz
+  }
+
+  entity technologies {
+    * id : uuid <<PK>>
+    --
+    name : varchar(100)
+    category : varchar(50)
+    icon_key : varchar(100)
+    website_url : text
+    display_order : int
+    is_active : boolean
+    created_at : timestamptz
+    updated_at : timestamptz
+  }
+
+  entity experience_technologies {
+    * experience_id : uuid <<PK,FK>>
+    * technology_id : uuid <<PK,FK>>
+    --
+    display_order : int
+  }
+
+  entity projects {
+    * id : uuid <<PK>>
+    --
+    slug : varchar(180)
+    title : varchar(255)
+    subtitle : varchar(500)
+    short_description : text
+    overview_markdown : text
+    role : varchar(255)
+    team_size : int
+    start_date : date
+    end_date : date
+    status : varchar(50)
+    github_url : text
+    live_url : text
+    thumbnail_media_id : uuid <<FK>>
+    featured : boolean
+    is_published : boolean
+    display_order : int
+    seo_title : varchar(255)
+    seo_description : varchar(500)
+    created_at : timestamptz
+    updated_at : timestamptz
+  }
+
+  entity project_technologies {
+    * project_id : uuid <<PK,FK>>
+    * technology_id : uuid <<PK,FK>>
+    --
+    display_order : int
+  }
+
+  entity project_sections {
+    * id : uuid <<PK>>
+    --
+    project_id : uuid <<FK>>
+    section_type : varchar(50)
+    title : varchar(255)
+    subtitle : varchar(500)
+    content_markdown : text
+    content_json : jsonb
+    display_order : int
+    is_visible : boolean
+    created_at : timestamptz
+    updated_at : timestamptz
+  }
+
+  entity project_media {
+    * id : uuid <<PK>>
+    --
+    project_id : uuid <<FK>>
+    media_asset_id : uuid <<FK>>
+    media_role : varchar(30)
+    caption : varchar(500)
+    display_order : int
+    created_at : timestamptz
+  }
+
+  entity skills {
+    * id : uuid <<PK>>
+    --
+    name : varchar(100)
+    category : varchar(50)
+    experience_level : varchar(30)
+    description : text
+    technology_id : uuid <<FK>>
+    display_order : int
+    is_published : boolean
+    created_at : timestamptz
+    updated_at : timestamptz
+  }
+
+  entity educations {
+    * id : uuid <<PK>>
+    --
+    institution : varchar(255)
+    degree : varchar(255)
+    field_of_study : varchar(255)
+    start_date : date
+    end_date : date
+    description : text
+    location : varchar(255)
+    display_order : int
+    is_published : boolean
+    created_at : timestamptz
+    updated_at : timestamptz
+  }
+
+  entity trainings {
+    * id : uuid <<PK>>
+    --
+    title : varchar(255)
+    provider : varchar(255)
+    description : text
+    start_date : date
+    end_date : date
+    credential_url : text
+    display_order : int
+    is_published : boolean
+    created_at : timestamptz
+    updated_at : timestamptz
+  }
+
+  entity certificates {
+    * id : uuid <<PK>>
+    --
+    name : varchar(255)
+    issuer : varchar(255)
+    issued_at : date
+    expires_at : date
+    credential_id : varchar(255)
+    credential_url : text
+    certificate_media_id : uuid <<FK>>
+    display_order : int
+    is_published : boolean
+    created_at : timestamptz
+    updated_at : timestamptz
+  }
+
+  entity journey_items {
+    * id : uuid <<PK>>
+    --
+    title : varchar(255)
+    subtitle : varchar(255)
+    description : text
+    occurred_at : date
+    icon_key : varchar(100)
+    display_order : int
+    is_published : boolean
+    created_at : timestamptz
+    updated_at : timestamptz
+  }
+
+  entity social_links {
+    * id : uuid <<PK>>
+    --
+    platform : varchar(100)
+    label : varchar(100)
+    url : text
+    icon_key : varchar(100)
+    display_order : int
+    is_visible : boolean
+    created_at : timestamptz
+    updated_at : timestamptz
+  }
+
+  entity site_settings {
+    * key : varchar(150) <<PK>>
+    --
+    value : jsonb
+    description : varchar(500)
+    updated_at : timestamptz
+  }
+
+  entity contact_messages {
+    * id : uuid <<PK>>
+    --
+    name : varchar(255)
+    email : varchar(255)
+    subject : varchar(255)
+    message : text
+    status : varchar(30)
+    received_at : timestamptz
+    read_at : timestamptz
+    replied_at : timestamptz
+  }
+}
+
+package "Personal Agent / RAG" {
+  entity agent_settings {
+    * id : uuid <<PK>>
+    --
+    name : varchar(100)
+    enabled : boolean
+    provider : varchar(100)
+    model_name : varchar(150)
+    embedding_provider : varchar(100)
+    embedding_model : varchar(150)
+    embedding_dimensions : int
+    system_prompt : text
+    welcome_message : text
+    fallback_message : text
+    max_context_chunks : int
+    minimum_similarity : numeric(6,5)
+    temperature : numeric(4,3)
+    created_at : timestamptz
+    updated_at : timestamptz
+  }
+
+  entity knowledge_documents {
+    * id : uuid <<PK>>
+    --
+    source_type : varchar(50)
+    source_ref_id : uuid
+    source_key : varchar(255)
+    title : varchar(500)
+    content : text
+    content_hash : varchar(128)
+    source_updated_at : timestamptz
+    version : int
+    metadata : jsonb
+    is_active : boolean
+    indexing_status : varchar(30)
+    indexed_at : timestamptz
+    last_index_error : text
+    created_at : timestamptz
+    updated_at : timestamptz
+  }
+
+  entity knowledge_chunks {
+    * id : uuid <<PK>>
+    --
+    knowledge_document_id : uuid <<FK>>
+    chunk_index : int
+    content : text
+    token_count : int
+    content_hash : varchar(128)
+    embedding : vector(1536)
+    embedding_model : varchar(150)
+    metadata : jsonb
+    created_at : timestamptz
+  }
+
+  entity chat_sessions {
+    * id : uuid <<PK>>
+    --
+    public_session_id : uuid
+    status : varchar(20)
+    started_at : timestamptz
+    last_message_at : timestamptz
+    closed_at : timestamptz
+    message_count : int
+    metadata : jsonb
+  }
+
+  entity chat_messages {
+    * id : uuid <<PK>>
+    --
+    chat_session_id : uuid <<FK>>
+    role : varchar(20)
+    content : text
+    model_name : varchar(150)
+    prompt_tokens : int
+    completion_tokens : int
+    latency_ms : int
+    created_at : timestamptz
+  }
+
+  entity chat_message_sources {
+    * id : uuid <<PK>>
+    --
+    chat_message_id : uuid <<FK>>
+    knowledge_chunk_id : uuid <<FK>>
+    rank : int
+    similarity_score : numeric(8,7)
+    created_at : timestamptz
+  }
+
+  entity chat_message_feedback {
+    * id : uuid <<PK>>
+    --
+    chat_message_id : uuid <<FK>>
+    rating : varchar(20)
+    comment : text
+    created_at : timestamptz
+  }
+}
+
+admin_refresh_tokens }o--|| admin_users : admin_user_id
+admin_refresh_tokens }o--o| admin_refresh_tokens : replaced_by_token_id
+
+profiles }o--o| media_assets : profile_image_id
+profiles }o--o| media_assets : cv_media_id
+
+experience_technologies }o--|| experiences : experience_id
+experience_technologies }o--|| technologies : technology_id
+
+projects }o--o| media_assets : thumbnail_media_id
+project_technologies }o--|| projects : project_id
+project_technologies }o--|| technologies : technology_id
+project_sections }o--|| projects : project_id
+project_media }o--|| projects : project_id
+project_media }o--|| media_assets : media_asset_id
+
+skills }o--o| technologies : technology_id
+certificates }o--o| media_assets : certificate_media_id
+
+knowledge_chunks }o--|| knowledge_documents : knowledge_document_id
+
+chat_messages }o--|| chat_sessions : chat_session_id
+chat_message_sources }o--|| chat_messages : chat_message_id
+chat_message_sources }o--|| knowledge_chunks : knowledge_chunk_id
+chat_message_feedback }o--|| chat_messages : chat_message_id
+
+note right of knowledge_documents
+Portfolio source tables are canonical.
+knowledge_documents and knowledge_chunks
+are derived data for RAG.
+source_ref_id is intentionally polymorphic.
+end note
+
+note right of knowledge_chunks
+Embedding contract for V1:
+VECTOR(1536)
+end note
+
+@enduml

@@ -1,0 +1,771 @@
+{
+  "seedVersion": "1.0",
+  "environmentIntent": "development-initial",
+  "notes": [
+    "Initial seed for API/UI integration testing.",
+    "Placeholder or uncertain values are deliberately included so they can be corrected through the Admin CMS.",
+    "Do not treat placeholder values as verified CV facts.",
+    "No secrets, passwords, API keys, JWT keys, database credentials, or R2 credentials are stored here."
+  ],
+  "profile": {
+    "fullName": "Nguyễn Đình Phúc",
+    "professionalTitle": "Backend .NET Developer",
+    "secondaryTitle": "Backend · Full-stack · AI Engineering",
+    "heroHeadline": "Building robust backend systems and intelligent web applications.",
+    "heroSummary": "Final-year Software Engineering student focused on backend development with C# and ASP.NET Core, with hands-on experience in Angular, SQL Server, Python backend, and AI/RAG integration.",
+    "aboutMarkdown": "I am a final-year Software Engineering student focused on backend and full-stack development. My primary stack is ASP.NET Core, Angular, and SQL Server. Since August 2025, I have been working as a Software Developer Intern at RTC Technology Vietnam, gaining hands-on experience with enterprise ERP development, WinForms-to-Web migration, REST APIs, Angular interfaces, SQL Server, and Stored Procedures. I am also expanding into Python backend development, Retrieval-Augmented Generation (RAG), AI application engineering, and cloud infrastructure.",
+    "email": "replace-me@example.com",
+    "phone": null,
+    "location": "Hanoi, Vietnam",
+    "university": "Hanoi University of Civil Engineering",
+    "major": "Software Engineering",
+    "availabilityStatus": "Open to Backend .NET / Full-stack opportunities",
+    "profileImageStorageKey": null,
+    "cvStorageKey": null,
+    "isPublished": true
+  },
+  "technologies": [
+    {
+      "name": "C#",
+      "category": "Backend",
+      "iconKey": "csharp",
+      "websiteUrl": null,
+      "displayOrder": 1,
+      "isActive": true
+    },
+    {
+      "name": "ASP.NET Core",
+      "category": "Backend",
+      "iconKey": "dotnet",
+      "websiteUrl": "https://dotnet.microsoft.com/",
+      "displayOrder": 2,
+      "isActive": true
+    },
+    {
+      "name": "Entity Framework Core",
+      "category": "Backend",
+      "iconKey": "database",
+      "websiteUrl": null,
+      "displayOrder": 3,
+      "isActive": true
+    },
+    {
+      "name": "Python",
+      "category": "Backend",
+      "iconKey": "python",
+      "websiteUrl": "https://www.python.org/",
+      "displayOrder": 4,
+      "isActive": true
+    },
+    {
+      "name": "FastAPI",
+      "category": "Backend",
+      "iconKey": "api",
+      "websiteUrl": "https://fastapi.tiangolo.com/",
+      "displayOrder": 5,
+      "isActive": true
+    },
+    {
+      "name": "Angular",
+      "category": "Frontend",
+      "iconKey": "angular",
+      "websiteUrl": "https://angular.dev/",
+      "displayOrder": 10,
+      "isActive": true
+    },
+    {
+      "name": "TypeScript",
+      "category": "Frontend",
+      "iconKey": "typescript",
+      "websiteUrl": "https://www.typescriptlang.org/",
+      "displayOrder": 11,
+      "isActive": true
+    },
+    {
+      "name": "RxJS",
+      "category": "Frontend",
+      "iconKey": "rxjs",
+      "websiteUrl": "https://rxjs.dev/",
+      "displayOrder": 12,
+      "isActive": true
+    },
+    {
+      "name": "NG-ZORRO",
+      "category": "Frontend",
+      "iconKey": "ui",
+      "websiteUrl": "https://ng.ant.design/",
+      "displayOrder": 13,
+      "isActive": true
+    },
+    {
+      "name": "SQL Server",
+      "category": "Data",
+      "iconKey": "database",
+      "websiteUrl": null,
+      "displayOrder": 20,
+      "isActive": true
+    },
+    {
+      "name": "PostgreSQL",
+      "category": "Data",
+      "iconKey": "postgresql",
+      "websiteUrl": "https://www.postgresql.org/",
+      "displayOrder": 21,
+      "isActive": true
+    },
+    {
+      "name": "Neon",
+      "category": "Data",
+      "iconKey": "database",
+      "websiteUrl": "https://neon.com/",
+      "displayOrder": 22,
+      "isActive": true
+    },
+    {
+      "name": "Redis",
+      "category": "Data",
+      "iconKey": "redis",
+      "websiteUrl": "https://redis.io/",
+      "displayOrder": 23,
+      "isActive": true
+    },
+    {
+      "name": "Qdrant",
+      "category": "AI",
+      "iconKey": "vector",
+      "websiteUrl": "https://qdrant.tech/",
+      "displayOrder": 30,
+      "isActive": true
+    },
+    {
+      "name": "RAG",
+      "category": "AI",
+      "iconKey": "brain",
+      "websiteUrl": null,
+      "displayOrder": 31,
+      "isActive": true
+    },
+    {
+      "name": "Vector Search",
+      "category": "AI",
+      "iconKey": "search",
+      "websiteUrl": null,
+      "displayOrder": 32,
+      "isActive": true
+    },
+    {
+      "name": "OpenAI API",
+      "category": "AI",
+      "iconKey": "ai",
+      "websiteUrl": "https://openai.com/",
+      "displayOrder": 33,
+      "isActive": true
+    },
+    {
+      "name": "Docker",
+      "category": "DevOps",
+      "iconKey": "docker",
+      "websiteUrl": "https://www.docker.com/",
+      "displayOrder": 40,
+      "isActive": true
+    },
+    {
+      "name": "Git",
+      "category": "Tools",
+      "iconKey": "git",
+      "websiteUrl": "https://git-scm.com/",
+      "displayOrder": 41,
+      "isActive": true
+    },
+    {
+      "name": "GitHub",
+      "category": "Tools",
+      "iconKey": "github",
+      "websiteUrl": "https://github.com/",
+      "displayOrder": 42,
+      "isActive": true
+    },
+    {
+      "name": "GitHub Actions",
+      "category": "DevOps",
+      "iconKey": "github",
+      "websiteUrl": "https://github.com/features/actions",
+      "displayOrder": 43,
+      "isActive": true
+    },
+    {
+      "name": "AWS",
+      "category": "Cloud",
+      "iconKey": "cloud",
+      "websiteUrl": "https://aws.amazon.com/",
+      "displayOrder": 44,
+      "isActive": true
+    },
+    {
+      "name": "Terraform",
+      "category": "Cloud",
+      "iconKey": "terraform",
+      "websiteUrl": "https://www.terraform.io/",
+      "displayOrder": 45,
+      "isActive": true
+    },
+    {
+      "name": "Cloudflare R2",
+      "category": "Cloud",
+      "iconKey": "cloud",
+      "websiteUrl": "https://www.cloudflare.com/developer-platform/products/r2/",
+      "displayOrder": 46,
+      "isActive": true
+    },
+    {
+      "name": "JWT",
+      "category": "Security",
+      "iconKey": "shield",
+      "websiteUrl": null,
+      "displayOrder": 50,
+      "isActive": true
+    }
+  ],
+  "experiences": [
+    {
+      "seedKey": "rtc-internship",
+      "companyName": "RTC Technology Vietnam",
+      "roleTitle": "Software Developer Intern",
+      "location": "Vietnam",
+      "startDate": "2025-08-01",
+      "endDate": null,
+      "isCurrent": true,
+      "summary": "Participating in the migration and development of ERP functionality from WinForms desktop applications to modern web applications.",
+      "responsibilitiesMarkdown": "- Participated in WinForms-to-Web migration.\n- Developed Angular interfaces using NG-ZORRO.\n- Developed and integrated ASP.NET Core REST APIs.\n- Worked with SQL Server and Stored Procedures.\n- Integrated frontend, backend, and database functionality.\n- Debugged application and database issues.",
+      "companyUrl": null,
+      "displayOrder": 1,
+      "isPublished": true,
+      "technologies": [
+        "C#",
+        "ASP.NET Core",
+        "Angular",
+        "TypeScript",
+        "NG-ZORRO",
+        "SQL Server"
+      ]
+    }
+  ],
+  "projects": [
+    {
+      "seedKey": "school-saas",
+      "slug": "school-saas",
+      "title": "SchoolSaaS",
+      "subtitle": "Multi-tenant School Management SaaS",
+      "shortDescription": "A multi-tenant school management platform focused on secure tenant isolation, authentication, feature access, and maintainable backend architecture.",
+      "overviewMarkdown": "SchoolSaaS is a team project for managing school operations using a multi-tenant architecture. The backend focuses on authentication, tenant isolation, feature/subscription control, caching, and maintainable application architecture.",
+      "role": "Backend / Full-stack Developer",
+      "teamSize": 2,
+      "startDate": "2026-05-01",
+      "endDate": null,
+      "status": "ACTIVE",
+      "githubUrl": null,
+      "liveUrl": null,
+      "thumbnailStorageKey": null,
+      "featured": true,
+      "isPublished": true,
+      "displayOrder": 1,
+      "seoTitle": "SchoolSaaS | Nguyễn Đình Phúc",
+      "seoDescription": "Multi-tenant school management SaaS built with ASP.NET Core, Angular, SQL Server and Redis.",
+      "technologies": [
+        "C#",
+        "ASP.NET Core",
+        "Angular",
+        "TypeScript",
+        "Entity Framework Core",
+        "SQL Server",
+        "Redis",
+        "JWT",
+        "Docker"
+      ],
+      "sections": [
+        {
+          "sectionType": "RESPONSIBILITIES",
+          "title": "My Responsibilities",
+          "subtitle": null,
+          "contentMarkdown": "- Worked on multi-tenant backend architecture.\n- Implemented JWT access-token authentication and refresh-token rotation.\n- Used TokenVersion and DeviceId in session-security design.\n- Integrated Redis for token-version/session-related caching.\n- Worked on subscription/feature access and audit/background processing.",
+          "content": {},
+          "displayOrder": 1,
+          "isVisible": true
+        },
+        {
+          "sectionType": "ENGINEERING_FOCUS",
+          "title": "Engineering Focus",
+          "subtitle": null,
+          "contentMarkdown": null,
+          "content": {
+            "items": [
+              {
+                "title": "Multi-tenant Architecture",
+                "description": "Control/master data and tenant-specific data are separated to support tenant isolation."
+              },
+              {
+                "title": "JWT & Refresh Token Rotation",
+                "description": "Authentication uses access tokens, refresh rotation, TokenVersion and device-aware session concepts."
+              },
+              {
+                "title": "Redis Caching",
+                "description": "Redis is used for token-version/session-related caching."
+              },
+              {
+                "title": "Custom Request Pipeline",
+                "description": "Cross-cutting behavior is handled through a custom request/handler and decorator pipeline instead of MediatR."
+              }
+            ]
+          },
+          "displayOrder": 2,
+          "isVisible": true
+        },
+        {
+          "sectionType": "LEARNINGS",
+          "title": "Lessons Learned",
+          "subtitle": null,
+          "contentMarkdown": "Working on SchoolSaaS strengthened my understanding of tenant isolation, authentication/session security, backend modularity, caching, and the trade-offs involved in building a SaaS architecture.",
+          "content": {},
+          "displayOrder": 3,
+          "isVisible": true
+        }
+      ]
+    },
+    {
+      "seedKey": "p-234",
+      "slug": "p-234",
+      "title": "P-234",
+      "subtitle": "AI-powered Regulatory Document RAG Platform",
+      "shortDescription": "Backend platform supporting a RAG chatbot for regulatory documents with document lifecycle management, RBAC, department-based access control, auditing and secure retrieval integration.",
+      "overviewMarkdown": "P-234 is a team project combining a backend platform with an existing AI/RAG pipeline for querying regulatory and institutional documents. My focus is the backend architecture and integration layer, especially authentication, authorization, document management, department-based ACL, auditability, storage and safe retrieval integration.",
+      "role": "Backend Developer",
+      "teamSize": null,
+      "startDate": null,
+      "endDate": null,
+      "status": "ACTIVE",
+      "githubUrl": "https://github.com/CoderPL1005/test",
+      "liveUrl": null,
+      "thumbnailStorageKey": null,
+      "featured": true,
+      "isPublished": true,
+      "displayOrder": 2,
+      "seoTitle": "P-234 | Nguyễn Đình Phúc",
+      "seoDescription": "RAG-based regulatory document platform with FastAPI, PostgreSQL, RBAC and department-based document access control.",
+      "technologies": [
+        "Python",
+        "FastAPI",
+        "PostgreSQL",
+        "Neon",
+        "Redis",
+        "Qdrant",
+        "Cloudflare R2",
+        "JWT",
+        "RAG",
+        "Vector Search",
+        "Docker"
+      ],
+      "sections": [
+        {
+          "sectionType": "RESPONSIBILITIES",
+          "title": "My Backend Scope",
+          "subtitle": null,
+          "contentMarkdown": "- Built and extended backend capabilities around the existing AI/RAG pipeline.\n- Worked on authentication, refresh-token handling, RBAC and permissions.\n- Implemented department-based document ACL.\n- Applied access restrictions to document viewing and retrieval/chat flows.\n- Worked on document upload, versioning, relations, effectiveness and audit requirements.\n- Integrated PostgreSQL/Neon, Cloudflare R2 and vector-search related components.",
+          "content": {},
+          "displayOrder": 1,
+          "isVisible": true
+        },
+        {
+          "sectionType": "ARCHITECTURE",
+          "title": "Department-based Access Control",
+          "subtitle": "Authorization before restricted document knowledge reaches retrieval.",
+          "contentMarkdown": "Authenticated User → Role / Department → Document ACL → Authorized Documents → Retrieval → RAG Context → LLM",
+          "content": {},
+          "displayOrder": 2,
+          "isVisible": true
+        },
+        {
+          "sectionType": "ENGINEERING_FOCUS",
+          "title": "Key Backend Architecture",
+          "subtitle": null,
+          "contentMarkdown": null,
+          "content": {
+            "items": [
+              {
+                "title": "Clean Architecture",
+                "description": "Separated application, domain, persistence/infrastructure and presentation concerns."
+              },
+              {
+                "title": "RBAC & JWT",
+                "description": "Authentication and granular permission checks protect backend operations."
+              },
+              {
+                "title": "Document Lifecycle",
+                "description": "Document source, versions, relations, legal status and effectiveness are managed explicitly."
+              },
+              {
+                "title": "Auditability",
+                "description": "Audit/outbox and activity-history concerns support traceability of sensitive document operations."
+              }
+            ]
+          },
+          "displayOrder": 3,
+          "isVisible": true
+        }
+      ]
+    },
+    {
+      "seedKey": "personal-portfolio-agent",
+      "slug": "personal-portfolio-agent",
+      "title": "Developer Portfolio & Personal AI Agent",
+      "subtitle": "Dynamic CV / Portfolio with Admin CMS and RAG Agent",
+      "shortDescription": "A full-stack personal portfolio where content is managed through an admin CMS and reused as knowledge for a personal RAG chatbot agent.",
+      "overviewMarkdown": "This project turns a personal CV into a dynamic full-stack application. Portfolio content is stored in PostgreSQL, managed through a protected Angular admin interface, and indexed into pgvector so a personal AI agent can answer grounded questions about experience, skills and projects.",
+      "role": "Full-stack Developer",
+      "teamSize": 1,
+      "startDate": "2026-08-27",
+      "endDate": null,
+      "status": "IN_PROGRESS",
+      "githubUrl": null,
+      "liveUrl": null,
+      "thumbnailStorageKey": null,
+      "featured": false,
+      "isPublished": true,
+      "displayOrder": 3,
+      "seoTitle": "Developer Portfolio & Personal AI Agent",
+      "seoDescription": "Angular + ASP.NET Core portfolio CMS with PostgreSQL, pgvector and a personal RAG assistant.",
+      "technologies": [
+        "C#",
+        "ASP.NET Core",
+        "Angular",
+        "TypeScript",
+        "PostgreSQL",
+        "OpenAI API",
+        "RAG",
+        "Vector Search",
+        "Cloudflare R2"
+      ],
+      "sections": []
+    }
+  ],
+  "skills": [
+    {
+      "name": "C#",
+      "category": "Backend",
+      "experienceLevel": "USED",
+      "description": "Primary language for .NET backend development.",
+      "technology": "C#",
+      "displayOrder": 1,
+      "isPublished": true
+    },
+    {
+      "name": "ASP.NET Core",
+      "category": "Backend",
+      "experienceLevel": "USED",
+      "description": "REST APIs, authentication, backend architecture and full-stack integration.",
+      "technology": "ASP.NET Core",
+      "displayOrder": 2,
+      "isPublished": true
+    },
+    {
+      "name": "Angular",
+      "category": "Frontend",
+      "experienceLevel": "USED",
+      "description": "Frontend development for internship and personal/team projects.",
+      "technology": "Angular",
+      "displayOrder": 3,
+      "isPublished": true
+    },
+    {
+      "name": "SQL Server",
+      "category": "Database",
+      "experienceLevel": "USED",
+      "description": "Relational database work including Stored Procedures.",
+      "technology": "SQL Server",
+      "displayOrder": 4,
+      "isPublished": true
+    },
+    {
+      "name": "PostgreSQL",
+      "category": "Database",
+      "experienceLevel": "USED",
+      "description": "Used in Python/FastAPI backend and RAG-related projects.",
+      "technology": "PostgreSQL",
+      "displayOrder": 5,
+      "isPublished": true
+    },
+    {
+      "name": "Redis",
+      "category": "Data / Caching",
+      "experienceLevel": "USED",
+      "description": "Used for token/session-related caching patterns.",
+      "technology": "Redis",
+      "displayOrder": 6,
+      "isPublished": true
+    },
+    {
+      "name": "Clean Architecture",
+      "category": "Architecture",
+      "experienceLevel": "USED",
+      "description": "Applied in backend project organization and use-case separation.",
+      "technology": null,
+      "displayOrder": 7,
+      "isPublished": true
+    },
+    {
+      "name": "JWT Authentication",
+      "category": "Security",
+      "experienceLevel": "USED",
+      "description": "Access tokens, refresh rotation, session invalidation and authorization flows.",
+      "technology": "JWT",
+      "displayOrder": 8,
+      "isPublished": true
+    },
+    {
+      "name": "RBAC / ACL",
+      "category": "Security",
+      "experienceLevel": "USED",
+      "description": "Role/permission systems and department-based document access control.",
+      "technology": null,
+      "displayOrder": 9,
+      "isPublished": true
+    },
+    {
+      "name": "Python",
+      "category": "Backend",
+      "experienceLevel": "USED",
+      "description": "Backend development for FastAPI/RAG integration.",
+      "technology": "Python",
+      "displayOrder": 10,
+      "isPublished": true
+    },
+    {
+      "name": "FastAPI",
+      "category": "Backend",
+      "experienceLevel": "USED",
+      "description": "Python backend APIs and RAG integration.",
+      "technology": "FastAPI",
+      "displayOrder": 11,
+      "isPublished": true
+    },
+    {
+      "name": "RAG",
+      "category": "AI",
+      "experienceLevel": "USED",
+      "description": "Hands-on integration of retrieval, authorization and LLM context flows.",
+      "technology": "RAG",
+      "displayOrder": 12,
+      "isPublished": true
+    },
+    {
+      "name": "Qdrant",
+      "category": "AI",
+      "experienceLevel": "USED",
+      "description": "Vector-search component used around RAG workflows.",
+      "technology": "Qdrant",
+      "displayOrder": 13,
+      "isPublished": true
+    },
+    {
+      "name": "pgvector",
+      "category": "AI",
+      "experienceLevel": "LEARNING",
+      "description": "Selected for the personal portfolio agent vector-search layer.",
+      "technology": null,
+      "displayOrder": 14,
+      "isPublished": true
+    },
+    {
+      "name": "AWS",
+      "category": "Cloud",
+      "experienceLevel": "LEARNING",
+      "description": "Hands-on cloud labs and Cloud AI training.",
+      "technology": "AWS",
+      "displayOrder": 15,
+      "isPublished": true
+    },
+    {
+      "name": "Terraform",
+      "category": "Cloud",
+      "experienceLevel": "LEARNING",
+      "description": "Infrastructure-as-Code practice in cloud labs.",
+      "technology": "Terraform",
+      "displayOrder": 16,
+      "isPublished": true
+    },
+    {
+      "name": "Docker",
+      "category": "DevOps",
+      "experienceLevel": "USED",
+      "description": "Containerized development/integration workflows.",
+      "technology": "Docker",
+      "displayOrder": 17,
+      "isPublished": true
+    }
+  ],
+  "educations": [
+    {
+      "seedKey": "huce-software-engineering",
+      "institution": "Hanoi University of Civil Engineering",
+      "degree": "Bachelor's degree (placeholder until exact degree wording is confirmed)",
+      "fieldOfStudy": "Software Engineering",
+      "startDate": null,
+      "endDate": null,
+      "description": "Final-year Software Engineering student focusing on software development, databases, backend systems and web application development.",
+      "location": "Hanoi, Vietnam",
+      "displayOrder": 1,
+      "isPublished": true
+    }
+  ],
+  "trainings": [
+    {
+      "seedKey": "vinuni-ai-thuc-chien-k3",
+      "title": "AI Thực Chiến K3",
+      "provider": "VinUni (placeholder display wording)",
+      "description": "Hands-on AI/Cloud training covering RAG, Cloud AI, AWS, Terraform, security, data governance, prompt-injection containment and audit/compliance exercises.",
+      "startDate": null,
+      "endDate": null,
+      "credentialUrl": null,
+      "displayOrder": 1,
+      "isPublished": true
+    }
+  ],
+  "certificates": [
+    {
+      "seedKey": "api-test-certificate",
+      "name": "API Test Certificate",
+      "issuer": "Test Data",
+      "issuedAt": "2026-01-01",
+      "expiresAt": null,
+      "credentialId": "TEST-ONLY",
+      "credentialUrl": null,
+      "certificateStorageKey": null,
+      "displayOrder": 999,
+      "isPublished": false,
+      "_note": "Intentional unpublished placeholder used to test certificate CRUD. Replace or delete through Admin CMS."
+    }
+  ],
+  "journey": [
+    {
+      "seedKey": "journey-dotnet",
+      "title": "C# / .NET Foundations",
+      "subtitle": "Backend development foundation",
+      "description": "Built core backend skills around C#, .NET, SQL and web APIs.",
+      "occurredAt": null,
+      "iconKey": "code",
+      "displayOrder": 1,
+      "isPublished": true
+    },
+    {
+      "seedKey": "journey-angular",
+      "title": "Angular & Full-stack Development",
+      "subtitle": "Frontend integration",
+      "description": "Expanded into Angular, TypeScript, RxJS and API-driven web development.",
+      "occurredAt": null,
+      "iconKey": "layout",
+      "displayOrder": 2,
+      "isPublished": true
+    },
+    {
+      "seedKey": "journey-rtc",
+      "title": "Software Developer Internship",
+      "subtitle": "RTC Technology Vietnam",
+      "description": "Started working with enterprise ERP code and WinForms-to-Web migration.",
+      "occurredAt": "2025-08-01",
+      "iconKey": "briefcase",
+      "displayOrder": 3,
+      "isPublished": true
+    },
+    {
+      "seedKey": "journey-schoolsaas",
+      "title": "SchoolSaaS",
+      "subtitle": "Multi-tenant backend architecture",
+      "description": "Worked with multi-tenancy, authentication, Redis, feature access and backend architecture.",
+      "occurredAt": "2026-05-01",
+      "iconKey": "layers",
+      "displayOrder": 4,
+      "isPublished": true
+    },
+    {
+      "seedKey": "journey-ai-cloud",
+      "title": "AI & Cloud Engineering",
+      "subtitle": "Hands-on learning",
+      "description": "Expanded into Python backend, RAG, AWS, Terraform, data governance and AI security labs.",
+      "occurredAt": "2026-08-01",
+      "iconKey": "cloud",
+      "displayOrder": 5,
+      "isPublished": true
+    },
+    {
+      "seedKey": "journey-p234",
+      "title": "P-234",
+      "subtitle": "Secure RAG/backend integration",
+      "description": "Worked on authorization-aware regulatory-document backend and RAG integration.",
+      "occurredAt": "2026-08-01",
+      "iconKey": "brain",
+      "displayOrder": 6,
+      "isPublished": true
+    },
+    {
+      "seedKey": "journey-portfolio-agent",
+      "title": "Personal Portfolio + AI Agent",
+      "subtitle": "Full-stack portfolio platform",
+      "description": "Building a dynamic portfolio CMS with PostgreSQL/pgvector and a personal RAG assistant.",
+      "occurredAt": "2026-08-27",
+      "iconKey": "terminal",
+      "displayOrder": 7,
+      "isPublished": true
+    }
+  ],
+  "socialLinks": [
+    {
+      "platform": "GitHub",
+      "label": "GitHub",
+      "url": "https://github.com/CoderPL1005",
+      "iconKey": "github",
+      "displayOrder": 1,
+      "isVisible": true
+    },
+    {
+      "platform": "LinkedIn",
+      "label": "LinkedIn",
+      "url": "https://www.linkedin.com/in/replace-me",
+      "iconKey": "linkedin",
+      "displayOrder": 2,
+      "isVisible": false
+    },
+    {
+      "platform": "Email",
+      "label": "Email",
+      "url": "mailto:replace-me@example.com",
+      "iconKey": "mail",
+      "displayOrder": 3,
+      "isVisible": false
+    }
+  ],
+  "siteSettings": {
+    "siteName": "Nguyễn Đình Phúc",
+    "footerText": "Built as a full-stack personal portfolio.",
+    "showAvailability": true,
+    "enableContactForm": true,
+    "showDownloadCv": true,
+    "showJourney": true,
+    "showAiAgent": true,
+    "defaultSeoTitle": "Nguyễn Đình Phúc | Backend .NET Developer",
+    "defaultSeoDescription": "Portfolio of Nguyễn Đình Phúc, a Software Engineering student and Backend .NET Developer working with ASP.NET Core, Angular, SQL, backend architecture and AI/RAG integration."
+  },
+  "agentSettings": {
+    "name": "portfolio-agent",
+    "enabled": true,
+    "provider": "OpenAI",
+    "modelName": "CONFIGURE_IN_ADMIN_OR_ENV",
+    "embeddingProvider": "OpenAI",
+    "embeddingModel": "CONFIGURE_IN_ADMIN_OR_ENV",
+    "embeddingDimensions": 1536,
+    "systemPrompt": "You are Nguyễn Đình Phúc's portfolio assistant. Answer only questions about Nguyễn Đình Phúc, his professional experience, projects, technical skills, education, training, certificates and engineering journey. Ground answers in retrieved portfolio context. Do not invent experience, achievements or technologies. If the context is insufficient, say that the portfolio does not provide enough information.",
+    "welcomeMessage": "Hi! You can ask me about Phúc's experience, projects, technical skills and engineering background.",
+    "fallbackMessage": "I can only answer based on information available in Phúc's portfolio.",
+    "maxContextChunks": 6,
+    "minimumSimilarity": 0.6,
+    "temperature": 0.2
+  }
+}

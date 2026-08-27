@@ -1,0 +1,53 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta content="width=device-width, initial-scale=1.0" name="viewport"><style>@layer base{html,body{margin:0;padding:0;}body{overscroll-behavior:none;}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config={theme:{extend:{"colors":{"surface-deep":"#020617","surface":"#111415","on-surface":"#e1e3e4","primary":"#c9beff","on-primary":"#30009b"}}}}</script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"></head><body class="bg-surface-deep font-body-md text-on-surface"><main class="w-full flex items-center justify-center min-h-screen"><div class="flex flex-col w-full h-full relative">
+<div class="w-full flex-grow flex items-center justify-center p-gutter min-h-screen">
+<div class="relative w-full max-w-[480px] bg-surface-muted/50 backdrop-blur-xl rounded-2xl shadow-2xl p-section-gap/2 lg:p-section-gap border border-border-subtle/50">
+<!-- Decorative Glow -->
+<div class="absolute -top-1/2 -left-1/2 w-full h-full bg-primary-container/20 blur-[120px] rounded-full pointer-events-none mix-blend-screen"></div>
+<!-- Header -->
+<div class="relative z-10 mb-section-gap/2 flex flex-col gap-base items-center text-center">
+<div class="w-16 h-16 rounded-xl bg-surface-deep border border-border-subtle flex items-center justify-center mb-base shadow-inner">
+<span class="material-symbols-outlined text-primary text-headline-lg">
+             admin_panel_settings
+           </span>
+</div>
+<h1 class="font-headline-xl text-headline-xl text-on-surface">Portfolio Administration</h1>
+<p class="font-body-md text-body-md text-text-dimmed">Manage portfolio content, media, and AI knowledge.</p>
+</div>
+<!-- Form -->
+<form class="relative z-10 flex flex-col gap-gutter" onsubmit="event.preventDefault(); this.querySelector('button').classList.add('opacity-75', 'cursor-not-allowed'); this.querySelector('button span').innerText = 'Authenticating...'; setTimeout(() =&gt; { this.querySelector('button').classList.remove('opacity-75', 'cursor-not-allowed'); this.querySelector('button span').innerText = 'Sign In'; }, 2000);">
+<div class="flex flex-col gap-base">
+<label class="font-label-mono text-label-mono text-text-dimmed uppercase tracking-wider" for="email">Administrator Email</label>
+<div class="relative group">
+<span class="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-text-dimmed group-focus-within:text-primary transition-colors">
+              mail
+            </span>
+<input class="w-full bg-surface-deep border border-border-subtle rounded-lg py-4 pl-12 pr-4 font-body-md text-body-md text-on-surface placeholder:text-text-dimmed/50 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all" id="email" placeholder="admin@example.com" required="" type="email">
+</div>
+</div>
+<div class="flex flex-col gap-base">
+<div class="flex justify-between items-center">
+<label class="font-label-mono text-label-mono text-text-dimmed uppercase tracking-wider" for="password">Access Token</label>
+</div>
+<div class="relative group">
+<span class="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-text-dimmed group-focus-within:text-primary transition-colors">
+              lock
+            </span>
+<input class="w-full bg-surface-deep border border-border-subtle rounded-lg py-4 pl-12 pr-4 font-body-md text-body-md text-on-surface placeholder:text-text-dimmed/50 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all" id="password" placeholder="••••••••" required="" type="password">
+</div>
+</div>
+<button class="w-full bg-primary text-on-primary rounded-lg py-4 font-label-mono text-label-mono uppercase tracking-wider hover:bg-primary-fixed transition-colors flex items-center justify-center gap-2 group mt-4 relative overflow-hidden" type="submit">
+<span class="relative z-10 transition-transform group-hover:scale-105">Sign In</span>
+<span class="material-symbols-outlined relative z-10 text-[20px] transition-transform group-hover:translate-x-1">
+            arrow_forward
+          </span>
+<div class="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300 ease-out"></div>
+</button>
+</form>
+<!-- Footer Info -->
+
+</div>
+</div>
+</div></main>
+
+</body></html>

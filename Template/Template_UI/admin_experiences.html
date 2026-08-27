@@ -1,0 +1,223 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta content="width=device-width, initial-scale=1.0" name="viewport"><style>@layer base{html,body{margin:0;padding:0;}body{overscroll-behavior:none;}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config={darkMode:"class",theme:{extend:{"colors":{"error":"#ffb4ab","on-background":"#e1e3e4","surface-container-lowest":"#0c0f10","secondary-fixed":"#dae2fd","on-secondary-container":"#adb4ce","inverse-on-surface":"#2e3132","on-tertiary-container":"#ffb293","tertiary-fixed-dim":"#ffb598","on-primary-fixed-variant":"#4618ca","surface-container-highest":"#323536","border-subtle":"#334155","on-secondary":"#283044","surface-muted":"#1E293B","secondary":"#bec6e0","primary-fixed-dim":"#c9beff","tertiary":"#ffb598","on-primary-container":"#c7bcff","outline":"#938ea1","on-secondary-fixed-variant":"#3f465c","surface-deep":"#020617","on-primary-fixed":"#1b0063","primary-container":"#512bd4","on-error":"#690005","surface-container":"#1d2021","on-secondary-fixed":"#131b2e","outline-variant":"#484555","primary":"#c9beff","surface-variant":"#323536","on-primary":"#30009b","inverse-surface":"#e1e3e4","on-tertiary":"#591d00","surface-tint":"#c9beff","secondary-container":"#3f465c","surface":"#111415","surface-container-high":"#282a2b","secondary-fixed-dim":"#bec6e0","surface-container-low":"#191c1d","tertiary-container":"#8f3300","surface-dim":"#111415","error-container":"#93000a","background":"#111415","primary-fixed":"#e6deff","on-tertiary-fixed-variant":"#7e2c00","on-surface":"#e1e3e4","tertiary-fixed":"#ffdbce","text-dimmed":"#94A3B8","inverse-primary":"#5f3de2","on-error-container":"#ffdad6","on-tertiary-fixed":"#370e00","on-surface-variant":"#c9c4d8","surface-bright":"#373a3b"},"borderRadius":{"DEFAULT":"0.125rem","lg":"0.25rem","xl":"0.5rem","full":"0.75rem"},"spacing":{"section-gap":"80px","container-max":"1120px","base":"8px","margin-mobile":"16px","gutter":"24px"},"fontFamily":{"body-md":["Geist"],"label-sm":["Geist"],"label-mono":["Geist"],"headline-lg-mobile":["Space Grotesk"],"headline-xl":["Space Grotesk"],"body-lg":["Geist"],"headline-lg":["Space Grotesk"]},"fontSize":{"body-md":["16px",{"lineHeight":"24px","fontWeight":"400"}],"label-sm":["12px",{"lineHeight":"16px","fontWeight":"600"}],"label-mono":["14px",{"lineHeight":"20px","letterSpacing":"0.05em","fontWeight":"500"}],"headline-lg-mobile":["28px",{"lineHeight":"36px","fontWeight":"600"}],"headline-xl":["48px",{"lineHeight":"56px","letterSpacing":"-0.02em","fontWeight":"700"}],"body-lg":["18px",{"lineHeight":"28px","fontWeight":"400"}],"headline-lg":["32px",{"lineHeight":"40px","letterSpacing":"-0.01em","fontWeight":"600"}]}}}}</script><link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&amp;family=Geist:wght@100..900&amp;display=swap" rel="stylesheet"><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"></head><body class="bg-background font-body-md text-on-surface"><aside class="fixed left-0 top-0 h-full w-72 bg-surface-container-lowest z-50 flex flex-col border-r border-border-subtle overflow-y-auto"><div class="p-6 flex items-center gap-3"><div class="w-8 h-8 bg-primary rounded flex items-center justify-center"><span class="material-symbols-outlined text-on-primary">terminal</span></div><span class="font-headline-lg text-lg tracking-tight">DEV_CORE v1</span></div><nav class="flex-1 px-4 space-y-6 pb-12" data-active-classes="bg-primary-container text-on-primary-container font-semibold"><section><p class="px-4 mb-2 text-[10px] uppercase tracking-widest text-text-dimmed font-label-mono">Overview</p><div class="space-y-1"><a class="flex items-center px-4 py-2 rounded-lg text-on-surface-variant hover:bg-surface-container-high transition-all group" data-path="dashboard" href="#"><span class="material-symbols-outlined mr-3 text-[20px]">grid_view</span><span class="text-sm">Dashboard</span></a></div></section><section><p class="px-4 mb-2 text-[10px] uppercase tracking-widest text-text-dimmed font-label-mono">Portfolio</p><div class="space-y-1"><a class="flex items-center px-4 py-2 rounded-lg text-on-surface-variant hover:bg-surface-container-high transition-all" data-path="profile" href="#"><span class="material-symbols-outlined mr-3 text-[20px]">person</span><span class="text-sm">Profile</span></a><a aria-current="page" class="flex items-center px-4 py-2 rounded-lg transition-all bg-primary-container text-on-primary-container font-semibold" data-path="experience" href="#"><span class="material-symbols-outlined mr-3 text-[20px]">work</span><span class="text-sm">Experience</span></a><a class="flex items-center px-4 py-2 rounded-lg text-on-surface-variant hover:bg-surface-container-high transition-all" data-path="projects" href="#"><span class="material-symbols-outlined mr-3 text-[20px]">code</span><span class="text-sm">Projects</span></a><a class="flex items-center px-4 py-2 rounded-lg text-on-surface-variant hover:bg-surface-container-high transition-all" data-path="skills" href="#"><span class="material-symbols-outlined mr-3 text-[20px]">psychology</span><span class="text-sm">Skills</span></a><a class="flex items-center px-4 py-2 rounded-lg text-on-surface-variant hover:bg-surface-container-high transition-all" data-path="journey" href="#"><span class="material-symbols-outlined mr-3 text-[20px]">timeline</span><span class="text-sm">Journey</span></a></div></section><section><p class="px-4 mb-2 text-[10px] uppercase tracking-widest text-text-dimmed font-label-mono">Website</p><div class="space-y-1"><a class="flex items-center px-4 py-2 rounded-lg text-on-surface-variant hover:bg-surface-container-high transition-all" data-path="site-settings" href="#"><span class="material-symbols-outlined mr-3 text-[20px]">settings</span><span class="text-sm">Site Settings</span></a><a class="flex items-center px-4 py-2 rounded-lg text-on-surface-variant hover:bg-surface-container-high transition-all" data-path="media-library" href="#"><span class="material-symbols-outlined mr-3 text-[20px]">folder</span><span class="text-sm">Media Library</span></a></div></section><section><p class="px-4 mb-2 text-[10px] uppercase tracking-widest text-text-dimmed font-label-mono">AI Agent</p><div class="space-y-1"><a class="flex items-center px-4 py-2 rounded-lg text-on-surface-variant hover:bg-surface-container-high transition-all" data-path="agent-settings" href="#"><span class="material-symbols-outlined mr-3 text-[20px]">smart_toy</span><span class="text-sm">Agent Settings</span></a><a class="flex items-center px-4 py-2 rounded-lg text-on-surface-variant hover:bg-surface-container-high transition-all" data-path="conversations" href="#"><span class="material-symbols-outlined mr-3 text-[20px]">forum</span><span class="text-sm">Conversations</span></a></div></section></nav></aside><div class="pl-72 flex flex-col min-h-screen"><header class="fixed top-0 left-72 right-0 h-16 bg-surface-dim/80 backdrop-blur-xl border-b border-border-subtle z-40 flex items-center justify-between px-8"><div class="flex items-center gap-4"><nav class="flex text-xs font-label-mono text-text-dimmed"><span class="hover:text-primary cursor-pointer">Admin</span><span class="mx-2">/</span><span class="text-on-surface">Dashboard</span></nav></div><div class="flex items-center gap-6"><a class="flex items-center gap-2 px-4 py-1.5 rounded bg-primary text-on-primary text-sm font-label-sm hover:opacity-90 transition-opacity" href="#"><span class="material-symbols-outlined text-[18px]">open_in_new</span>View Site</a><div class="flex items-center gap-3 pl-6 border-l border-border-subtle"><div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center"><span class="material-symbols-outlined text-on-primary text-[18px]">person</span></div><span class="material-symbols-outlined text-on-surface-variant cursor-pointer hover:text-error transition-colors">logout</span></div></div></header><main class="flex-1 pt-16 bg-background p-8"><div class="flex flex-col w-full relative">
+<div class="flex items-end justify-between mb-section-gap">
+<div>
+<h1 class="font-headline-xl text-headline-xl text-on-surface mb-2">Experience</h1>
+<p class="font-body-lg text-body-lg text-text-dimmed max-w-2xl">Manage professional history, roles, and project highlights for the portfolio timeline.</p>
+</div>
+<button class="bg-primary text-on-primary font-label-mono text-label-mono px-6 py-3 rounded-lg flex items-center gap-2 hover:bg-primary-fixed transition-colors shadow-lg shadow-primary/20">
+<span class="material-symbols-outlined text-[18px]">add</span>
+      ADD ROLE
+    </button>
+</div>
+<div class="bg-surface-muted rounded-xl p-8 relative overflow-hidden shadow-2xl">
+<div class="absolute -top-32 -right-32 w-96 h-96 bg-primary/5 rounded-full blur-[80px] pointer-events-none"></div>
+<div class="flex items-center gap-4 mb-8">
+<div class="flex-1 bg-surface-deep rounded-lg px-4 py-2 flex items-center gap-3">
+<span class="material-symbols-outlined text-text-dimmed">search</span>
+<input class="bg-transparent border-none outline-none text-on-surface font-body-md w-full placeholder:text-text-dimmed" placeholder="Search roles or companies..." type="text">
+</div>
+<div class="flex items-center gap-2 bg-surface-deep rounded-lg px-4 py-2 cursor-pointer hover:bg-surface-container transition-colors">
+<span class="material-symbols-outlined text-text-dimmed text-[18px]">filter_list</span>
+<span class="font-label-mono text-label-mono text-on-surface">FILTER</span>
+</div>
+</div>
+<div class="w-full overflow-x-auto">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="text-text-dimmed font-label-mono text-label-sm uppercase tracking-wider">
+<th class="pb-4 font-normal">Order</th>
+<th class="pb-4 font-normal">Role / Company</th>
+<th class="pb-4 font-normal">Timeline</th>
+<th class="pb-4 font-normal">Status</th>
+<th class="pb-4 font-normal text-right">Actions</th>
+</tr>
+</thead>
+<tbody class="text-on-surface font-body-md" id="experience-list">
+<tr class="group hover:bg-surface-container/50 transition-colors" draggable="true">
+<td class="py-4 align-middle w-24">
+<div class="flex items-center gap-2 text-text-dimmed cursor-move">
+<span class="material-symbols-outlined text-[16px]">drag_indicator</span>
+<span class="font-label-mono">01</span>
+</div>
+</td>
+<td class="py-4 align-middle">
+<div class="flex items-center gap-4">
+<div class="w-10 h-10 rounded bg-surface-deep flex items-center justify-center">
+<span class="material-symbols-outlined text-primary text-[20px]">architecture</span>
+</div>
+<div><div class="font-headline-lg text-body-lg font-semibold mb-0.5">Lead .NET Architect</div><div class="text-text-dimmed text-sm">Vercel • ERP Migration Lead</div></div>
+</div>
+</td>
+<td class="py-4 align-middle">
+<div class="text-sm">
+<div class="">2021 — Present</div>
+<div class="text-text-dimmed text-xs mt-0.5">3 yrs 2 mos</div>
+</div>
+</td>
+<td class="py-4 align-middle">
+<label class="relative inline-flex items-center cursor-pointer">
+<input checked="" class="sr-only peer" type="checkbox">
+<div class="w-9 h-5 bg-surface-deep rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-text-dimmed peer-checked:after:bg-on-primary after:border-gray-300 after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+<span class="ml-3 text-xs font-label-mono text-primary">PUBLISHED</span>
+</label>
+</td>
+<td class="py-4 align-middle text-right">
+<div class="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+<button class="p-2 rounded hover:bg-surface-deep text-text-dimmed hover:text-primary transition-colors">
+<span class="material-symbols-outlined text-[18px]">edit</span>
+</button>
+<button class="p-2 rounded hover:bg-error-container text-text-dimmed hover:text-error transition-colors">
+<span class="material-symbols-outlined text-[18px]">delete</span>
+</button>
+</div>
+</td>
+</tr>
+<tr class="group hover:bg-surface-container/50 transition-colors" draggable="true">
+<td class="py-4 align-middle w-24">
+<div class="flex items-center gap-2 text-text-dimmed cursor-move">
+<span class="material-symbols-outlined text-[16px]">drag_indicator</span>
+<span class="font-label-mono">02</span>
+</div>
+</td>
+<td class="py-4 align-middle">
+<div class="flex items-center gap-4">
+<div class="w-10 h-10 rounded bg-surface-deep flex items-center justify-center">
+<span class="material-symbols-outlined text-secondary text-[20px]">code_blocks</span>
+</div>
+<div><div class="font-headline-lg text-body-lg font-semibold mb-0.5">Senior .NET Developer</div><div class="text-text-dimmed text-sm">Stripe • Legacy System Migration</div></div>
+</div>
+</td>
+<td class="py-4 align-middle">
+<div class="text-sm">
+<div class="">2018 — 2021</div>
+<div class="text-text-dimmed text-xs mt-0.5">3 yrs</div>
+</div>
+</td>
+<td class="py-4 align-middle">
+<label class="relative inline-flex items-center cursor-pointer">
+<input checked="" class="sr-only peer" type="checkbox">
+<div class="w-9 h-5 bg-surface-deep rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-text-dimmed peer-checked:after:bg-on-primary after:border-gray-300 after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+<span class="ml-3 text-xs font-label-mono text-primary">PUBLISHED</span>
+</label>
+</td>
+<td class="py-4 align-middle text-right">
+<div class="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+<button class="p-2 rounded hover:bg-surface-deep text-text-dimmed hover:text-primary transition-colors">
+<span class="material-symbols-outlined text-[18px]">edit</span>
+</button>
+<button class="p-2 rounded hover:bg-error-container text-text-dimmed hover:text-error transition-colors">
+<span class="material-symbols-outlined text-[18px]">delete</span>
+</button>
+</div>
+</td>
+</tr>
+<tr class="group hover:bg-surface-container/50 transition-colors" draggable="true">
+<td class="py-4 align-middle w-24">
+<div class="flex items-center gap-2 text-text-dimmed cursor-move">
+<span class="material-symbols-outlined text-[16px]">drag_indicator</span>
+<span class="font-label-mono">03</span>
+</div>
+</td>
+<td class="py-4 align-middle">
+<div class="flex items-center gap-4">
+<div class="w-10 h-10 rounded bg-surface-deep flex items-center justify-center">
+<span class="material-symbols-outlined text-text-dimmed text-[20px]">terminal</span>
+</div>
+<div><div class="font-headline-lg text-body-lg font-semibold mb-0.5">Software Engineer (.NET)</div><div class="text-text-dimmed text-sm">Netflix • ERP Integration Specialist</div></div>
+</div>
+</td>
+<td class="py-4 align-middle">
+<div class="text-sm">
+<div class="">2015 — 2018</div>
+<div class="text-xs mt-0.5">3 yrs</div>
+</div>
+</td>
+<td class="py-4 align-middle">
+<label class="relative inline-flex items-center cursor-pointer">
+<input class="sr-only peer" type="checkbox" checked="checked">
+<div class="w-9 h-5 bg-surface-deep rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-text-dimmed peer-checked:after:bg-on-primary after:border-gray-300 after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+<span class="ml-3 text-xs font-label-mono text-primary">PUBLISHED</span>
+</label>
+</td>
+<td class="py-4 align-middle text-right">
+<div class="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+<button class="p-2 rounded hover:bg-surface-deep text-text-dimmed hover:text-primary transition-colors">
+<span class="material-symbols-outlined text-[18px]">edit</span>
+</button>
+<button class="p-2 rounded hover:bg-error-container text-text-dimmed hover:text-error transition-colors">
+<span class="material-symbols-outlined text-[18px]">delete</span>
+</button>
+</div>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="mt-8 pt-4 flex items-center justify-between text-sm text-text-dimmed font-label-mono">
+<div class="">Showing 3 of 12 roles</div>
+<div class="flex items-center gap-2">
+<button class="w-8 h-8 rounded flex items-center justify-center hover:bg-surface-deep transition-colors opacity-50 cursor-not-allowed">
+<span class="material-symbols-outlined text-[18px]">chevron_left</span>
+</button>
+<button class="w-8 h-8 rounded flex items-center justify-center hover:bg-surface-deep transition-colors text-on-surface">1</button>
+<button class="w-8 h-8 rounded flex items-center justify-center hover:bg-surface-deep transition-colors">2</button>
+<button class="w-8 h-8 rounded flex items-center justify-center hover:bg-surface-deep transition-colors">3</button>
+<button class="w-8 h-8 rounded flex items-center justify-center hover:bg-surface-deep transition-colors">
+<span class="material-symbols-outlined text-[18px]">chevron_right</span>
+</button>
+</div>
+</div>
+</div>
+<div class="mt-section-gap grid grid-cols-1 md:grid-cols-3 gap-6">
+<div class="bg-surface-muted rounded-xl p-6 relative overflow-hidden group">
+<div class="absolute inset-0 bg-gradient-to-br from-primary/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+<span class="material-symbols-outlined text-primary mb-4 text-3xl">analytics</span>
+<div class="font-headline-lg text-body-lg font-semibold text-on-surface mb-2">Total Experience</div>
+<div class="font-headline-xl text-headline-lg text-on-surface">8.2 Yrs</div>
+<div class="text-text-dimmed text-sm mt-2 font-label-mono">ACROSS 4 COMPANIES</div>
+</div>
+<div class="bg-surface-muted rounded-xl p-6 relative overflow-hidden group col-span-1 md:col-span-2 flex items-center">
+<div class="absolute inset-0 bg-gradient-to-bl from-secondary/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+<div class="flex-1">
+<div class="font-label-mono text-label-sm text-primary uppercase tracking-widest mb-2">Timeline Health</div>
+<p class="text-on-surface font-body-md mb-4 max-w-md">Your experience timeline currently has no gaps greater than 3 months. Recruiter engagement is high for consistent histories.</p>
+<div class="w-full h-2 bg-surface-deep rounded-full overflow-hidden">
+<div class="h-full bg-primary rounded-full w-full"></div>
+</div>
+</div>
+<div class="hidden md:block w-32 h-32 ml-8 opacity-20">
+<svg class="w-full h-full stroke-primary fill-none stroke-2" viewBox="0 0 100 100">
+<path d="M10,90 Q30,50 50,70 T90,10"></path>
+</svg>
+</div>
+</div>
+</div>
+</div>
+<script>
+  // Simple drag-and-drop visual feedback
+  const list = document.getElementById('experience-list');
+  let draggedItem = null;
+
+  list.addEventListener('dragstart', (e) => {
+    draggedItem = e.target.closest('tr');
+    if(draggedItem) {
+      setTimeout(() => {
+        draggedItem.classList.add('opacity-50', 'bg-surface-deep');
+      }, 0);
+    }
+  });
+
+  list.addEventListener('dragend', (e) => {
+    if(draggedItem) {
+      draggedItem.classList.remove('opacity-50', 'bg-surface-deep');
+      draggedItem = null;
+    }
+  });
+
+  list.querySelectorAll('tr').forEach(row => {
+    row.setAttribute('draggable', true);
+  });
+</script></main></div>
+
+</body></html>
