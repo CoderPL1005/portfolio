@@ -1,0 +1,2 @@
+import { inject, Injectable } from '@angular/core'; import { map } from 'rxjs'; import { ApiClientService } from '../../../core/api/api-client.service'; import { ApiResponse } from '../../../core/api/api-response.model'; import { requireData } from '../shared/admin-api'; import { Dashboard } from '../shared/admin.models';
+@Injectable() export class DashboardService { private api=inject(ApiClientService); get(){return this.api.get<ApiResponse<Dashboard>>('admin/dashboard').pipe(map(requireData));} }

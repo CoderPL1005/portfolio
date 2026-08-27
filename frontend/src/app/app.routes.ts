@@ -1,6 +1,7 @@
 import { Routes } from '@angular/router';
 import { adminAuthChildGuard, adminAuthGuard } from './core/guards/admin-auth.guard';
 import { adminLoginGuard } from './core/guards/admin-login.guard';
+import { unsavedChangesGuard } from './features/admin/shared/dirty.guard';
 
 const placeholder = () =>
   import('./features/placeholder/placeholder-page.component').then((m) => m.PlaceholderPageComponent);
@@ -19,24 +20,24 @@ export const routes: Routes = [
     loadComponent: () =>
       import('./layout/admin-layout/admin-layout.component').then((m) => m.AdminLayoutComponent),
     children: [
-      { path: '', pathMatch: 'full', loadComponent: placeholder, data: { title: 'Dashboard', eyebrow: 'Overview' } },
-      { path: 'profile', loadComponent: placeholder, data: { title: 'Profile', eyebrow: 'Portfolio' } },
-      { path: 'experience', loadComponent: placeholder, data: { title: 'Experience', eyebrow: 'Portfolio' } },
-      { path: 'experience/new', loadComponent: placeholder, data: { title: 'New experience', eyebrow: 'Portfolio' } },
-      { path: 'experience/:id', loadComponent: placeholder, data: { title: 'Edit experience', eyebrow: 'Portfolio' } },
-      { path: 'education', loadComponent: placeholder, data: { title: 'Education', eyebrow: 'Portfolio' } },
-      { path: 'trainings', loadComponent: placeholder, data: { title: 'Trainings', eyebrow: 'Portfolio' } },
-      { path: 'certificates', loadComponent: placeholder, data: { title: 'Certificates', eyebrow: 'Portfolio' } },
-      { path: 'projects', loadComponent: placeholder, data: { title: 'Projects', eyebrow: 'Portfolio' } },
-      { path: 'projects/new', loadComponent: placeholder, data: { title: 'New project', eyebrow: 'Portfolio' } },
-      { path: 'projects/:id', loadComponent: placeholder, data: { title: 'Edit project', eyebrow: 'Portfolio' } },
-      { path: 'skills', loadComponent: placeholder, data: { title: 'Skills', eyebrow: 'Portfolio' } },
-      { path: 'journey', loadComponent: placeholder, data: { title: 'Journey', eyebrow: 'Portfolio' } },
-      { path: 'social-links', loadComponent: placeholder, data: { title: 'Social links', eyebrow: 'Website' } },
-      { path: 'site-settings', loadComponent: placeholder, data: { title: 'Site settings', eyebrow: 'Website' } },
+      { path: '', pathMatch: 'full', loadComponent: () => import('./features/admin/dashboard/dashboard-page.component').then(m => m.DashboardPageComponent) },
+      { path: 'profile', canDeactivate: [unsavedChangesGuard], loadComponent: () => import('./features/admin/profile/profile-page.component').then(m => m.ProfilePageComponent) },
+      { path: 'experience', loadComponent: () => import('./features/admin/experiences/experience-list-page.component').then(m => m.ExperienceListPageComponent) },
+      { path: 'experience/new', canDeactivate: [unsavedChangesGuard], loadComponent: () => import('./features/admin/experiences/experience-edit-page.component').then(m => m.ExperienceEditPageComponent) },
+      { path: 'experience/:id', canDeactivate: [unsavedChangesGuard], loadComponent: () => import('./features/admin/experiences/experience-edit-page.component').then(m => m.ExperienceEditPageComponent) },
+      { path: 'education', canDeactivate: [unsavedChangesGuard], loadComponent: () => import('./features/admin/education/education-page.component').then(m => m.EducationPageComponent) },
+      { path: 'trainings', canDeactivate: [unsavedChangesGuard], loadComponent: () => import('./features/admin/trainings/training-page.component').then(m => m.TrainingPageComponent) },
+      { path: 'certificates', canDeactivate: [unsavedChangesGuard], loadComponent: () => import('./features/admin/certificates/certificate-page.component').then(m => m.CertificatePageComponent) },
+      { path: 'projects', loadComponent: () => import('./features/admin/projects/project-list-page.component').then(m => m.ProjectListPageComponent) },
+      { path: 'projects/new', canDeactivate: [unsavedChangesGuard], loadComponent: () => import('./features/admin/projects/project-editor-shell.component').then(m => m.ProjectEditorShellComponent) },
+      { path: 'projects/:id', canDeactivate: [unsavedChangesGuard], loadComponent: () => import('./features/admin/projects/project-editor-shell.component').then(m => m.ProjectEditorShellComponent) },
+      { path: 'skills', canDeactivate: [unsavedChangesGuard], loadComponent: () => import('./features/admin/skills/skills-page.component').then(m => m.SkillsAdminPageComponent) },
+      { path: 'journey', canDeactivate: [unsavedChangesGuard], loadComponent: () => import('./features/admin/journey/journey-page.component').then(m => m.JourneyAdminPageComponent) },
+      { path: 'social-links', canDeactivate: [unsavedChangesGuard], loadComponent: () => import('./features/admin/social-links/social-links-page.component').then(m => m.SocialLinksPageComponent) },
+      { path: 'site-settings', canDeactivate: [unsavedChangesGuard], loadComponent: () => import('./features/admin/site-settings/site-settings-page.component').then(m => m.SiteSettingsPageComponent) },
       { path: 'media', loadComponent: placeholder, data: { title: 'Media library', eyebrow: 'Website' } },
-      { path: 'contact-messages', loadComponent: placeholder, data: { title: 'Contact messages', eyebrow: 'Inbox' } },
-      { path: 'contact-messages/:id', loadComponent: placeholder, data: { title: 'Message detail', eyebrow: 'Inbox' } },
+      { path: 'contact-messages', loadComponent: () => import('./features/admin/contact-messages/contact-message-list-page.component').then(m => m.ContactMessageListPageComponent) },
+      { path: 'contact-messages/:id', loadComponent: () => import('./features/admin/contact-messages/contact-message-detail-page.component').then(m => m.ContactMessageDetailPageComponent) },
       { path: 'agent', loadComponent: placeholder, data: { title: 'Agent settings', eyebrow: 'AI Agent' } },
       { path: 'agent/knowledge', loadComponent: placeholder, data: { title: 'Knowledge', eyebrow: 'AI Agent' } },
       { path: 'agent/knowledge/:id', loadComponent: placeholder, data: { title: 'Knowledge detail', eyebrow: 'AI Agent' } },
