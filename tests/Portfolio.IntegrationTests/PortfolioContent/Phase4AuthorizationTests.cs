@@ -86,12 +86,16 @@ public sealed class Phase4AuthorizationTests(AuthApiFactory factory) : IClassFix
     [Fact]
     public async Task Public_contact_is_anonymous_and_rate_limited_after_three_requests_per_minute()
     {
-        var client = factory.CreateClient(); var statuses = new List<HttpStatusCode>();
+        var client = factory.CreateClient(); var responses = new List<HttpResponseMessage>();
         for (var index = 0; index < 4; index++)
         {
-            var response = await client.PostAsJsonAsync("/api/v1/public/contact", new { name = "Sender", email = "sender@example.com", subject = "Hello", message = "Message" }); statuses.Add(response.StatusCode);
+            responses.Add(await client.PostAsJsonAsync("/api/v1/public/contact", new { name = "Sender", email = "sender@example.com", subject = "Hello", message = "Message" }));
         }
-        Assert.Equal([HttpStatusCode.Created, HttpStatusCode.Created, HttpStatusCode.Created, HttpStatusCode.TooManyRequests], statuses);
+        Assert.Equal([HttpStatusCode.Created, HttpStatusCode.Created, HttpStatusCode.Created, HttpStatusCode.TooManyRequests], responses.Select(x => x.StatusCode));
+        Assert.Equal("application/json", responses[^1].Content.Headers.ContentType?.MediaType);
+        using var body = JsonDocument.Parse(await responses[^1].Content.ReadAsStringAsync());
+        Assert.False(body.RootElement.GetProperty("success").GetBoolean());
+        Assert.Equal("TOO_MANY_REQUESTS", body.RootElement.GetProperty("error").GetProperty("code").GetString());
     }
 
     [Fact]

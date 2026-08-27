@@ -63,6 +63,7 @@ public static class AuthenticationExtensions
             options.OnRejected = async (context, cancellationToken) =>
             {
                 context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+                context.HttpContext.Response.ContentType = "application/json; charset=utf-8";
                 await context.HttpContext.Response.WriteAsJsonAsync(
                     ApiResponse.Failure(new ApiError("TOO_MANY_REQUESTS", "Too many requests.")),
                     cancellationToken);

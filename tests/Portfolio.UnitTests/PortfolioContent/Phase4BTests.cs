@@ -98,6 +98,31 @@ public sealed class Phase4BTests
     }
 
     [Fact]
+    public async Task Public_project_detail_maps_media_orders_ties_and_matches_slug_case_insensitively()
+    {
+        await using var db = PublicPortfolioTests.CreateContext();
+        var project = Project("public-project", true, false, 0);
+        var firstMediaId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        var secondMediaId = Guid.Parse("00000000-0000-0000-0000-000000000002");
+        var firstAsset = new MediaAsset { Id = Guid.NewGuid(), StorageKey = "first", PublicUrl = "https://example.com/first.png", FileName = "first.png", MediaType = "IMAGE", AltText = "First" };
+        var secondAsset = new MediaAsset { Id = Guid.NewGuid(), StorageKey = "second", PublicUrl = "https://example.com/second.png", FileName = "second.png", MediaType = "IMAGE", AltText = "Second" };
+        db.AddRange(project, firstAsset, secondAsset);
+        db.ProjectMedia.AddRange(
+            new ProjectMedia { Id = secondMediaId, ProjectId = project.Id, MediaAssetId = secondAsset.Id, MediaRole = "SCREENSHOT", DisplayOrder = 1 },
+            new ProjectMedia { Id = firstMediaId, ProjectId = project.Id, MediaAssetId = firstAsset.Id, MediaRole = "DIAGRAM", Caption = "Architecture", DisplayOrder = 1 });
+        await db.SaveChangesAsync();
+
+        var detail = await new GetPublicProjectBySlugQueryHandler(db).HandleAsync(new("PUBLIC-PROJECT"));
+
+        Assert.Equal([firstMediaId, secondMediaId], detail.Media.Select(item => item.Id));
+        Assert.Equal("https://example.com/first.png", detail.Media.First().Url);
+        Assert.Equal("First", detail.Media.First().AltText);
+        Assert.Equal("Architecture", detail.Media.First().Caption);
+        await Assert.ThrowsAsync<NotFoundException>(() =>
+            new GetPublicProjectBySlugQueryHandler(db).HandleAsync(new("missing")));
+    }
+
+    [Fact]
     public async Task Project_validation_rejects_contract_constraint_violations()
     {
         var technologyId = Guid.NewGuid();

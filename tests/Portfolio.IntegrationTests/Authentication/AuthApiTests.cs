@@ -54,7 +54,8 @@ public sealed class AuthApiTests(AuthApiFactory factory) : IClassFixture<AuthApi
         Assert.Contains("portfolio_refresh_token=", cookie, StringComparison.Ordinal);
         Assert.Contains("httponly", cookie, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("secure", cookie, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("samesite=strict", cookie, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("samesite=none", cookie, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("path=/api/v1/auth", cookie, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("test-refresh-token", json, StringComparison.Ordinal);
     }
 

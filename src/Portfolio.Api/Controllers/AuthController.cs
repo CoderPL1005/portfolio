@@ -73,7 +73,9 @@ public sealed class AuthController(IRequestDispatcher dispatcher) : ControllerBa
     {
         HttpOnly = true,
         Secure = true,
-        SameSite = SameSiteMode.Strict,
+        // The frozen deployment architecture hosts Angular and the API on separate sites.
+        // None is required for the refresh cookie on cross-site credentialed requests.
+        SameSite = SameSiteMode.None,
         Path = "/api/v1/auth",
         IsEssential = true
     };
