@@ -9,9 +9,17 @@ public sealed class ApplicationDbContextFactory : IDesignTimeDbContextFactory<Ap
 {
     public ApplicationDbContext CreateDbContext(string[] args)
     {
+        var connectionString =
+            Environment.GetEnvironmentVariable("ConnectionStrings__Database");
+
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            connectionString = "Host=localhost;Database=portfolio_design_time";
+        }
+
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseNpgsql(
-                "Host=localhost;Database=portfolio_design_time",
+                connectionString,
                 npgsql => npgsql.UseVector())
             .Options;
 
