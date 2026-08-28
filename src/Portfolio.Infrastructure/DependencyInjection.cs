@@ -7,6 +7,8 @@ using Portfolio.Application.Common.Abstractions.Authentication;
 using Portfolio.Infrastructure.Authentication;
 using Portfolio.Infrastructure.Persistence;
 using Portfolio.Infrastructure.Persistence.Seeding;
+using Portfolio.Application.Common.Abstractions.Storage;
+using Portfolio.Infrastructure.Storage;
 
 namespace Portfolio.Infrastructure;
 
@@ -28,6 +30,8 @@ public static class DependencyInjection
         services.AddScoped<IPasswordHasher, PasswordHasher>();
         services.AddScoped<IJwtTokenService, JwtTokenService>();
         services.AddScoped<IRefreshTokenStore, RefreshTokenStore>();
+        services.AddOptions<R2Settings>().Bind(configuration.GetSection(R2Settings.SectionName));
+        services.AddSingleton<IFileStorage, R2FileStorage>();
         services.AddOptions<JwtSettings>()
             .Bind(configuration.GetSection(JwtSettings.SectionName))
             .Validate(settings => !string.IsNullOrWhiteSpace(settings.Issuer), "Jwt:Issuer is required.")

@@ -26,6 +26,7 @@ using Portfolio.Application.Features.Journey;
 using Portfolio.Application.Features.Phase4C;
 using Portfolio.Application.Features.SiteSettings;
 using Portfolio.Application.Features.SocialLinks;
+using Portfolio.Application.Features.Media;
 
 namespace Portfolio.Application;
 
@@ -164,6 +165,13 @@ public static class DependencyInjection
         services.AddScoped<IRequestValidator<GetContactMessagesQuery>, GetContactMessagesQueryValidator>();
         services.AddScoped<IRequestValidator<UpdateContactMessageStatusCommand>, UpdateContactMessageStatusCommandValidator>();
         services.AddScoped<IRequestHandler<GetDashboardQuery, DashboardResult>, GetDashboardQueryHandler>();
+        services.AddScoped<IRequestHandler<GetMediaQuery, Common.Models.PagedResult<MediaAssetResult>>, GetMediaQueryHandler>();
+        services.AddScoped<IRequestHandler<UploadMediaCommand, MediaAssetResult>, UploadMediaCommandHandler>();
+        services.AddScoped<IRequestHandler<UpdateMediaCommand, MediaAssetResult>, UpdateMediaCommandHandler>();
+        services.AddScoped<IRequestHandler<DeleteMediaCommand, bool>, DeleteMediaCommandHandler>();
+        services.AddScoped<IRequestValidator<GetMediaQuery>, GetMediaQueryValidator>();
+        services.AddScoped<IRequestValidator<UploadMediaCommand>, UploadMediaCommandValidator>();
+        services.AddScoped<IRequestValidator<UpdateMediaCommand>, UpdateMediaCommandValidator>();
 
         return services;
     }

@@ -18,6 +18,8 @@ using Portfolio.Application.Features.ContactMessages;
 using Portfolio.Application.Features.Phase4C;
 using Portfolio.Application.Features.Dashboard;
 using Portfolio.Application.Features.SiteSettings;
+using Portfolio.Application.Features.Media;
+using Portfolio.Application.Common.Models;
 
 namespace Portfolio.IntegrationTests.Authentication;
 
@@ -50,6 +52,10 @@ public sealed class AuthApiFactory : WebApplicationFactory<Program>
             services.RemoveAll<IRequestHandler<GetSiteSettingsQuery, SiteSettingsResult>>();
             services.RemoveAll<IRequestHandler<UpdateSiteSettingsCommand, SiteSettingsResult>>();
             services.RemoveAll<IRequestHandler<GetDashboardQuery, DashboardResult>>();
+            services.RemoveAll<IRequestHandler<GetMediaQuery, Portfolio.Application.Common.Models.PagedResult<MediaAssetResult>>>();
+            services.RemoveAll<IRequestHandler<UploadMediaCommand, MediaAssetResult>>();
+            services.RemoveAll<IRequestHandler<UpdateMediaCommand, MediaAssetResult>>();
+            services.RemoveAll<IRequestHandler<DeleteMediaCommand, bool>>();
             services.AddScoped<IRequestHandler<LoginCommand, LoginResult>, FakeLoginHandler>();
             services.AddScoped<IRequestHandler<RefreshCommand, RefreshResult>, FakeRefreshHandler>();
             services.AddScoped<IRequestHandler<LogoutCommand, bool>, FakeLogoutHandler>();
@@ -61,6 +67,10 @@ public sealed class AuthApiFactory : WebApplicationFactory<Program>
             services.AddScoped<IRequestHandler<GetSiteSettingsQuery, SiteSettingsResult>, FakeGetSiteSettingsHandler>();
             services.AddScoped<IRequestHandler<UpdateSiteSettingsCommand, SiteSettingsResult>, FakeUpdateSiteSettingsHandler>();
             services.AddScoped<IRequestHandler<GetDashboardQuery, DashboardResult>, FakeDashboardHandler>();
+            services.AddScoped<IRequestHandler<GetMediaQuery, Portfolio.Application.Common.Models.PagedResult<MediaAssetResult>>, FakeGetMediaHandler>();
+            services.AddScoped<IRequestHandler<UploadMediaCommand, MediaAssetResult>, FakeUploadMediaHandler>();
+            services.AddScoped<IRequestHandler<UpdateMediaCommand, MediaAssetResult>, FakeUpdateMediaHandler>();
+            services.AddScoped<IRequestHandler<DeleteMediaCommand, bool>, FakeDeleteMediaHandler>();
         });
     }
 
@@ -136,4 +146,9 @@ public sealed class AuthApiFactory : WebApplicationFactory<Program>
     { public Task<SiteSettingsResult> HandleAsync(UpdateSiteSettingsCommand request, CancellationToken cancellationToken = default) => Task.FromResult(new SiteSettingsResult(request.SiteName, request.FooterText, request.ShowAvailability, request.EnableContactForm, request.ShowDownloadCv, request.ShowJourney, request.ShowAiAgent, request.DefaultSeoTitle, request.DefaultSeoDescription)); }
     public sealed class FakeDashboardHandler : IRequestHandler<GetDashboardQuery, DashboardResult>
     { public Task<DashboardResult> HandleAsync(GetDashboardQuery request, CancellationToken cancellationToken = default) => Task.FromResult(new DashboardResult(1, 2, 3, 4, 5, new(6, 7, 8), 9, [])); }
+    private static MediaAssetResult Media(Guid? id=null,string type="IMAGE",string? alt="Alt") => new(id??Guid.Parse("99999999-9999-9999-9999-999999999999"),"asset.png","image/png",12,type,"portfolio/2026/08/asset.png","https://cdn.example/asset.png",alt,new DateTimeOffset(2026,8,28,0,0,0,TimeSpan.Zero),new DateTimeOffset(2026,8,28,0,0,0,TimeSpan.Zero));
+    public sealed class FakeGetMediaHandler:IRequestHandler<GetMediaQuery,Portfolio.Application.Common.Models.PagedResult<MediaAssetResult>> { public Task<Portfolio.Application.Common.Models.PagedResult<MediaAssetResult>> HandleAsync(GetMediaQuery r,CancellationToken ct=default)=>Task.FromResult(new Portfolio.Application.Common.Models.PagedResult<MediaAssetResult>([Media()],r.Page,r.PageSize,1)); }
+    public sealed class FakeUploadMediaHandler:IRequestHandler<UploadMediaCommand,MediaAssetResult> { public Task<MediaAssetResult> HandleAsync(UploadMediaCommand r,CancellationToken ct=default)=>Task.FromResult(Media(type:r.MediaType.Trim().ToUpperInvariant(),alt:r.AltText)); }
+    public sealed class FakeUpdateMediaHandler:IRequestHandler<UpdateMediaCommand,MediaAssetResult> { public Task<MediaAssetResult> HandleAsync(UpdateMediaCommand r,CancellationToken ct=default)=>Task.FromResult(Media(r.Id,r.MediaType,r.AltText)); }
+    public sealed class FakeDeleteMediaHandler:IRequestHandler<DeleteMediaCommand,bool> { public Task<bool> HandleAsync(DeleteMediaCommand r,CancellationToken ct=default){if(r.Id==Guid.Parse("88888888-8888-8888-8888-888888888888"))throw new Portfolio.Application.Common.Exceptions.ConflictException("MEDIA_IN_USE","The media asset is referenced.");return Task.FromResult(true);} }
 }

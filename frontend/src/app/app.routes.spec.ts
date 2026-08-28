@@ -24,10 +24,10 @@ describe('application routes', () => {
     expect(admin?.canActivateChild?.length).toBe(1);
   });
 
-  it('loads Phase 8 admin features while retaining only later-phase placeholders', () => {
+  it('loads Phase 9 media and prior admin features while retaining only AI placeholders', () => {
     const admin = routes.find((route) => route.path === 'admin')!;
-    const implemented = admin.children!.filter((route) => !route.path?.startsWith('agent') && route.path !== 'media');
-    const placeholders = admin.children!.filter((route) => route.path === 'media' || route.path?.startsWith('agent'));
+    const implemented = admin.children!.filter((route) => !route.path?.startsWith('agent'));
+    const placeholders = admin.children!.filter((route) => route.path?.startsWith('agent'));
     expect(implemented.every((route) => route.loadComponent !== placeholderReference)).toBe(true);
     expect(placeholders.every((route) => route.loadComponent === placeholderReference)).toBe(true);
     expect(admin.children!.find((route) => route.path === 'profile')?.canDeactivate?.length).toBe(1);
@@ -42,4 +42,4 @@ describe('application routes', () => {
   });
 });
 
-const placeholderReference = routes.find((route) => route.path === 'admin')?.children?.find((route) => route.path === 'media')?.loadComponent;
+const placeholderReference = routes.find((route) => route.path === 'admin')?.children?.find((route) => route.path === 'agent')?.loadComponent;
