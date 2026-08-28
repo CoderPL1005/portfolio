@@ -1,10 +1,13 @@
 using Portfolio.Api.Contracts.Common;
 using Portfolio.Api.Authentication;
 using Portfolio.Api.Middleware;
+using Portfolio.Api.Startup;
 using Portfolio.Application;
 using Portfolio.Infrastructure;
+using Portfolio.Infrastructure.Persistence.Seeding;
 
-var builder = WebApplication.CreateBuilder(args);
+var seedRequested = DatabaseSeedMode.IsRequested(args);
+var builder = WebApplication.CreateBuilder(DatabaseSeedMode.WithoutSeedArgument(args));
 
 const string FrontendCorsPolicy = "frontend";
 var configuredOrigins = builder.Configuration
@@ -65,6 +68,18 @@ app.MapGet(
     () => Results.Ok(ApiResponse<object>.Ok(new { status = "Healthy" })))
     .AllowAnonymous();
 app.MapControllers();
+
+if (seedRequested)
+{
+    var seedPath = DatabaseSeedMode.ResolveSeedPath(
+        builder.Environment.ContentRootPath,
+        AppContext.BaseDirectory,
+        Directory.GetCurrentDirectory());
+    await using var scope = app.Services.CreateAsyncScope();
+    var seeder = scope.ServiceProvider.GetRequiredService<DatabaseSeeder>();
+    await seeder.SeedAsync(seedPath);
+    return;
+}
 
 app.Run();
 
