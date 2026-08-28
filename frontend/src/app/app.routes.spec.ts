@@ -10,7 +10,7 @@ describe('application routes', () => {
       '', 'projects', 'projects/:slug', 'experience', 'skills', 'journey', 'contact',
     ]);
     expect(publicShell?.children?.every((route) => route.loadComponent)).toBe(true);
-    expect(publicShell?.children?.every((route) => route.loadComponent !== placeholderReference)).toBe(true);
+    expect(publicShell?.children?.every((route) => route.loadComponent)).toBe(true);
   });
 
   it('defines a guarded lazy admin login and admin shell', () => {
@@ -24,12 +24,10 @@ describe('application routes', () => {
     expect(admin?.canActivateChild?.length).toBe(1);
   });
 
-  it('loads Phase 9 media and prior admin features while retaining only AI placeholders', () => {
+  it('loads all final admin features including AI routes', () => {
     const admin = routes.find((route) => route.path === 'admin')!;
-    const implemented = admin.children!.filter((route) => !route.path?.startsWith('agent'));
-    const placeholders = admin.children!.filter((route) => route.path?.startsWith('agent'));
-    expect(implemented.every((route) => route.loadComponent !== placeholderReference)).toBe(true);
-    expect(placeholders.every((route) => route.loadComponent === placeholderReference)).toBe(true);
+    expect(admin.children!.every((route) => route.loadComponent)).toBe(true);
+    expect(admin.children!.filter((route)=>route.path?.startsWith('agent'))).toHaveLength(5);
     expect(admin.children!.find((route) => route.path === 'profile')?.canDeactivate?.length).toBe(1);
     expect(admin.children!.find((route) => route.path === 'projects/:id')?.canDeactivate?.length).toBe(1);
   });
@@ -41,5 +39,3 @@ describe('application routes', () => {
     expect(wildcard?.loadComponent).toBeTypeOf('function');
   });
 });
-
-const placeholderReference = routes.find((route) => route.path === 'admin')?.children?.find((route) => route.path === 'agent')?.loadComponent;

@@ -60,6 +60,10 @@ public static class AuthenticationExtensions
                         QueueLimit = 0,
                         QueueProcessingOrder = QueueProcessingOrder.OldestFirst
                     }));
+            options.AddPolicy("public-chat", context =>
+                RateLimitPartition.GetFixedWindowLimiter(
+                    $"{context.Connection.RemoteIpAddress}:{context.Request.RouteValues["sessionId"]}",
+                    _ => new FixedWindowRateLimiterOptions { PermitLimit = 12, Window = TimeSpan.FromMinutes(1), QueueLimit = 0, QueueProcessingOrder = QueueProcessingOrder.OldestFirst }));
             options.OnRejected = async (context, cancellationToken) =>
             {
                 context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;

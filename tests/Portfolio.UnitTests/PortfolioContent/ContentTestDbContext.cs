@@ -25,23 +25,19 @@ internal sealed class ContentTestDbContext(DbContextOptions<ContentTestDbContext
     public DbSet<SiteSetting> SiteSettings => Set<SiteSetting>();
     public DbSet<ContactMessage> ContactMessages => Set<ContactMessage>();
     public DbSet<KnowledgeDocument> KnowledgeDocuments => Set<KnowledgeDocument>();
+    public DbSet<AgentSetting> AgentSettings => Set<AgentSetting>();
+    public DbSet<KnowledgeChunk> KnowledgeChunks => Set<KnowledgeChunk>();
     public DbSet<ChatSession> ChatSessions => Set<ChatSession>();
+    public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
+    public DbSet<ChatMessageSource> ChatMessageSources => Set<ChatMessageSource>();
+    public DbSet<ChatMessageFeedback> ChatMessageFeedback => Set<ChatMessageFeedback>();
 
     DbSet<AdminUser> IApplicationDbContext.AdminUsers => throw new NotSupportedException();
     DbSet<AdminRefreshToken> IApplicationDbContext.AdminRefreshTokens => throw new NotSupportedException();
-    DbSet<AgentSetting> IApplicationDbContext.AgentSettings => throw new NotSupportedException();
-    DbSet<KnowledgeChunk> IApplicationDbContext.KnowledgeChunks => throw new NotSupportedException();
-    DbSet<ChatMessage> IApplicationDbContext.ChatMessages => throw new NotSupportedException();
-    DbSet<ChatMessageSource> IApplicationDbContext.ChatMessageSources => throw new NotSupportedException();
-    DbSet<ChatMessageFeedback> IApplicationDbContext.ChatMessageFeedback => throw new NotSupportedException();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Ignore<AdminUser>(); modelBuilder.Ignore<AdminRefreshToken>();
-        modelBuilder.Ignore<AgentSetting>();
-        modelBuilder.Ignore<KnowledgeChunk>();
-        modelBuilder.Ignore<ChatMessage>();
-        modelBuilder.Ignore<ChatMessageSource>(); modelBuilder.Ignore<ChatMessageFeedback>();
 
         modelBuilder.Entity<MediaAsset>().HasKey(item => item.Id);
         modelBuilder.Entity<Profile>().HasKey(item => item.Id);
@@ -81,10 +77,18 @@ internal sealed class ContentTestDbContext(DbContextOptions<ContentTestDbContext
                 value, default(System.Text.Json.JsonDocumentOptions)));
         modelBuilder.Entity<ContactMessage>().HasKey(item => item.Id);
         modelBuilder.Entity<KnowledgeDocument>().HasKey(item => item.Id);
+        modelBuilder.Entity<AgentSetting>().HasKey(item => item.Id);
+        modelBuilder.Entity<KnowledgeChunk>().HasKey(item => item.Id);
+        modelBuilder.Entity<KnowledgeChunk>().Ignore(item => item.Embedding);
+        modelBuilder.Entity<KnowledgeChunk>().Property(item=>item.Metadata).HasConversion(value=>value.RootElement.GetRawText(),value=>System.Text.Json.JsonDocument.Parse(value,default(System.Text.Json.JsonDocumentOptions)));
+        modelBuilder.Entity<KnowledgeChunk>().HasOne(item=>item.KnowledgeDocument).WithMany().HasForeignKey(item=>item.KnowledgeDocumentId);
         modelBuilder.Entity<KnowledgeDocument>().Property(item => item.Metadata).HasConversion(
             value => value.RootElement.GetRawText(), value => System.Text.Json.JsonDocument.Parse(
                 value, default(System.Text.Json.JsonDocumentOptions)));
         modelBuilder.Entity<ChatSession>().HasKey(item => item.Id);
+        modelBuilder.Entity<ChatMessage>().HasKey(item=>item.Id);modelBuilder.Entity<ChatMessage>().HasOne(item=>item.ChatSession).WithMany().HasForeignKey(item=>item.ChatSessionId);
+        modelBuilder.Entity<ChatMessageSource>().HasKey(item=>item.Id);modelBuilder.Entity<ChatMessageSource>().HasOne(item=>item.ChatMessage).WithMany().HasForeignKey(item=>item.ChatMessageId);modelBuilder.Entity<ChatMessageSource>().HasOne(item=>item.KnowledgeChunk).WithMany().HasForeignKey(item=>item.KnowledgeChunkId);
+        modelBuilder.Entity<ChatMessageFeedback>().HasKey(item=>item.Id);modelBuilder.Entity<ChatMessageFeedback>().HasOne(item=>item.ChatMessage).WithMany().HasForeignKey(item=>item.ChatMessageId);
         modelBuilder.Entity<ChatSession>().Property(item => item.Metadata).HasConversion(
             value => value.RootElement.GetRawText(), value => System.Text.Json.JsonDocument.Parse(
                 value, default(System.Text.Json.JsonDocumentOptions)));

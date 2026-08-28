@@ -27,6 +27,8 @@ using Portfolio.Application.Features.Phase4C;
 using Portfolio.Application.Features.SiteSettings;
 using Portfolio.Application.Features.SocialLinks;
 using Portfolio.Application.Features.Media;
+using Portfolio.Application.Features.Agent;
+using Portfolio.Application.Features.Chat;
 
 namespace Portfolio.Application;
 
@@ -172,6 +174,24 @@ public static class DependencyInjection
         services.AddScoped<IRequestValidator<GetMediaQuery>, GetMediaQueryValidator>();
         services.AddScoped<IRequestValidator<UploadMediaCommand>, UploadMediaCommandValidator>();
         services.AddScoped<IRequestValidator<UpdateMediaCommand>, UpdateMediaCommandValidator>();
+        services.AddScoped<PortfolioKnowledgeBuilder>();
+        services.AddScoped<IRequestHandler<GetAgentSettingsQuery,AgentSettingsResult>,GetAgentSettingsQueryHandler>();
+        services.AddScoped<IRequestHandler<UpdateAgentSettingsCommand,AgentSettingsResult>,UpdateAgentSettingsCommandHandler>();
+        services.AddScoped<IRequestValidator<UpdateAgentSettingsCommand>,UpdateAgentSettingsCommandValidator>();
+        services.AddScoped<IRequestHandler<GetKnowledgeQuery,Common.Models.PagedResult<KnowledgeListItem>>,GetKnowledgeQueryHandler>();
+        services.AddScoped<IRequestHandler<GetKnowledgeDocumentQuery,KnowledgeDetail>,GetKnowledgeDocumentQueryHandler>();
+        services.AddScoped<IRequestHandler<ReindexKnowledgeCommand,string>,ReindexKnowledgeCommandHandler>();
+        services.AddScoped<IRequestHandler<ReindexAllKnowledgeCommand,string>,ReindexAllKnowledgeCommandHandler>();
+        services.AddScoped<IRequestValidator<GetKnowledgeQuery>,KnowledgeQueryValidator>();
+        services.AddScoped<IRequestHandler<CreateChatSessionCommand,ChatSessionResult>,CreateChatSessionCommandHandler>();
+        services.AddScoped<IRequestHandler<SendChatMessageCommand,ChatAnswerResult>,SendChatMessageCommandHandler>();
+        services.AddScoped<IRequestHandler<SubmitChatFeedbackCommand,Guid>,SubmitChatFeedbackCommandHandler>();
+        services.AddScoped<IRequestValidator<SendChatMessageCommand>,SendChatMessageValidator>();
+        services.AddScoped<IRequestValidator<SubmitChatFeedbackCommand>,SubmitChatFeedbackValidator>();
+        services.AddScoped<IRequestHandler<GetConversationsQuery,Common.Models.PagedResult<ConversationListItem>>,GetConversationsQueryHandler>();
+        services.AddScoped<IRequestHandler<GetConversationQuery,ConversationDetail>,GetConversationQueryHandler>();
+        services.AddScoped<IRequestHandler<CloseConversationCommand,bool>,CloseConversationCommandHandler>();
+        services.AddScoped<IRequestValidator<GetConversationsQuery>,GetConversationsQueryValidator>();
 
         return services;
     }

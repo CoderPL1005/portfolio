@@ -41,6 +41,9 @@ public sealed class ExceptionHandlingMiddleware(
             ConflictException conflictException => (
                 StatusCodes.Status409Conflict,
                 new ApiError(conflictException.Code, conflictException.Message)),
+            ServiceUnavailableException unavailableException => (
+                StatusCodes.Status503ServiceUnavailable,
+                new ApiError(unavailableException.Code, unavailableException.Message)),
             _ => (
                 StatusCodes.Status500InternalServerError,
                 new ApiError("INTERNAL_ERROR", "An unexpected error occurred.")),

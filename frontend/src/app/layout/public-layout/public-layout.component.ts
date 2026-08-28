@@ -1,9 +1,10 @@
 import { Component, signal } from '@angular/core';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
+import { ChatWidgetComponent } from '../../features/agent/chat-widget.component';
 
 @Component({
   selector: 'app-public-layout',
-  imports: [RouterLink, RouterLinkActive, RouterOutlet],
+  imports: [RouterLink, RouterLinkActive, RouterOutlet, ChatWidgetComponent],
   templateUrl: './public-layout.component.html',
   styleUrl: './public-layout.component.css',
 })

@@ -3,9 +3,6 @@ import { adminAuthChildGuard, adminAuthGuard } from './core/guards/admin-auth.gu
 import { adminLoginGuard } from './core/guards/admin-login.guard';
 import { unsavedChangesGuard } from './features/admin/shared/dirty.guard';
 
-const placeholder = () =>
-  import('./features/placeholder/placeholder-page.component').then((m) => m.PlaceholderPageComponent);
-
 export const routes: Routes = [
   {
     path: 'admin/login',
@@ -38,11 +35,11 @@ export const routes: Routes = [
       { path: 'media', loadComponent: () => import('./features/admin/media/media-library-page.component').then(m => m.MediaLibraryPageComponent) },
       { path: 'contact-messages', loadComponent: () => import('./features/admin/contact-messages/contact-message-list-page.component').then(m => m.ContactMessageListPageComponent) },
       { path: 'contact-messages/:id', loadComponent: () => import('./features/admin/contact-messages/contact-message-detail-page.component').then(m => m.ContactMessageDetailPageComponent) },
-      { path: 'agent', loadComponent: placeholder, data: { title: 'Agent settings', eyebrow: 'AI Agent' } },
-      { path: 'agent/knowledge', loadComponent: placeholder, data: { title: 'Knowledge', eyebrow: 'AI Agent' } },
-      { path: 'agent/knowledge/:id', loadComponent: placeholder, data: { title: 'Knowledge detail', eyebrow: 'AI Agent' } },
-      { path: 'agent/conversations', loadComponent: placeholder, data: { title: 'Conversations', eyebrow: 'AI Agent' } },
-      { path: 'agent/conversations/:id', loadComponent: placeholder, data: { title: 'Conversation detail', eyebrow: 'AI Agent' } },
+      { path: 'agent', canDeactivate:[unsavedChangesGuard], loadComponent:()=>import('./features/admin/agent/agent-settings-page.component').then(m=>m.AgentSettingsPageComponent) },
+      { path: 'agent/knowledge', loadComponent:()=>import('./features/admin/agent/knowledge-page.component').then(m=>m.KnowledgePageComponent) },
+      { path: 'agent/knowledge/:id', loadComponent:()=>import('./features/admin/agent/knowledge-detail-page.component').then(m=>m.KnowledgeDetailPageComponent) },
+      { path: 'agent/conversations', loadComponent:()=>import('./features/admin/agent/conversations-page.component').then(m=>m.ConversationsPageComponent) },
+      { path: 'agent/conversations/:id', loadComponent:()=>import('./features/admin/agent/conversation-detail-page.component').then(m=>m.ConversationDetailPageComponent) },
     ],
   },
   {

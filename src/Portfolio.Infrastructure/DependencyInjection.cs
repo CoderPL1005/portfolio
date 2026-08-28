@@ -9,6 +9,8 @@ using Portfolio.Infrastructure.Persistence;
 using Portfolio.Infrastructure.Persistence.Seeding;
 using Portfolio.Application.Common.Abstractions.Storage;
 using Portfolio.Infrastructure.Storage;
+using Portfolio.Application.Common.Abstractions.AI;
+using Portfolio.Infrastructure.AI;
 
 namespace Portfolio.Infrastructure;
 
@@ -32,6 +34,12 @@ public static class DependencyInjection
         services.AddScoped<IRefreshTokenStore, RefreshTokenStore>();
         services.AddOptions<R2Settings>().Bind(configuration.GetSection(R2Settings.SectionName));
         services.AddSingleton<IFileStorage, R2FileStorage>();
+        services.AddOptions<OpenAISettings>().Bind(configuration.GetSection(OpenAISettings.SectionName));
+        services.AddSingleton<IEmbeddingService, OpenAIEmbeddingService>();
+        services.AddSingleton<IChatCompletionService, OpenAIChatCompletionService>();
+        services.AddScoped<IKnowledgeRetriever, PgvectorKnowledgeRetriever>();
+        services.AddScoped<IKnowledgeIndexer, KnowledgeIndexer>();
+        services.AddHostedService<KnowledgeIndexingWorker>();
         services.AddOptions<JwtSettings>()
             .Bind(configuration.GetSection(JwtSettings.SectionName))
             .Validate(settings => !string.IsNullOrWhiteSpace(settings.Issuer), "Jwt:Issuer is required.")
