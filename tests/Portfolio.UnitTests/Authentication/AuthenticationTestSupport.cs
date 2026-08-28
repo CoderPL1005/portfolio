@@ -92,7 +92,6 @@ internal sealed class AuthTestDbContext(DbContextOptions<AuthTestDbContext> opti
     DbSet<JourneyItem> IApplicationDbContext.JourneyItems => throw new NotSupportedException();
     DbSet<SocialLink> IApplicationDbContext.SocialLinks => throw new NotSupportedException();
     DbSet<SiteSetting> IApplicationDbContext.SiteSettings => throw new NotSupportedException();
-    DbSet<ContactMessage> IApplicationDbContext.ContactMessages => throw new NotSupportedException();
     DbSet<AgentSetting> IApplicationDbContext.AgentSettings => throw new NotSupportedException();
     DbSet<KnowledgeDocument> IApplicationDbContext.KnowledgeDocuments => throw new NotSupportedException();
     DbSet<KnowledgeChunk> IApplicationDbContext.KnowledgeChunks => throw new NotSupportedException();
@@ -119,7 +118,6 @@ internal sealed class AuthTestDbContext(DbContextOptions<AuthTestDbContext> opti
         modelBuilder.Ignore<JourneyItem>();
         modelBuilder.Ignore<SocialLink>();
         modelBuilder.Ignore<SiteSetting>();
-        modelBuilder.Ignore<ContactMessage>();
         modelBuilder.Ignore<AgentSetting>();
         modelBuilder.Ignore<KnowledgeDocument>();
         modelBuilder.Ignore<KnowledgeChunk>();

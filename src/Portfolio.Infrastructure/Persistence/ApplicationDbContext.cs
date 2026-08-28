@@ -26,7 +26,6 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<JourneyItem> JourneyItems => Set<JourneyItem>();
     public DbSet<SocialLink> SocialLinks => Set<SocialLink>();
     public DbSet<SiteSetting> SiteSettings => Set<SiteSetting>();
-    public DbSet<ContactMessage> ContactMessages => Set<ContactMessage>();
     public DbSet<AgentSetting> AgentSettings => Set<AgentSetting>();
     public DbSet<KnowledgeDocument> KnowledgeDocuments => Set<KnowledgeDocument>();
     public DbSet<KnowledgeChunk> KnowledgeChunks => Set<KnowledgeChunk>();

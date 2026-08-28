@@ -20,10 +20,10 @@ export interface JourneyItem { id: string; title: string; subtitle: string | nul
 export type JourneyRequest = Omit<JourneyItem, 'id'|'updatedAt'>;
 export interface SocialLink { id: string; platform: string; label: string | null; url: string; iconKey: string | null; displayOrder: number; isVisible: boolean; updatedAt: string; }
 export type SocialLinkRequest = Omit<SocialLink, 'id'|'updatedAt'>;
-export interface SiteSettings { siteName: string; footerText: string | null; showAvailability: boolean; enableContactForm: boolean; showDownloadCv: boolean; showJourney: boolean; showAiAgent: boolean; defaultSeoTitle: string | null; defaultSeoDescription: string | null; }
+export interface SiteSettings { siteName: string; footerText: string | null; showAvailability: boolean; showDownloadCv: boolean; showJourney: boolean; showAiAgent: boolean; defaultSeoTitle: string | null; defaultSeoDescription: string | null; }
 export interface KnowledgeCounts { indexed: number; pending: number; failed: number; }
 export interface RecentUpdate { resourceType: string; id: string; title: string; updatedAt: string; }
-export interface Dashboard { projects: number; experiences: number; skills: number; certificates: number; unreadContactMessages: number; knowledge: KnowledgeCounts; conversations: number; recentUpdates: RecentUpdate[]; }
+export interface Dashboard { projects: number; experiences: number; skills: number; certificates: number; knowledge: KnowledgeCounts; conversations: number; recentUpdates: RecentUpdate[]; }
 export interface ProjectListItem { id: string; slug: string; title: string; role: string | null; status: ProjectStatus; featured: boolean; isPublished: boolean; displayOrder: number; thumbnailUrl: string | null; updatedAt: string; }
 export type ProjectStatus = 'PLANNED'|'IN_PROGRESS'|'ACTIVE'|'COMPLETED'|'ARCHIVED';
 export interface ProjectTechnology { technologyId: string; name: string; category: string; iconKey: string | null; displayOrder: number; }
@@ -32,5 +32,3 @@ export interface ProjectMedia { id: string; mediaAssetId: string; mediaRole: str
 export interface Project { id: string; slug: string; title: string; subtitle: string | null; shortDescription: string | null; overviewMarkdown: string | null; role: string | null; teamSize: number | null; startDate: string | null; endDate: string | null; status: ProjectStatus; githubUrl: string | null; liveUrl: string | null; thumbnailMediaId: string | null; thumbnailUrl: string | null; featured: boolean; isPublished: boolean; displayOrder: number; seoTitle: string | null; seoDescription: string | null; updatedAt: string; technologies: ProjectTechnology[]; sections: ProjectSection[]; media: ProjectMedia[]; }
 export type ProjectRequest = Omit<Project, 'id'|'thumbnailUrl'|'updatedAt'|'technologies'|'sections'|'media'> & { technologyIds: string[] };
 export interface ProjectSectionRequest { sectionType: string; title: string | null; subtitle: string | null; contentMarkdown: string | null; content: unknown; displayOrder: number; isVisible: boolean; }
-export interface ContactMessage { id: string; name: string; email: string; subject: string | null; message: string; status: ContactStatus; receivedAt: string; readAt: string | null; repliedAt: string | null; }
-export type ContactStatus = 'NEW'|'READ'|'REPLIED'|'ARCHIVED';

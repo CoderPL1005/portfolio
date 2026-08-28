@@ -14,6 +14,6 @@ public sealed class AdminSiteSettingsController(IRequestDispatcher dispatcher) :
     [HttpPut] public async Task<ActionResult<ApiResponse<SiteSettingsResult>>> Update(SiteSettingsRequest request, CancellationToken ct) => Ok(ApiResponse<SiteSettingsResult>.Ok(await dispatcher.DispatchAsync(request.Command(), ct)));
 }
 public sealed record SiteSettingsRequest(string SiteName, string? FooterText, bool ShowAvailability,
-    bool EnableContactForm, bool ShowDownloadCv, bool ShowJourney, bool ShowAiAgent,
+    bool ShowDownloadCv, bool ShowJourney, bool ShowAiAgent,
     string? DefaultSeoTitle, string? DefaultSeoDescription)
-{ public UpdateSiteSettingsCommand Command() => new(SiteName, FooterText, ShowAvailability, EnableContactForm, ShowDownloadCv, ShowJourney, ShowAiAgent, DefaultSeoTitle, DefaultSeoDescription); }
+{ public UpdateSiteSettingsCommand Command() => new(SiteName, FooterText, ShowAvailability, ShowDownloadCv, ShowJourney, ShowAiAgent, DefaultSeoTitle, DefaultSeoDescription); }

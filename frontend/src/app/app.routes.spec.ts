@@ -28,6 +28,7 @@ describe('application routes', () => {
     const admin = routes.find((route) => route.path === 'admin')!;
     expect(admin.children!.every((route) => route.loadComponent)).toBe(true);
     expect(admin.children!.filter((route)=>route.path?.startsWith('agent'))).toHaveLength(5);
+    expect(admin.children!.some((route) => route.path?.startsWith('contact-messages'))).toBe(false);
     expect(admin.children!.find((route) => route.path === 'profile')?.canDeactivate?.length).toBe(1);
     expect(admin.children!.find((route) => route.path === 'projects/:id')?.canDeactivate?.length).toBe(1);
   });

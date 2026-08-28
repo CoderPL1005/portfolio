@@ -16,28 +16,30 @@ public sealed class ApplicationDbContextModelTests
         "admin_users", "admin_refresh_tokens", "media_assets", "profiles", "experiences",
         "technologies", "experience_technologies", "projects", "project_technologies",
         "project_sections", "project_media", "skills", "educations", "trainings", "certificates",
-        "journey_items", "social_links", "site_settings", "contact_messages", "agent_settings",
+        "journey_items", "social_links", "site_settings", "agent_settings",
         "knowledge_documents", "knowledge_chunks", "chat_sessions", "chat_messages",
         "chat_message_sources", "chat_message_feedback"
     ];
 
     [Fact]
-    public void Model_contains_all_26_expected_tables()
+    public void Model_contains_all_25_expected_tables_and_excludes_contact_messages()
     {
         using var context = CreateContext();
         var tables = context.Model.GetEntityTypes().Select(entity => entity.GetTableName()).Order().ToArray();
 
         Assert.Equal(ExpectedTables.Order(), tables);
+        Assert.DoesNotContain("contact_messages", tables);
+        Assert.Null(context.Model.FindEntityType("Portfolio.Domain.Entities.ContactMessage"));
     }
 
     [Fact]
-    public void Application_context_contract_exposes_all_26_sets()
+    public void Application_context_contract_exposes_all_25_sets()
     {
         var dbSetCount = typeof(IApplicationDbContext).GetProperties()
             .Count(property => property.PropertyType.IsGenericType &&
                 property.PropertyType.GetGenericTypeDefinition() == typeof(DbSet<>));
 
-        Assert.Equal(26, dbSetCount);
+        Assert.Equal(25, dbSetCount);
     }
 
     [Fact]
@@ -56,8 +58,8 @@ public sealed class ApplicationDbContextModelTests
         var model = context.GetService<IDesignTimeModel>().Model;
 
         Assert.Equal(19, model.GetEntityTypes().SelectMany(entity => entity.GetForeignKeys()).Count());
-        Assert.Equal(34, model.GetEntityTypes().SelectMany(entity => entity.GetCheckConstraints()).Count());
-        Assert.Equal(23, model.GetEntityTypes().SelectMany(entity => entity.GetIndexes()).Count());
+        Assert.Equal(33, model.GetEntityTypes().SelectMany(entity => entity.GetCheckConstraints()).Count());
+        Assert.Equal(22, model.GetEntityTypes().SelectMany(entity => entity.GetIndexes()).Count());
 
         var experienceTechnology = model.FindEntityType(typeof(ExperienceTechnology))!;
         Assert.Equal(2, experienceTechnology.FindPrimaryKey()!.Properties.Count);
@@ -91,15 +93,16 @@ public sealed class ApplicationDbContextModelTests
         using var context = CreateContext();
         var migrations = context.Database.GetMigrations().ToArray();
 
-        Assert.Single(migrations);
+        Assert.Equal(2, migrations.Length);
         Assert.EndsWith("_InitialPortfolioSchema", migrations[0], StringComparison.Ordinal);
+        Assert.EndsWith("_RemoveContactMessages", migrations[1], StringComparison.Ordinal);
     }
 
     [Fact]
     public void Migration_script_contains_schema_only_postgresql_objects()
     {
         using var context = CreateContext();
-        var migration = context.Database.GetMigrations().Single();
+        var migration = context.Database.GetMigrations().First();
         var script = context.GetService<IMigrator>().GenerateScript(Migration.InitialDatabase, migration);
 
         Assert.Contains("CREATE EXTENSION IF NOT EXISTS pgcrypto", script, StringComparison.Ordinal);
@@ -109,6 +112,17 @@ public sealed class ApplicationDbContextModelTests
         Assert.Equal(16, CountOccurrences(script, "CREATE TRIGGER"));
         Assert.Equal(5, CountOccurrences(script, "CREATE UNIQUE INDEX"));
         Assert.DoesNotContain("CREATE INDEX \"IX_", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Removal_migration_drops_only_the_contact_messages_table()
+    {
+        using var context = CreateContext();
+        var migrations = context.Database.GetMigrations().ToArray();
+        var script = context.GetService<IMigrator>().GenerateScript(migrations[0], migrations[1]);
+
+        Assert.Contains("DROP TABLE contact_messages", script, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(1, CountOccurrences(script.ToUpperInvariant(), "DROP TABLE"));
     }
 
     private static ApplicationDbContext CreateContext()

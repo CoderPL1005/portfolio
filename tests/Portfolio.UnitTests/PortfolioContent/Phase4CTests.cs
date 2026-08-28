@@ -1,7 +1,6 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Portfolio.Application.Common.Exceptions;
-using Portfolio.Application.Features.ContactMessages;
 using Portfolio.Application.Features.Dashboard;
 using Portfolio.Application.Features.Journey;
 using Portfolio.Application.Features.PortfolioContent.GetPublicPortfolio;
@@ -53,44 +52,27 @@ public sealed class Phase4CTests
     public async Task Site_settings_map_typed_values_to_only_approved_json_rows()
     {
         await using var db = PublicPortfolioTests.CreateContext(); db.SiteSettings.Add(new SiteSetting { Key = "unexpected", Value = JsonDocument.Parse("{\"unsafe\":true}") }); await db.SaveChangesAsync();
-        var command = new UpdateSiteSettingsCommand("Portfolio", "Footer", true, true, false, true, false, "SEO", "Description"); var result = await new UpdateSiteSettingsCommandHandler(db, new FixedTimeProvider(Now)).HandleAsync(command); var loaded = await new GetSiteSettingsQueryHandler(db).HandleAsync(new());
-        Assert.Equal("Portfolio", result.SiteName); Assert.Equal(result, loaded); Assert.Equal(10, await db.SiteSettings.CountAsync()); Assert.Equal(JsonValueKind.Object, (await db.SiteSettings.SingleAsync(x => x.Key == "unexpected")).Value.RootElement.ValueKind);
+        var command = new UpdateSiteSettingsCommand("Portfolio", "Footer", true, false, true, false, "SEO", "Description"); var result = await new UpdateSiteSettingsCommandHandler(db, new FixedTimeProvider(Now)).HandleAsync(command); var loaded = await new GetSiteSettingsQueryHandler(db).HandleAsync(new());
+        Assert.Equal("Portfolio", result.SiteName); Assert.Equal(result, loaded); Assert.Equal(9, await db.SiteSettings.CountAsync()); Assert.Equal(JsonValueKind.Object, (await db.SiteSettings.SingleAsync(x => x.Key == "unexpected")).Value.RootElement.ValueKind);
     }
 
     [Fact]
     public async Task Site_settings_validation_enforces_typed_string_limits()
     {
-        var failures = await new UpdateSiteSettingsCommandValidator().ValidateAsync(new("", new string('x', 501), true, true, true, true, true, new string('x', 256), new string('x', 501)));
+        var failures = await new UpdateSiteSettingsCommandValidator().ValidateAsync(new("", new string('x', 501), true, true, true, true, new string('x', 256), new string('x', 501)));
         Assert.Equal(4, failures.Count);
-    }
-
-    [Fact]
-    public async Task Contact_submission_list_pagination_filter_and_detail_work()
-    {
-        await using var db = PublicPortfolioTests.CreateContext(); var submit = new SubmitContactMessageCommandHandler(db, new FixedTimeProvider(Now)); var first = await submit.HandleAsync(new("Alice", "alice@example.com", null, "Hello")); db.ContactMessages.Add(new ContactMessage { Id = Guid.NewGuid(), Name = "Bob", Email = "bob@example.com", Message = "Later", Status = "READ", ReceivedAt = Now.AddMinutes(1) }); await db.SaveChangesAsync();
-        var list = await new GetContactMessagesQueryHandler(db).HandleAsync(new(1, 1, "READ")); var detail = await new GetContactMessageQueryHandler(db).HandleAsync(new(first.Id));
-        Assert.Equal(1, list.Total); Assert.Equal("Bob", list.Items.Single().Name); Assert.Equal("NEW", detail.Status); Assert.Equal("Hello", detail.Message);
-    }
-
-    [Fact]
-    public async Task Contact_validation_status_timestamps_and_not_found_work()
-    {
-        await using var db = PublicPortfolioTests.CreateContext(); var item = new ContactMessage { Id = Guid.NewGuid(), Name = "Name", Email = "a@b.com", Message = "Message", Status = "NEW", ReceivedAt = Now }; db.ContactMessages.Add(item); await db.SaveChangesAsync(); var handler = new UpdateContactMessageStatusCommandHandler(db, new FixedTimeProvider(Now));
-        var read = await handler.HandleAsync(new(item.Id, "READ")); var replied = await handler.HandleAsync(new(item.Id, "REPLIED")); var archived = await handler.HandleAsync(new(item.Id, "ARCHIVED")); var invalid = await new SubmitContactMessageCommandValidator().ValidateAsync(new("", "bad", new string('x', 256), new string('x', 5001)));
-        Assert.Equal(Now, read.ReadAt); Assert.Equal(Now, replied.RepliedAt); Assert.Equal(Now, archived.ReadAt); Assert.Equal(Now, archived.RepliedAt); Assert.Equal(4, invalid.Count); await Assert.ThrowsAsync<NotFoundException>(() => new GetContactMessageQueryHandler(db).HandleAsync(new(Guid.NewGuid())));
     }
 
     [Fact]
     public async Task Dashboard_uses_persisted_counts_without_fake_analytics()
     {
-        await using var db = PublicPortfolioTests.CreateContext(); db.Projects.Add(Project()); db.Experiences.Add(new Experience { Id = Guid.NewGuid(), CompanyName = "Company", RoleTitle = "Role", StartDate = new DateOnly(2026, 1, 1) }); db.Skills.Add(new Skill { Id = Guid.NewGuid(), Name = "Skill", Category = "Backend", ExperienceLevel = "USED" }); db.Certificates.Add(new Certificate { Id = Guid.NewGuid(), Name = "Cert" }); db.ContactMessages.AddRange(Contact("NEW"), Contact("READ")); db.KnowledgeDocuments.AddRange(Knowledge("INDEXED"), Knowledge("PENDING"), Knowledge("FAILED"), Knowledge("INDEXING")); db.ChatSessions.Add(new ChatSession { Id = Guid.NewGuid(), PublicSessionId = Guid.NewGuid(), Status = "ACTIVE", Metadata = JsonDocument.Parse("{}") }); await db.SaveChangesAsync();
+        await using var db = PublicPortfolioTests.CreateContext(); db.Projects.Add(Project()); db.Experiences.Add(new Experience { Id = Guid.NewGuid(), CompanyName = "Company", RoleTitle = "Role", StartDate = new DateOnly(2026, 1, 1) }); db.Skills.Add(new Skill { Id = Guid.NewGuid(), Name = "Skill", Category = "Backend", ExperienceLevel = "USED" }); db.Certificates.Add(new Certificate { Id = Guid.NewGuid(), Name = "Cert" }); db.KnowledgeDocuments.AddRange(Knowledge("INDEXED"), Knowledge("PENDING"), Knowledge("FAILED"), Knowledge("INDEXING")); db.ChatSessions.Add(new ChatSession { Id = Guid.NewGuid(), PublicSessionId = Guid.NewGuid(), Status = "ACTIVE", Metadata = JsonDocument.Parse("{}") }); await db.SaveChangesAsync();
         var result = await new GetDashboardQueryHandler(db).HandleAsync(new());
-        Assert.Equal(1, result.Projects); Assert.Equal(1, result.Experiences); Assert.Equal(1, result.Skills); Assert.Equal(1, result.Certificates); Assert.Equal(1, result.UnreadContactMessages); Assert.Equal(1, result.Knowledge.Indexed); Assert.Equal(1, result.Knowledge.Pending); Assert.Equal(1, result.Knowledge.Failed); Assert.Equal(1, result.Conversations); Assert.Equal(4, result.RecentUpdates.Count);
+        Assert.Equal(1, result.Projects); Assert.Equal(1, result.Experiences); Assert.Equal(1, result.Skills); Assert.Equal(1, result.Certificates); Assert.Equal(1, result.Knowledge.Indexed); Assert.Equal(1, result.Knowledge.Pending); Assert.Equal(1, result.Knowledge.Failed); Assert.Equal(1, result.Conversations); Assert.Equal(4, result.RecentUpdates.Count);
     }
 
     private static JourneyItem Journey(Guid id, string title, int order, bool published) => new() { Id = id, Title = title, DisplayOrder = order, IsPublished = published };
     private static SocialLink Social(Guid id, string platform, int order, bool visible) => new() { Id = id, Platform = platform, Url = "https://example.com", DisplayOrder = order, IsVisible = visible };
     private static Project Project() => new() { Id = Guid.NewGuid(), Slug = "project", Title = "Project", Status = "ACTIVE" };
-    private static ContactMessage Contact(string status) => new() { Id = Guid.NewGuid(), Name = "Name", Email = "a@b.com", Message = "Message", Status = status, ReceivedAt = Now };
     private static KnowledgeDocument Knowledge(string status) => new() { Id = Guid.NewGuid(), SourceType = "PROFILE", SourceKey = Guid.NewGuid().ToString(), Title = "Title", Content = "Content", ContentHash = "hash", Version = 1, Metadata = JsonDocument.Parse("{}"), IndexingStatus = status };
 }

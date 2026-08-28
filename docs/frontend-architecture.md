@@ -73,7 +73,6 @@ Admin:
 ├── Social Links
 ├── Site Settings
 ├── Media Library
-├── Contact Messages
 ├── Knowledge
 ├── Agent Settings
 └── Conversations
@@ -551,29 +550,9 @@ Do not introduce unsupported "Mastered" wording from mock UI.
 
 # 16. Public Contact
 
-```text
-features/public/contact/
-├── pages/
-│   └── contact-page.component.ts
-├── components/
-│   └── contact-form.component.ts
-├── models/
-│   └── contact-request.model.ts
-└── services/
-    └── public-contact.service.ts
-```
+The `/contact` page renders the API-provided profile email and published social links.
 
-API:
-
-```text
-POST /api/v1/public/contact
-```
-
-Use Reactive Forms.
-
-Validation must mirror API constraints.
-
-Do not trust frontend validation as the only protection.
+It contains no form, submission service, or persistence behavior.
 
 ---
 
@@ -964,33 +943,6 @@ Do not place R2 credentials in frontend config.
 
 ---
 
-# 30. Contact Messages
-
-```text
-features/admin/contact-messages/
-├── pages/
-│   ├── contact-message-list-page.component.ts
-│   └── contact-message-detail-page.component.ts
-├── components/
-│   └── message-status-badge.component.ts
-├── models/
-└── services/
-    └── contact-messages.service.ts
-```
-
-Statuses:
-
-```text
-NEW
-READ
-REPLIED
-ARCHIVED
-```
-
-No CRM logic.
-
----
-
 # 31. Agent Settings
 
 ```text
@@ -1183,8 +1135,6 @@ Admin:
 /admin/social-links
 /admin/site-settings
 /admin/media
-/admin/contact-messages
-/admin/contact-messages/:id
 
 /admin/agent
 /admin/agent/knowledge
@@ -1803,8 +1753,8 @@ PUBLIC
 → GET /public/projects/{slug}
 
 /contact
-→ Contact Form
-→ POST /public/contact
+→ Contact Information
+→ profile email and published social links from GET /public/portfolio
 
 Chat Widget
 → POST /public/chat/sessions
@@ -1850,9 +1800,6 @@ ADMIN
 
 /admin/media
 → Media Library
-
-/admin/contact-messages
-→ Inbox
 
 /admin/agent
 → Agent Settings

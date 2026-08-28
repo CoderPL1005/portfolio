@@ -33,8 +33,6 @@ export const routes: Routes = [
       { path: 'social-links', canDeactivate: [unsavedChangesGuard], loadComponent: () => import('./features/admin/social-links/social-links-page.component').then(m => m.SocialLinksPageComponent) },
       { path: 'site-settings', canDeactivate: [unsavedChangesGuard], loadComponent: () => import('./features/admin/site-settings/site-settings-page.component').then(m => m.SiteSettingsPageComponent) },
       { path: 'media', loadComponent: () => import('./features/admin/media/media-library-page.component').then(m => m.MediaLibraryPageComponent) },
-      { path: 'contact-messages', loadComponent: () => import('./features/admin/contact-messages/contact-message-list-page.component').then(m => m.ContactMessageListPageComponent) },
-      { path: 'contact-messages/:id', loadComponent: () => import('./features/admin/contact-messages/contact-message-detail-page.component').then(m => m.ContactMessageDetailPageComponent) },
       { path: 'agent', canDeactivate:[unsavedChangesGuard], loadComponent:()=>import('./features/admin/agent/agent-settings-page.component').then(m=>m.AgentSettingsPageComponent) },
       { path: 'agent/knowledge', loadComponent:()=>import('./features/admin/agent/knowledge-page.component').then(m=>m.KnowledgePageComponent) },
       { path: 'agent/knowledge/:id', loadComponent:()=>import('./features/admin/agent/knowledge-detail-page.component').then(m=>m.KnowledgeDetailPageComponent) },

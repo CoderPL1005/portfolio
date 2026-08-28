@@ -415,7 +415,6 @@ OpenAI-backed Personal Agent
 - Protected admin account.
 - Admin CRUD for portfolio content.
 - Media/CV management.
-- Contact messages.
 - Agent settings.
 - Knowledge-source management.
 - Conversation history/monitoring.

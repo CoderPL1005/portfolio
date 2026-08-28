@@ -746,7 +746,6 @@
     "siteName": "Nguyễn Đình Phúc",
     "footerText": "Built as a full-stack personal portfolio.",
     "showAvailability": true,
-    "enableContactForm": true,
     "showDownloadCv": true,
     "showJourney": true,
     "showAiAgent": true,

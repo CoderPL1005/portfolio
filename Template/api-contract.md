@@ -182,15 +182,6 @@ LEARNING
 EXPLORING
 ```
 
-## ContactMessageStatus
-
-```text
-NEW
-READ
-REPLIED
-ARCHIVED
-```
-
 ## KnowledgeSourceType
 
 ```text
@@ -634,67 +625,6 @@ UI:
 
 ---
 
-## 8.4 Submit Contact Message
-
-```http
-POST /api/v1/public/contact
-```
-
-Authentication:
-
-```text
-Public
-```
-
-Request:
-
-```json
-{
-  "name": "Recruiter Name",
-  "email": "recruiter@example.com",
-  "subject": "Backend Developer Opportunity",
-  "message": "..."
-}
-```
-
-Response:
-
-```http
-201 Created
-```
-
-```json
-{
-  "success": true,
-  "data": {
-    "id": "uuid",
-    "status": "NEW"
-  }
-}
-```
-
-Validation:
-
-- name required, max 255
-- email required, valid email
-- subject optional, max 255
-- message required
-- message max length must be enforced
-
-Security:
-
-- rate limit
-- anti-spam control
-- never execute or render message as trusted HTML
-
-DB:
-
-```text
-contact_messages
-```
-
----
-
 # 9. Admin Dashboard API
 
 ## 9.1 Dashboard Summary
@@ -719,7 +649,6 @@ Response:
     "experiences": 1,
     "skills": 24,
     "certificates": 0,
-    "unreadContactMessages": 2,
     "knowledge": {
       "indexed": 8,
       "pending": 1,
@@ -1686,7 +1615,6 @@ Response:
     "siteName": "Nguyễn Đình Phúc",
     "footerText": "...",
     "showAvailability": true,
-    "enableContactForm": true,
     "showDownloadCv": true,
     "showJourney": true,
     "showAiAgent": true,
@@ -1813,68 +1741,6 @@ Possible error:
 ```text
 409 MEDIA_IN_USE
 ```
-
----
-
-# 25. Contact Messages Admin API
-
-## 25.1 List Messages
-
-```http
-GET /api/v1/admin/contact-messages
-```
-
-Query:
-
-```text
-?page=1&pageSize=20&status=NEW
-```
-
----
-
-## 25.2 Get Message
-
-```http
-GET /api/v1/admin/contact-messages/{id}
-```
-
----
-
-## 25.3 Update Message Status
-
-```http
-PATCH /api/v1/admin/contact-messages/{id}/status
-```
-
-Request:
-
-```json
-{
-  "status": "READ"
-}
-```
-
-Allowed:
-
-```text
-NEW
-READ
-REPLIED
-ARCHIVED
-```
-
-Backend behavior:
-
-- setting READ may set `readAt`
-- setting REPLIED may set `repliedAt`
-
----
-
-## 25.4 Delete Contact Message
-
-Not required for V1.
-
-Use `ARCHIVED` instead.
 
 ---
 
@@ -2494,7 +2360,6 @@ GET /public/projects/{slug}
 Do not cache:
 
 ```text
-POST /public/contact
 POST /public/chat/*
 admin endpoints
 ```
@@ -2679,7 +2544,6 @@ INTERNAL_ERROR
   GET    /portfolio
   GET    /projects
   GET    /projects/{slug}
-  POST   /contact
 
   POST   /chat/sessions
   POST   /chat/sessions/{sessionId}/messages
@@ -2771,9 +2635,6 @@ INTERNAL_ERROR
   PUT    /media/{id}
   DELETE /media/{id}
 
-  GET    /contact-messages
-  GET    /contact-messages/{id}
-  PATCH  /contact-messages/{id}/status
 
 /admin/agent
   GET    /settings
@@ -2813,9 +2674,7 @@ GET /public/projects/{slug}
 
 ## Contact
 
-```text
-POST /public/contact
-```
+The frontend uses profile email and published social links from `GET /public/portfolio`.
 
 ## Portfolio Agent
 
@@ -2896,12 +2755,6 @@ PUT /admin/profile
 
 ```text
 /admin/media/*
-```
-
-## Admin Inbox
-
-```text
-/admin/contact-messages/*
 ```
 
 ## Admin Agent Settings

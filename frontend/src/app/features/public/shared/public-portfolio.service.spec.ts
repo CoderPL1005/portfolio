@@ -11,5 +11,5 @@ describe('PublicPortfolioService', () => {
   it('requests the aggregate', () => { api.get.mockReturnValue(of({ success: true, data: portfolio })); service.getPortfolio().subscribe(value => expect(value).toBe(portfolio)); expect(api.get).toHaveBeenCalledWith('public/portfolio'); });
   it('requests projects and supported featured filtering', () => { api.get.mockReturnValue(of({ success: true, data: [project] })); service.getProjects(true).subscribe(); expect(api.get.mock.calls[0][0]).toBe('public/projects'); expect(api.get.mock.calls[0][1].params.get('featured')).toBe('true'); });
   it('encodes a project slug', () => { api.get.mockReturnValue(of({ success: true, data: projectDetail })); service.getProject('a/b').subscribe(); expect(api.get).toHaveBeenCalledWith('public/projects/a%2Fb'); });
-  it('submits the contact contract', () => { const request = { name: 'A', email: 'a@example.com', subject: null, message: 'Hi' }; api.post.mockReturnValue(of({ success: true, data: { id: '1', status: 'NEW' } })); service.submitContact(request).subscribe(); expect(api.post).toHaveBeenCalledWith('public/contact', request); });
+  it('does not expose a contact submission operation', () => { expect('submitContact' in service).toBe(false); expect(api.post).not.toHaveBeenCalled(); });
 });

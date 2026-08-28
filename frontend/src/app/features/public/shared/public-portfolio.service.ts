@@ -3,10 +3,7 @@ import { inject, Injectable } from '@angular/core';
 import { map, Observable } from 'rxjs';
 import { ApiClientService } from '../../../core/api/api-client.service';
 import { ApiResponse } from '../../../core/api/api-response.model';
-import {
-  ContactRequest, ContactSubmission, PortfolioAggregate, PublicProjectDetail,
-  PublicProjectListItem,
-} from './public.models';
+import { PortfolioAggregate, PublicProjectDetail, PublicProjectListItem } from './public.models';
 
 @Injectable({ providedIn: 'root' })
 export class PublicPortfolioService {
@@ -25,9 +22,6 @@ export class PublicPortfolioService {
     return this.api.get<ApiResponse<PublicProjectDetail>>(`public/projects/${encodeURIComponent(slug)}`).pipe(map(requireData));
   }
 
-  submitContact(request: ContactRequest): Observable<ContactSubmission> {
-    return this.api.post<ApiResponse<ContactSubmission>>('public/contact', request).pipe(map(requireData));
-  }
 }
 
 function requireData<T>(response: ApiResponse<T>): T {

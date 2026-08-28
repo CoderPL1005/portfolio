@@ -44,7 +44,6 @@ export class AdminSidebarComponent {
       { label: 'Social Links', path: '/admin/social-links' }, { label: 'Site Settings', path: '/admin/site-settings' },
       { label: 'Media Library', path: '/admin/media' },
     ] },
-    { label: 'Inbox', links: [{ label: 'Contact Messages', path: '/admin/contact-messages' }] },
     { label: 'AI Agent', links: [
       { label: 'Knowledge', path: '/admin/agent/knowledge' }, { label: 'Agent Settings', path: '/admin/agent' },
       { label: 'Conversations', path: '/admin/agent/conversations' },

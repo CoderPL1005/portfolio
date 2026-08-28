@@ -69,7 +69,7 @@ public sealed class Phase5ApiHardeningTests(AuthApiFactory factory) : IClassFixt
         var adminEndpoints = apiEndpoints.Where(x => x.Route.StartsWith("api/v1/admin/", StringComparison.OrdinalIgnoreCase)).ToList();
 
         Assert.Empty(duplicates);
-        Assert.Equal(81, adminEndpoints.Count);
+        Assert.Equal(78, adminEndpoints.Count);
         Assert.All(adminEndpoints, endpoint =>
             Assert.NotNull(endpoint.Endpoint.Metadata.GetMetadata<IAuthorizeData>()));
     }
@@ -87,7 +87,6 @@ public sealed class Phase5ApiHardeningTests(AuthApiFactory factory) : IClassFixt
         AssertProperties<PublicSkillResult>("Id", "Name", "Category", "ExperienceLevel", "Description", "TechnologyId");
         AssertProperties<PublicJourneyResult>("Id", "Title", "Subtitle", "Description", "OccurredAt", "IconKey");
         AssertProperties<PublicSocialLinkResult>("Id", "Platform", "Label", "Url", "IconKey");
-        AssertProperties<ContactSubmissionResult>("Id", "Status");
     }
 
     [Fact]

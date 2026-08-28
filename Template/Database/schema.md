@@ -914,49 +914,6 @@ EXECUTE FUNCTION set_updated_at();
 
 
 -- ============================================================
--- 19. CONTACT MESSAGES
--- ============================================================
-
-CREATE TABLE contact_messages (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-
-    name VARCHAR(255) NOT NULL,
-
-    email VARCHAR(255) NOT NULL,
-
-    subject VARCHAR(255),
-
-    message TEXT NOT NULL,
-
-    status VARCHAR(30) NOT NULL DEFAULT 'NEW',
-
-    received_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-
-    read_at TIMESTAMPTZ,
-
-    replied_at TIMESTAMPTZ,
-
-    CONSTRAINT ck_contact_messages_status
-        CHECK (
-            status IN (
-                'NEW',
-                'READ',
-                'REPLIED',
-                'ARCHIVED'
-            )
-        )
-);
-
-
-CREATE INDEX ix_contact_messages_status_received
-    ON contact_messages(
-        status,
-        received_at DESC
-    );
-
-
-
--- ============================================================
 -- 20. AGENT SETTINGS
 --
 -- V1 supports one active Personal Portfolio Agent.
@@ -1438,9 +1395,6 @@ social_links
 
 site_settings
 
-contact_messages
-
-
 agent_settings
 
 
@@ -1555,9 +1509,6 @@ Website
 ├── Site Settings
 ├── CV
 └── Media Library
-
-Inbox
-└── Contact Messages
 
 AI Agent
 ├── Agent Settings

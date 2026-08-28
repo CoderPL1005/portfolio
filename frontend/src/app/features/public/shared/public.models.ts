@@ -157,6 +157,3 @@ export interface PortfolioAggregate {
   journey: PublicJourneyItem[];
   socialLinks: PublicSocialLink[];
 }
-
-export interface ContactRequest { name: string; email: string; subject: string | null; message: string; }
-export interface ContactSubmission { id: string; status: string; }

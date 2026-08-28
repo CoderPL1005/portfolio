@@ -23,7 +23,6 @@ public interface IApplicationDbContext
     DbSet<JourneyItem> JourneyItems { get; }
     DbSet<SocialLink> SocialLinks { get; }
     DbSet<SiteSetting> SiteSettings { get; }
-    DbSet<ContactMessage> ContactMessages { get; }
     DbSet<AgentSetting> AgentSettings { get; }
     DbSet<KnowledgeDocument> KnowledgeDocuments { get; }
     DbSet<KnowledgeChunk> KnowledgeChunks { get; }

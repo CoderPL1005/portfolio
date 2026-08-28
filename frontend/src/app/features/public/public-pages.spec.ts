@@ -1,6 +1,5 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { ReactiveFormsModule } from '@angular/forms';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { Observable, Subject, of, throwError } from 'rxjs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -48,9 +47,13 @@ describe('ProjectDetailPageComponent', () => {
 
 describe('ContactPageComponent', () => {
   beforeEach(() => TestBed.resetTestingModule());
-  function create(api: { submitContact: ReturnType<typeof vi.fn> }) { TestBed.configureTestingModule({ imports: [ReactiveFormsModule], providers: [{ provide: PublicPortfolioService, useValue: api }] }); return TestBed.createComponent(ContactPageComponent).componentInstance; }
-  it('blocks invalid forms', () => { const api = { submitContact: vi.fn() }; const component = create(api); component.submit(); expect(api.submitContact).not.toHaveBeenCalled(); expect(component.form.controls.name.touched).toBe(true); });
-  it('submits a valid form and exposes success', () => { const api = { submitContact: vi.fn(() => of({ id: '1', status: 'NEW' })) }; const component = create(api); component.form.setValue({ name: 'Name', email: 'a@example.com', subject: '', message: 'Hello' }); component.submit(); expect(api.submitContact).toHaveBeenCalledWith({ name: 'Name', email: 'a@example.com', subject: null, message: 'Hello' }); expect(component.success()).toBe(true); });
-  it('maps backend validation details safely', () => { const api = { submitContact: vi.fn(() => throwError(() => new ApiHttpError(400, { code: 'VALIDATION_ERROR', message: 'invalid', details: { email: ['Email is invalid.'] } }))) }; const component = create(api); component.form.setValue({ name: 'Name', email: 'a@example.com', subject: '', message: 'Hello' }); component.submit(); expect(component.fieldError('email')).toBe('Email is invalid.'); });
-  it('handles 429 and prevents duplicate submissions', () => { const pending = new Subject<{ id: string; status: string }>(); const api = { submitContact: vi.fn(() => pending) }; const component = create(api); component.form.setValue({ name: 'Name', email: 'a@example.com', subject: '', message: 'Hello' }); component.submit(); component.submit(); expect(api.submitContact).toHaveBeenCalledTimes(1); pending.error(new ApiHttpError(429, { code: 'RATE_LIMITED', message: 'internal' })); expect(component.generalError()).toContain('Please wait'); });
+  it('renders API-provided email and published social links without a form', async () => {
+    const data = { ...portfolio, profile: { ...portfolio.profile, email: 'owner@example.com' }, socialLinks: [{ id: 'social-1', platform: 'GitHub', label: 'GitHub profile', url: 'https://github.com/example', iconKey: null }] };
+    await TestBed.configureTestingModule({ imports: [ContactPageComponent], providers: [{ provide: PortfolioStore, useValue: storeWith(data) }] }).compileComponents();
+    const fixture = TestBed.createComponent(ContactPageComponent); fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('a[href="mailto:owner@example.com"]')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('a[href="https://github.com/example"]')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('form')).toBeNull();
+    expect(fixture.nativeElement.querySelector('button[type="submit"]')).toBeNull();
+  });
 });

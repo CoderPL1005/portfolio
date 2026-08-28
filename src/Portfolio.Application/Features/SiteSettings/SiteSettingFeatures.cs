@@ -11,7 +11,7 @@ namespace Portfolio.Application.Features.SiteSettings;
 
 public sealed record GetSiteSettingsQuery : IRequest<SiteSettingsResult>;
 public sealed record UpdateSiteSettingsCommand(string SiteName, string? FooterText,
-    bool ShowAvailability, bool EnableContactForm, bool ShowDownloadCv, bool ShowJourney,
+    bool ShowAvailability, bool ShowDownloadCv, bool ShowJourney,
     bool ShowAiAgent, string? DefaultSeoTitle, string? DefaultSeoDescription)
     : IRequest<SiteSettingsResult>;
 
@@ -22,8 +22,8 @@ public sealed class UpdateSiteSettingsCommandHandler(IApplicationDbContext db, T
     public async Task<SiteSettingsResult> HandleAsync(UpdateSiteSettingsCommand r, CancellationToken ct = default)
     {
         var existing = (await db.SiteSettings.ToListAsync(ct)).ToDictionary(x => x.Key, StringComparer.Ordinal); var now = clock.GetUtcNow();
-        Set("siteName", r.SiteName.Trim()); Set("footerText", r.FooterText?.Trim()); Set("showAvailability", r.ShowAvailability); Set("enableContactForm", r.EnableContactForm); Set("showDownloadCv", r.ShowDownloadCv); Set("showJourney", r.ShowJourney); Set("showAiAgent", r.ShowAiAgent); Set("defaultSeoTitle", r.DefaultSeoTitle?.Trim()); Set("defaultSeoDescription", r.DefaultSeoDescription?.Trim());
-        await db.SaveChangesAsync(ct); return new(r.SiteName.Trim(), r.FooterText?.Trim(), r.ShowAvailability, r.EnableContactForm, r.ShowDownloadCv, r.ShowJourney, r.ShowAiAgent, r.DefaultSeoTitle?.Trim(), r.DefaultSeoDescription?.Trim());
+        Set("siteName", r.SiteName.Trim()); Set("footerText", r.FooterText?.Trim()); Set("showAvailability", r.ShowAvailability); Set("showDownloadCv", r.ShowDownloadCv); Set("showJourney", r.ShowJourney); Set("showAiAgent", r.ShowAiAgent); Set("defaultSeoTitle", r.DefaultSeoTitle?.Trim()); Set("defaultSeoDescription", r.DefaultSeoDescription?.Trim());
+        await db.SaveChangesAsync(ct); return new(r.SiteName.Trim(), r.FooterText?.Trim(), r.ShowAvailability, r.ShowDownloadCv, r.ShowJourney, r.ShowAiAgent, r.DefaultSeoTitle?.Trim(), r.DefaultSeoDescription?.Trim());
         void Set<T>(string key, T value) { if (!existing.TryGetValue(key, out var row)) { row = new SiteSetting { Key = key }; db.SiteSettings.Add(row); existing[key] = row; } row.Value = JsonSerializer.SerializeToDocument(value); row.UpdatedAt = now; }
     }
 }
@@ -35,5 +35,5 @@ public sealed class UpdateSiteSettingsCommandValidator : IRequestValidator<Updat
 internal static class SiteSettingsMapping
 {
     public static SiteSettingsResult Map(IReadOnlyCollection<SiteSetting> rows)
-    { var map = rows.ToDictionary(x => x.Key, x => x.Value.RootElement, StringComparer.Ordinal); return new(GetString("siteName") ?? string.Empty, GetString("footerText"), GetBool("showAvailability"), GetBool("enableContactForm"), GetBool("showDownloadCv"), GetBool("showJourney"), GetBool("showAiAgent"), GetString("defaultSeoTitle"), GetString("defaultSeoDescription")); string? GetString(string key) => map.TryGetValue(key, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null; bool GetBool(string key) => map.TryGetValue(key, out var value) && value.ValueKind is JsonValueKind.True or JsonValueKind.False && value.GetBoolean(); }
+    { var map = rows.ToDictionary(x => x.Key, x => x.Value.RootElement, StringComparer.Ordinal); return new(GetString("siteName") ?? string.Empty, GetString("footerText"), GetBool("showAvailability"), GetBool("showDownloadCv"), GetBool("showJourney"), GetBool("showAiAgent"), GetString("defaultSeoTitle"), GetString("defaultSeoDescription")); string? GetString(string key) => map.TryGetValue(key, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null; bool GetBool(string key) => map.TryGetValue(key, out var value) && value.ValueKind is JsonValueKind.True or JsonValueKind.False && value.GetBoolean(); }
 }

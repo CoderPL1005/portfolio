@@ -23,7 +23,6 @@ internal sealed class ContentTestDbContext(DbContextOptions<ContentTestDbContext
     public DbSet<JourneyItem> JourneyItems => Set<JourneyItem>();
     public DbSet<SocialLink> SocialLinks => Set<SocialLink>();
     public DbSet<SiteSetting> SiteSettings => Set<SiteSetting>();
-    public DbSet<ContactMessage> ContactMessages => Set<ContactMessage>();
     public DbSet<KnowledgeDocument> KnowledgeDocuments => Set<KnowledgeDocument>();
     public DbSet<AgentSetting> AgentSettings => Set<AgentSetting>();
     public DbSet<KnowledgeChunk> KnowledgeChunks => Set<KnowledgeChunk>();
@@ -75,7 +74,6 @@ internal sealed class ContentTestDbContext(DbContextOptions<ContentTestDbContext
         modelBuilder.Entity<SiteSetting>().Property(item => item.Value).HasConversion(
             value => value.RootElement.GetRawText(), value => System.Text.Json.JsonDocument.Parse(
                 value, default(System.Text.Json.JsonDocumentOptions)));
-        modelBuilder.Entity<ContactMessage>().HasKey(item => item.Id);
         modelBuilder.Entity<KnowledgeDocument>().HasKey(item => item.Id);
         modelBuilder.Entity<AgentSetting>().HasKey(item => item.Id);
         modelBuilder.Entity<KnowledgeChunk>().HasKey(item => item.Id);

@@ -69,9 +69,7 @@ public sealed class Phase4AuthorizationTests(AuthApiFactory factory) : IClassFix
         AssertProperties<UpdateProjectMediaRequest>("MediaRole", "Caption", "DisplayOrder");
         AssertProperties<JourneyRequest>("Title", "Subtitle", "Description", "OccurredAt", "IconKey", "DisplayOrder", "IsPublished");
         AssertProperties<SocialLinkRequest>("Platform", "Label", "Url", "IconKey", "DisplayOrder", "IsVisible");
-        AssertProperties<SiteSettingsRequest>("SiteName", "FooterText", "ShowAvailability", "EnableContactForm", "ShowDownloadCv", "ShowJourney", "ShowAiAgent", "DefaultSeoTitle", "DefaultSeoDescription");
-        AssertProperties<ContactRequest>("Name", "Email", "Subject", "Message");
-        AssertProperties<ContactStatusRequest>("Status");
+        AssertProperties<SiteSettingsRequest>("SiteName", "FooterText", "ShowAvailability", "ShowDownloadCv", "ShowJourney", "ShowAiAgent", "DefaultSeoTitle", "DefaultSeoDescription");
     }
 
     [Fact]
@@ -83,33 +81,22 @@ public sealed class Phase4AuthorizationTests(AuthApiFactory factory) : IClassFix
         Assert.Equal("project", listBody.RootElement.GetProperty("data")[0].GetProperty("slug").GetString()); Assert.Equal("project", detailBody.RootElement.GetProperty("data").GetProperty("slug").GetString());
     }
 
-    [Fact]
-    public async Task Public_contact_is_anonymous_and_rate_limited_after_three_requests_per_minute()
+    [Theory]
+    [InlineData("POST", "/api/v1/public/contact")]
+    [InlineData("GET", "/api/v1/admin/contact-messages")]
+    public async Task Removed_contact_routes_are_not_mapped(string method, string route)
     {
-        var client = factory.CreateClient(); var responses = new List<HttpResponseMessage>();
-        for (var index = 0; index < 4; index++)
-        {
-            responses.Add(await client.PostAsJsonAsync("/api/v1/public/contact", new { name = "Sender", email = "sender@example.com", subject = "Hello", message = "Message" }));
-        }
-        Assert.Equal([HttpStatusCode.Created, HttpStatusCode.Created, HttpStatusCode.Created, HttpStatusCode.TooManyRequests], responses.Select(x => x.StatusCode));
-        Assert.Equal("application/json", responses[^1].Content.Headers.ContentType?.MediaType);
-        using var body = JsonDocument.Parse(await responses[^1].Content.ReadAsStringAsync());
-        Assert.False(body.RootElement.GetProperty("success").GetBoolean());
-        Assert.Equal("TOO_MANY_REQUESTS", body.RootElement.GetProperty("error").GetProperty("code").GetString());
-    }
-
-    [Fact]
-    public async Task Contact_delete_route_is_not_exposed()
-    {
-        var response = await factory.CreateClient().DeleteAsync("/api/v1/admin/contact-messages/11111111-1111-1111-1111-111111111111");
-        Assert.Equal(HttpStatusCode.MethodNotAllowed, response.StatusCode);
+        using var request = new HttpRequestMessage(new HttpMethod(method), route);
+        if (method == "POST") request.Content = JsonContent.Create(new { });
+        var response = await factory.CreateClient().SendAsync(request);
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
     [Fact]
     public async Task Authenticated_site_settings_get_and_update_use_typed_contract()
     {
         var client = AuthenticatedClient(); var get = await client.GetAsync("/api/v1/admin/site-settings");
-        var update = await client.PutAsJsonAsync("/api/v1/admin/site-settings", new { siteName = "Updated", footerText = "Footer", showAvailability = true, enableContactForm = true, showDownloadCv = true, showJourney = true, showAiAgent = false, defaultSeoTitle = "SEO", defaultSeoDescription = "Description" });
+        var update = await client.PutAsJsonAsync("/api/v1/admin/site-settings", new { siteName = "Updated", footerText = "Footer", showAvailability = true, showDownloadCv = true, showJourney = true, showAiAgent = false, defaultSeoTitle = "SEO", defaultSeoDescription = "Description" });
         Assert.Equal(HttpStatusCode.OK, get.StatusCode); Assert.Equal(HttpStatusCode.OK, update.StatusCode); using var body = JsonDocument.Parse(await update.Content.ReadAsStringAsync()); Assert.Equal("Updated", body.RootElement.GetProperty("data").GetProperty("siteName").GetString());
     }
 
@@ -186,9 +173,6 @@ public sealed class Phase4AuthorizationTests(AuthApiFactory factory) : IClassFix
         ,{ "PUT", "/api/v1/admin/social-links/reorder" }
         ,{ "GET", "/api/v1/admin/site-settings" }
         ,{ "PUT", "/api/v1/admin/site-settings" }
-        ,{ "GET", "/api/v1/admin/contact-messages" }
-        ,{ "GET", "/api/v1/admin/contact-messages/11111111-1111-1111-1111-111111111111" }
-        ,{ "PATCH", "/api/v1/admin/contact-messages/11111111-1111-1111-1111-111111111111/status" }
         ,{ "GET", "/api/v1/admin/dashboard" }
     };
 

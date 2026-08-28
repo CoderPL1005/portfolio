@@ -261,18 +261,6 @@ package "Portfolio / CMS" {
     updated_at : timestamptz
   }
 
-  entity contact_messages {
-    * id : uuid <<PK>>
-    --
-    name : varchar(255)
-    email : varchar(255)
-    subject : varchar(255)
-    message : text
-    status : varchar(30)
-    received_at : timestamptz
-    read_at : timestamptz
-    replied_at : timestamptz
-  }
 }
 
 package "Personal Agent / RAG" {

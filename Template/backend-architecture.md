@@ -145,7 +145,6 @@ Portfolio.Domain/
 │   ├── SocialLink.cs
 │   ├── SiteSetting.cs
 │   ├── MediaAsset.cs
-│   ├── ContactMessage.cs
 │   ├── AgentSetting.cs
 │   ├── KnowledgeDocument.cs
 │   ├── KnowledgeChunk.cs
@@ -157,7 +156,6 @@ Portfolio.Domain/
 └── Enums/
     ├── ProjectStatus.cs
     ├── SkillExperienceLevel.cs
-    ├── ContactMessageStatus.cs
     ├── KnowledgeSourceType.cs
     ├── KnowledgeIndexingStatus.cs
     ├── ChatSessionStatus.cs
@@ -286,7 +284,6 @@ Features/
 ├── SocialLinks/
 ├── SiteSettings/
 ├── Media/
-├── ContactMessages/
 ├── Knowledge/
 └── Chat/
 ```
@@ -443,7 +440,6 @@ Portfolio.Infrastructure/
 │   │   ├── SocialLinkConfiguration.cs
 │   │   ├── SiteSettingConfiguration.cs
 │   │   ├── MediaAssetConfiguration.cs
-│   │   ├── ContactMessageConfiguration.cs
 │   │   ├── AgentSettingConfiguration.cs
 │   │   ├── KnowledgeDocumentConfiguration.cs
 │   │   ├── KnowledgeChunkConfiguration.cs
@@ -850,7 +846,6 @@ Portfolio.Api/
 │       ├── SocialLinksController.cs
 │       ├── SiteSettingsController.cs
 │       ├── MediaController.cs
-│       ├── ContactMessagesController.cs
 │       ├── AgentSettingsController.cs
 │       ├── KnowledgeController.cs
 │       └── ConversationsController.cs

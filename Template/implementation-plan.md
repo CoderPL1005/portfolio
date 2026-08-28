@@ -425,7 +425,6 @@ Certificates
 Journey
 Social Links
 Site Settings
-Contact Messages
 Dashboard
 ```
 
@@ -586,27 +585,6 @@ Do not expose arbitrary raw JSON editing for normal settings.
 
 ---
 
-## 9.11 Contact Messages
-
-Implement:
-
-```text
-GET   /admin/contact-messages
-GET   /admin/contact-messages/{id}
-PATCH /admin/contact-messages/{id}/status
-```
-
-Statuses:
-
-```text
-NEW
-READ
-REPLIED
-ARCHIVED
-```
-
----
-
 ## 9.12 Dashboard
 
 Implement:
@@ -641,7 +619,6 @@ Implement:
 GET  /public/portfolio
 GET  /public/projects
 GET  /public/projects/{slug}
-POST /public/contact
 ```
 
 Rules:
@@ -650,8 +627,6 @@ Rules:
 - public project by slug returns 404 if unpublished
 - sort by displayOrder
 - Home uses aggregate endpoint
-- contact endpoint rate-limited
-- contact content treated as untrusted text
 
 ## Exit criteria
 
@@ -794,11 +769,9 @@ Use `project_sections`.
 
 ## 12.4 Contact
 
-Implement Reactive Form against:
+Render the profile email and published social links as outbound contact options.
 
-```text
-POST /public/contact
-```
+Do not submit or persist contact messages.
 
 ## Exit criteria
 
@@ -831,7 +804,6 @@ Certificates
 Journey
 Social Links
 Site Settings
-Contact Messages
 ```
 
 Use Reactive Forms.
