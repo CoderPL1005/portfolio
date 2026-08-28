@@ -25,9 +25,9 @@ import { PublicProjectListItem } from './public.models';
   `,
   styles: `
     :host { display: block; height: 100%; }
-    .project-card { height: 100%; overflow: hidden; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); }
-    .project-media { display: block; height: 13rem; text-decoration: none; }
-    .project-body { padding: 1.25rem; }
+    .project-card { height: 100%; overflow: hidden; border: 1px solid var(--color-border); border-radius: var(--radius-xl); background: var(--color-surface); transition:transform .25s,border-color .25s,box-shadow .25s; }
+    .project-card:hover{transform:translateY(-4px);border-color:var(--color-outline-variant);box-shadow:0 1.5rem 3rem #0004}.project-media { display: block; height: 14rem; border-bottom:1px solid var(--color-border);text-decoration: none; }
+    .project-body { padding: 1.5rem; }
     .project-meta { display: flex; gap: .75rem; color: var(--color-primary); font-size: .72rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
     h3 { margin: .55rem 0; font-size: 1.3rem; } h3 a { color: var(--color-text); text-decoration: none; }
     h3 a:hover { color: var(--color-primary); } p { color: var(--color-text-muted); overflow-wrap: anywhere; }

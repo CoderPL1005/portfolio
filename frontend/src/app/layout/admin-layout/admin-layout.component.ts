@@ -18,7 +18,7 @@ import { AdminTopbarComponent } from './admin-topbar.component';
     </div>
   `,
   styles: `
-    :host { display: block; min-height: 100vh; background: var(--color-background); }
+    :host { display: block; min-height: 100vh; background: var(--color-background); background-image:radial-gradient(circle at 85% 0,color-mix(in srgb,var(--color-primary-strong) 8%,transparent),transparent 32rem); }
     .workspace { min-height: 100vh; padding-left: 17.5rem; }
     main { min-height: calc(100vh - 4rem); }
     .backdrop { display: none; }

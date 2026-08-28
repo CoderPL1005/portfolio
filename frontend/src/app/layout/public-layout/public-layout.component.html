@@ -1,20 +1,24 @@
 <header class="public-header">
   <div class="header-inner">
-    <a class="brand" routerLink="/" aria-label="Portfolio home">Portfolio<span>.</span></a>
+    <a class="brand" routerLink="/" aria-label="Portfolio home"><b>{{ initials() }}</b>@if (profile()?.fullName; as name) { <span>{{ name }}</span> }</a>
     <nav class="desktop-nav" aria-label="Primary navigation">
       @for (link of links; track link.path) {
-        <a [routerLink]="link.path" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: link.path === '/' }">{{ link.label }}</a>
+        <a [routerLink]="link.path" [fragment]="link.fragment" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: link.path === '/' && !link.fragment }">{{ link.label }}</a>
       }
     </nav>
-    <button class="menu-button" type="button" (click)="toggleMenu()" [attr.aria-expanded]="menuOpen()" aria-controls="mobile-navigation">
+    <div class="header-actions">
+      <div class="social-actions">@for (social of socialLinks(); track social.id) { @if (socialUrl(social.url); as url) { <a [href]="url" [attr.target]="external(url) ? '_blank' : null" [attr.rel]="external(url) ? 'noopener noreferrer' : null" [attr.aria-label]="social.label || social.platform">{{ (social.label || social.platform).slice(0, 1) }}</a> } }</div>
+      @if (http(profile()?.cvUrl); as cv) { <a class="cv-button" [href]="cv" target="_blank" rel="noopener noreferrer">CV</a> }
+      <button class="menu-button" type="button" (click)="toggleMenu()" [attr.aria-expanded]="menuOpen()" aria-controls="mobile-navigation">
       <span class="sr-only">Toggle navigation</span>
       <span aria-hidden="true">{{ menuOpen() ? 'Close' : 'Menu' }}</span>
-    </button>
+      </button>
+    </div>
   </div>
   @if (menuOpen()) {
     <nav id="mobile-navigation" class="mobile-nav" aria-label="Mobile navigation">
       @for (link of links; track link.path) {
-        <a [routerLink]="link.path" (click)="closeMenu()">{{ link.label }}</a>
+        <a [routerLink]="link.path" [fragment]="link.fragment" (click)="closeMenu()">{{ link.label }}</a>
       }
     </nav>
   }
@@ -22,6 +26,6 @@
 <main class="public-content"><router-outlet /></main>
 <app-chat-widget />
 <footer class="public-footer">
-  <div><strong>Portfolio.</strong><span>Built with care and clear engineering.</span></div>
+  <div><strong>{{ initials() }}</strong><span>{{ profile()?.professionalTitle || 'Technical portfolio' }}</span></div>
   <a routerLink="/admin/login">Admin</a>
 </footer>
