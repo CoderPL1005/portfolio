@@ -1,3 +1,4 @@
+using Microsoft.OpenApi.Models;
 using Portfolio.Api.Contracts.Common;
 using Portfolio.Api.Authentication;
 using Portfolio.Api.Middleware;
@@ -23,6 +24,35 @@ var allowedOrigins = configuredOrigins
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddApiAuthentication(builder.Configuration);
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen(options =>
+{
+    options.SwaggerDoc("v1", new OpenApiInfo
+    {
+        Title = "Portfolio API",
+        Version = "v1"
+    });
+    options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Name = "Authorization",
+        Description = "Enter the raw JWT access token. The Bearer prefix is added automatically.",
+        In = ParameterLocation.Header,
+        Type = SecuritySchemeType.Http,
+        Scheme = "bearer",
+        BearerFormat = "JWT"
+    });
+    options.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        [new OpenApiSecurityScheme
+        {
+            Reference = new OpenApiReference
+            {
+                Type = ReferenceType.SecurityScheme,
+                Id = "Bearer"
+            }
+        }] = Array.Empty<string>()
+    });
+});
 builder.Services.AddControllers()
     .ConfigureApiBehaviorOptions(options =>
     {
@@ -52,6 +82,13 @@ builder.Services.AddCors(options => options.AddPolicy(FrontendCorsPolicy, policy
         .AllowCredentials()));
 
 var app = builder.Build();
+
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI(options =>
+        options.SwaggerEndpoint("/swagger/v1/swagger.json", "Portfolio API v1"));
+}
 
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 app.UseRateLimiter();
