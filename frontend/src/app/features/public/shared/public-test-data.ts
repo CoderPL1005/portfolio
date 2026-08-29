@@ -1,4 +1,9 @@
-import { PortfolioAggregate, PublicProjectDetail, PublicProjectListItem } from './public.models';
+import { PortfolioAggregate, PublicProjectDetail, PublicProjectListItem, PublicSocialLink } from './public.models';
+
+export const duplicatePlatformSocialLinks: PublicSocialLink[] = [
+  { id: 'github-coderpl1005', platform: 'GitHub', label: 'CoderPL1005', url: 'https://github.com/CoderPL1005', iconKey: 'github' },
+  { id: 'github-phucnd3009', platform: 'GitHub', label: 'PhucND3009', url: 'https://github.com/PhucND3009', iconKey: 'github' },
+];
 
 export const project: PublicProjectListItem = { id: 'p1', slug: 'real-project', title: 'API project', subtitle: null, shortDescription: 'Published summary', role: 'Developer', status: 'COMPLETED', featured: true, thumbnailUrl: null, technologies: [{ id: 't1', name: 'Angular', category: 'Frontend' }] };
 export const portfolio: PortfolioAggregate = {

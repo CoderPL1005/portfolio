@@ -68,6 +68,36 @@ public sealed class Phase4BTests
     }
 
     [Fact]
+    public async Task Project_slug_update_persists_and_duplicate_checks_remain_case_insensitive()
+    {
+        await using var db = PublicPortfolioTests.CreateContext();
+        var technology = Technology("Slug Tech", true);
+        var project = Project("old-slug", true, true, 0);
+        var other = Project("existing-slug", true, false, 1);
+        db.AddRange(technology, project, other);
+        db.ProjectTechnologies.Add(new ProjectTechnology
+        {
+            ProjectId = project.Id,
+            TechnologyId = technology.Id,
+            DisplayOrder = 0,
+        });
+        await db.SaveChangesAsync();
+        var handler = new UpdateProjectCommandHandler(db, new FixedTimeProvider(Now.AddDays(1)));
+
+        var updated = await handler.HandleAsync(ProjectUpdate(project.Id, "new-slug", 0, true, [technology.Id]));
+
+        Assert.Equal("new-slug", updated.Slug);
+        Assert.Equal("new-slug", (await db.Projects.SingleAsync(item => item.Id == project.Id)).Slug);
+        Assert.Equal(technology.Id, (await db.ProjectTechnologies.SingleAsync(item => item.ProjectId == project.Id)).TechnologyId);
+        var duplicate = await Assert.ThrowsAsync<ConflictException>(() =>
+            handler.HandleAsync(ProjectUpdate(project.Id, "existing-slug", 0, true, [technology.Id])));
+        var caseInsensitiveDuplicate = await Assert.ThrowsAsync<ConflictException>(() =>
+            handler.HandleAsync(ProjectUpdate(project.Id, "EXISTING-SLUG", 0, true, [technology.Id])));
+        Assert.Equal("PROJECT_SLUG_EXISTS", duplicate.Code);
+        Assert.Equal("PROJECT_SLUG_EXISTS", caseInsensitiveDuplicate.Code);
+    }
+
+    [Fact]
     public async Task Failed_project_relationship_validation_does_not_partially_replace_links()
     {
         await using var db = PublicPortfolioTests.CreateContext(); var technology = Technology("Valid", true); db.Technologies.Add(technology); await db.SaveChangesAsync(); var project = await new CreateProjectCommandHandler(db, new FixedTimeProvider(Now)).HandleAsync(ProjectCreate("safe", 0, true, [technology.Id]));

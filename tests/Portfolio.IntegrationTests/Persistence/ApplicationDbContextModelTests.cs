@@ -65,6 +65,17 @@ public sealed class ApplicationDbContextModelTests
         Assert.Equal(2, experienceTechnology.FindPrimaryKey()!.Properties.Count);
         var projectTechnology = model.FindEntityType(typeof(ProjectTechnology))!;
         Assert.Equal(2, projectTechnology.FindPrimaryKey()!.Properties.Count);
+        var project = model.FindEntityType(typeof(Project))!;
+        Assert.Equal(new[] { nameof(Project.Id) }, project.FindPrimaryKey()!.Properties.Select(property => property.Name));
+        Assert.Single(project.GetKeys());
+        Assert.DoesNotContain(project.GetKeys(), key => key.Properties.Any(property => property.Name == nameof(Project.Slug)));
+        var projectDependents = model.GetEntityTypes().SelectMany(entity => entity.GetForeignKeys())
+            .Where(foreignKey => foreignKey.PrincipalEntityType == project).ToArray();
+        Assert.Equal(3, projectDependents.Length);
+        Assert.All(projectDependents, foreignKey =>
+            Assert.Equal(new[] { nameof(Project.Id) }, foreignKey.PrincipalKey.Properties.Select(property => property.Name)));
+        var socialLink = model.FindEntityType(typeof(SocialLink))!;
+        Assert.Equal(new[] { nameof(SocialLink.Id) }, socialLink.FindPrimaryKey()!.Properties.Select(property => property.Name));
 
         var chunkForeignKey = model.FindEntityType(typeof(KnowledgeChunk))!.GetForeignKeys().Single();
         Assert.Equal(DeleteBehavior.Cascade, chunkForeignKey.DeleteBehavior);
@@ -93,9 +104,11 @@ public sealed class ApplicationDbContextModelTests
         using var context = CreateContext();
         var migrations = context.Database.GetMigrations().ToArray();
 
-        Assert.Equal(2, migrations.Length);
+        Assert.Equal(4, migrations.Length);
         Assert.EndsWith("_InitialPortfolioSchema", migrations[0], StringComparison.Ordinal);
         Assert.EndsWith("_RemoveContactMessages", migrations[1], StringComparison.Ordinal);
+        Assert.EndsWith("_AllowDuplicateSocialLinkPlatforms", migrations[2], StringComparison.Ordinal);
+        Assert.EndsWith("_AllowProjectSlugUpdates", migrations[3], StringComparison.Ordinal);
     }
 
     [Fact]
@@ -123,6 +136,58 @@ public sealed class ApplicationDbContextModelTests
 
         Assert.Contains("DROP TABLE contact_messages", script, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(1, CountOccurrences(script.ToUpperInvariant(), "DROP TABLE"));
+    }
+
+    [Fact]
+    public void Duplicate_social_platform_migration_only_drops_and_recreates_the_unique_index()
+    {
+        using var context = CreateContext();
+        var migrations = context.Database.GetMigrations().ToArray();
+        var migrator = context.GetService<IMigrator>();
+        var upScript = migrator.GenerateScript(migrations[1], migrations[2]);
+        var downScript = migrator.GenerateScript(migrations[2], migrations[1]);
+
+        Assert.Contains("DROP INDEX uq_social_links_platform_ci", upScript, StringComparison.Ordinal);
+        Assert.Equal(1, CountOccurrences(upScript, "DROP INDEX"));
+        Assert.DoesNotContain("DROP TABLE", upScript, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("CREATE TABLE", upScript, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("ALTER TABLE", upScript, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("DELETE FROM social_links", upScript, StringComparison.OrdinalIgnoreCase);
+
+        Assert.Contains("CREATE UNIQUE INDEX uq_social_links_platform_ci", downScript, StringComparison.Ordinal);
+        Assert.Contains("ON social_links (LOWER(platform))", downScript, StringComparison.Ordinal);
+        Assert.Equal(1, CountOccurrences(downScript, "CREATE UNIQUE INDEX"));
+        Assert.DoesNotContain("DROP TABLE", downScript, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("CREATE TABLE", downScript, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("ALTER TABLE", downScript, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Project_slug_migration_only_removes_and_recreates_the_redundant_constraint()
+    {
+        using var context = CreateContext();
+        var migrations = context.Database.GetMigrations().ToArray();
+        var migrator = context.GetService<IMigrator>();
+        var initialScript = migrator.GenerateScript(Migration.InitialDatabase, migrations[0]);
+        var upScript = migrator.GenerateScript(migrations[2], migrations[3]);
+        var downScript = migrator.GenerateScript(migrations[3], migrations[2]);
+
+        Assert.Contains("CREATE UNIQUE INDEX uq_projects_slug_ci", initialScript, StringComparison.Ordinal);
+        Assert.Contains("DROP CONSTRAINT uq_projects_slug", upScript, StringComparison.Ordinal);
+        Assert.Equal(1, CountOccurrences(upScript, "DROP CONSTRAINT"));
+        Assert.DoesNotContain("uq_projects_slug_ci", upScript, StringComparison.Ordinal);
+        Assert.DoesNotContain("DROP TABLE", upScript, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("CREATE TABLE", upScript, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("DROP INDEX", upScript, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("DELETE FROM projects", upScript, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("FOREIGN KEY", upScript, StringComparison.OrdinalIgnoreCase);
+
+        Assert.Contains("ADD CONSTRAINT uq_projects_slug UNIQUE (slug)", downScript, StringComparison.Ordinal);
+        Assert.Equal(1, CountOccurrences(downScript, "ADD CONSTRAINT"));
+        Assert.DoesNotContain("uq_projects_slug_ci", downScript, StringComparison.Ordinal);
+        Assert.DoesNotContain("DROP TABLE", downScript, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("CREATE TABLE", downScript, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("FOREIGN KEY", downScript, StringComparison.OrdinalIgnoreCase);
     }
 
     private static ApplicationDbContext CreateContext()

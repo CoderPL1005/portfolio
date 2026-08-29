@@ -14,7 +14,7 @@ export class PublicLayoutComponent {
   readonly store = inject(PortfolioStore);
   readonly menuOpen = signal(false);
   readonly profile = computed(() => this.store.data()?.profile ?? null);
-  readonly socialLinks = computed(() => this.store.data()?.socialLinks.slice(0, 2) ?? []);
+  readonly socialLinks = computed(() => this.store.data()?.socialLinks ?? []);
   readonly initials = computed(() => (this.profile()?.fullName ?? 'Portfolio').split(/\s+/).filter(Boolean).map(x => x[0]).slice(-3).join('').toUpperCase());
   readonly http = safeHttpUrl;
   readonly socialUrl = safeSocialUrl;
@@ -29,7 +29,7 @@ export class PublicLayoutComponent {
     { label: 'Contact', path: '/contact', fragment: undefined },
   ];
 
-  constructor() { this.store.load(); }
+  constructor() { this.store.load(true); }
 
   toggleMenu(): void {
     this.menuOpen.update((open) => !open);

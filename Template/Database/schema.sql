@@ -397,9 +397,6 @@ CREATE TABLE projects (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
-    CONSTRAINT uq_projects_slug
-        UNIQUE (slug),
-
     CONSTRAINT ck_projects_team_size
         CHECK (
             team_size IS NULL
@@ -860,10 +857,6 @@ CREATE TABLE social_links (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-
-
-CREATE UNIQUE INDEX uq_social_links_platform_ci
-    ON social_links(LOWER(platform));
 
 
 CREATE INDEX ix_social_links_visible_order

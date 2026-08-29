@@ -27,14 +27,40 @@ public sealed class Phase4CTests
     }
 
     [Fact]
-    public async Task Social_link_crud_reorder_url_validation_conflict_and_not_found_work()
+    public async Task Social_link_crud_reorder_url_validation_and_not_found_work()
     {
         await using var db = PublicPortfolioTests.CreateContext(); var create = new CreateSocialLinkCommandHandler(db, new FixedTimeProvider(Now));
         var second = await create.HandleAsync(new("Email", "Email", "mailto:test@example.com", "mail", 2, false)); var first = await create.HandleAsync(new("GitHub", "GitHub", "https://github.com/example", "github", 1, true));
-        var list = await new GetSocialLinksQueryHandler(db).HandleAsync(new()); var conflict = await Assert.ThrowsAsync<ConflictException>(() => create.HandleAsync(new("github", null, "https://example.com", null, 3, true)));
+        var list = await new GetSocialLinksQueryHandler(db).HandleAsync(new());
         var invalid = await new CreateSocialLinkCommandValidator().ValidateAsync(new("", null, "javascript:alert(1)", null, -1, true)); await new ReorderSocialLinksCommandHandler(db).HandleAsync(new([new(second.Id, 0), new(first.Id, 1)]));
-        Assert.Equal(new[] { first.Id, second.Id }, list.Select(x => x.Id)); Assert.Equal("SOCIAL_LINK_PLATFORM_EXISTS", conflict.Code); Assert.Contains(invalid, x => x.PropertyName == "url");
+        Assert.Equal(new[] { first.Id, second.Id }, list.Select(x => x.Id)); Assert.Contains(invalid, x => x.PropertyName == "url");
         await new DeleteSocialLinkCommandHandler(db).HandleAsync(new(second.Id)); await Assert.ThrowsAsync<NotFoundException>(() => new UpdateSocialLinkCommandHandler(db, new FixedTimeProvider(Now)).HandleAsync(new(second.Id, "Email", null, "mailto:a@b.com", null, 0, true)));
+    }
+
+    [Fact]
+    public async Task Social_links_allow_duplicate_platforms_for_create_admin_list_public_portfolio_and_update()
+    {
+        await using var db = PublicPortfolioTests.CreateContext();
+        db.Profiles.Add(new Profile { Id = Guid.NewGuid(), SingletonKey = 1, FullName = "Owner", IsPublished = true });
+        await db.SaveChangesAsync();
+        var create = new CreateSocialLinkCommandHandler(db, new FixedTimeProvider(Now));
+
+        var first = await create.HandleAsync(new("GitHub", "CoderPL1005", "https://github.com/CoderPL1005", "github", 1, true));
+        var second = await create.HandleAsync(new("GitHub", "PhucND3009", "https://github.com/PhucND3009", "github", 2, true));
+
+        Assert.NotEqual(first.Id, second.Id);
+        Assert.Equal(2, await db.SocialLinks.CountAsync(x => x.Platform == "GitHub"));
+        var adminList = await new GetSocialLinksQueryHandler(db).HandleAsync(new());
+        Assert.Equal(new[] { first.Id, second.Id }, adminList.Select(x => x.Id));
+
+        var updated = await new UpdateSocialLinkCommandHandler(db, new FixedTimeProvider(Now))
+            .HandleAsync(new(first.Id, "GitHub", "Primary GitHub", "https://github.com/CoderPL1005", "github", 1, true));
+
+        Assert.Equal("Primary GitHub", updated.Label);
+        Assert.Equal(2, await db.SocialLinks.CountAsync(x => x.Platform == "GitHub"));
+        var publicPortfolio = await new GetPublicPortfolioQueryHandler(db).HandleAsync(new());
+        Assert.Equal(new[] { first.Id, second.Id }, publicPortfolio.SocialLinks.Select(x => x.Id));
+        Assert.Equal(new[] { "https://github.com/CoderPL1005", "https://github.com/PhucND3009" }, publicPortfolio.SocialLinks.Select(x => x.Url));
     }
 
     [Fact]

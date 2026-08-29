@@ -37,7 +37,6 @@ public sealed class ProjectConfiguration : IEntityTypeConfiguration<Project>
         builder.Property(entity => entity.SeoDescription).HasColumnName("seo_description").HasColumnType("character varying(500)").HasMaxLength(500);
         builder.Property(entity => entity.CreatedAt).HasColumnName("created_at").HasColumnType("timestamp with time zone").HasDefaultValueSql("NOW()");
         builder.Property(entity => entity.UpdatedAt).HasColumnName("updated_at").HasColumnType("timestamp with time zone").HasDefaultValueSql("NOW()");
-        builder.HasAlternateKey(entity => entity.Slug).HasName("uq_projects_slug");
         builder.HasOne(entity => entity.ThumbnailMedia).WithMany().HasForeignKey(entity => entity.ThumbnailMediaId).OnDelete(DeleteBehavior.SetNull);
         builder.HasIndex(entity => new { entity.IsPublished, entity.Featured, entity.DisplayOrder }).HasDatabaseName("ix_projects_public");
     }

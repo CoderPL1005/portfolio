@@ -11,7 +11,7 @@ import { JourneyPageComponent } from './journey/journey-page.component';
 import { ProjectDetailPageComponent } from './project-detail/project-detail-page.component';
 import { ProjectsPageComponent } from './projects/projects-page.component';
 import { PortfolioStore } from './shared/portfolio.store';
-import { portfolio, project, projectDetail } from './shared/public-test-data';
+import { duplicatePlatformSocialLinks, portfolio, project, projectDetail } from './shared/public-test-data';
 import { PublicProjectDetail, PublicProjectListItem } from './shared/public.models';
 import { PublicPortfolioService } from './shared/public-portfolio.service';
 import { SkillsPageComponent, groupSkills } from './skills/skills-page.component';
@@ -22,6 +22,17 @@ function storeWith(data = portfolio) {
 describe('public aggregate pages', () => {
   beforeEach(() => TestBed.resetTestingModule());
   it('maps API content onto Home and creates project links', async () => { const store = storeWith(); await TestBed.configureTestingModule({ imports: [HomePageComponent], providers: [provideRouter([]), { provide: PortfolioStore, useValue: store }] }).compileComponents(); const fixture = TestBed.createComponent(HomePageComponent); fixture.detectChanges(); expect(fixture.nativeElement.textContent).toContain('API Person'); expect(fixture.nativeElement.textContent).toContain('API project'); expect(fixture.nativeElement.querySelector('a[href="/projects/real-project"]')).not.toBeNull(); });
+  it('renders every duplicate-platform link in Find me online with stable IDs', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const store = storeWith({ ...portfolio, socialLinks: duplicatePlatformSocialLinks });
+    await TestBed.configureTestingModule({ imports: [HomePageComponent], providers: [provideRouter([]), { provide: PortfolioStore, useValue: store }] }).compileComponents();
+    const fixture = TestBed.createComponent(HomePageComponent); fixture.detectChanges();
+    const links = [...fixture.nativeElement.querySelectorAll('.socials a')] as HTMLAnchorElement[];
+    expect(links.map(link => link.textContent?.trim())).toEqual(['CoderPL1005', 'PhucND3009']);
+    expect(links.map(link => link.href)).toEqual(['https://github.com/CoderPL1005', 'https://github.com/PhucND3009']);
+    expect(warning.mock.calls.flat().join(' ')).not.toContain('NG0955');
+    warning.mockRestore();
+  });
   it('safely omits absent optional Home sections', async () => { const store = storeWith({ ...portfolio, featuredProjects: [], experiences: [], skills: [], journey: [], socialLinks: [] }); await TestBed.configureTestingModule({ imports: [HomePageComponent], providers: [provideRouter([]), { provide: PortfolioStore, useValue: store }] }).compileComponents(); const fixture = TestBed.createComponent(HomePageComponent); fixture.detectChanges(); expect(fixture.nativeElement.textContent).not.toContain('Featured projects'); expect(fixture.nativeElement.textContent).toContain('API Person'); });
   it('renders experience, education, training and certificates without inventing an end date', async () => { await TestBed.configureTestingModule({ imports: [ExperiencePageComponent], providers: [{ provide: PortfolioStore, useValue: storeWith() }] }).compileComponents(); const fixture = TestBed.createComponent(ExperiencePageComponent); fixture.detectChanges(); const content = fixture.nativeElement.textContent; expect(content).toContain('API Company'); expect(content).toContain('API University'); expect(content).toContain('API Training'); expect(content).toContain('API Certificate'); expect(content).toContain('Present'); });
   it('shows an intentional empty experience state', async () => { const empty = { ...portfolio, experiences: [], educations: [], trainings: [], certificates: [] }; await TestBed.configureTestingModule({ imports: [ExperiencePageComponent], providers: [{ provide: PortfolioStore, useValue: storeWith(empty) }] }).compileComponents(); const fixture = TestBed.createComponent(ExperiencePageComponent); fixture.detectChanges(); expect(fixture.nativeElement.textContent).toContain('No experience published'); });
@@ -48,11 +59,14 @@ describe('ProjectDetailPageComponent', () => {
 describe('ContactPageComponent', () => {
   beforeEach(() => TestBed.resetTestingModule());
   it('renders API-provided email and published social links without a form', async () => {
-    const data = { ...portfolio, profile: { ...portfolio.profile, email: 'owner@example.com' }, socialLinks: [{ id: 'social-1', platform: 'GitHub', label: 'GitHub profile', url: 'https://github.com/example', iconKey: null }] };
+    const data = { ...portfolio, profile: { ...portfolio.profile, email: 'owner@example.com' }, socialLinks: duplicatePlatformSocialLinks };
     await TestBed.configureTestingModule({ imports: [ContactPageComponent], providers: [{ provide: PortfolioStore, useValue: storeWith(data) }] }).compileComponents();
     const fixture = TestBed.createComponent(ContactPageComponent); fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('a[href="mailto:owner@example.com"]')).not.toBeNull();
-    expect(fixture.nativeElement.querySelector('a[href="https://github.com/example"]')).not.toBeNull();
+    const links = [...fixture.nativeElement.querySelectorAll('.contact-links a[href^="https://github.com/"]')] as HTMLAnchorElement[];
+    expect(links.map(link => link.querySelector('span')?.textContent?.trim())).toEqual(['GitHub', 'GitHub']);
+    expect(links.map(link => link.querySelector('strong')?.textContent?.trim())).toEqual(['CoderPL1005', 'PhucND3009']);
+    expect(links.map(link => link.href)).toEqual(['https://github.com/CoderPL1005', 'https://github.com/PhucND3009']);
     expect(fixture.nativeElement.querySelector('form')).toBeNull();
     expect(fixture.nativeElement.querySelector('button[type="submit"]')).toBeNull();
   });
