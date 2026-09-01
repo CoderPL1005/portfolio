@@ -10,6 +10,17 @@ using Portfolio.Infrastructure.Persistence.Seeding;
 var seedRequested = DatabaseSeedMode.IsRequested(args);
 var builder = WebApplication.CreateBuilder(DatabaseSeedMode.WithoutSeedArgument(args));
 
+var platformPort = builder.Configuration["PORT"];
+if (!string.IsNullOrWhiteSpace(platformPort))
+{
+    if (!int.TryParse(platformPort, out var port) || port is < 1 or > 65535)
+    {
+        throw new InvalidOperationException("PORT must be a number between 1 and 65535.");
+    }
+
+    builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
+}
+
 const string FrontendCorsPolicy = "frontend";
 var configuredOrigins = builder.Configuration
     .GetSection("Cors:AllowedOrigins")
