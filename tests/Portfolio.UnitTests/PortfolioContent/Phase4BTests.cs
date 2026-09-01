@@ -164,11 +164,14 @@ public sealed class Phase4BTests
     }
 
     [Fact]
-    public async Task Portfolio_aggregate_populates_only_featured_projects_and_published_skills()
+    public async Task Portfolio_aggregate_keeps_featured_projects_filtered_and_adds_all_published_projects_to_journey()
     {
         await using var db = PublicPortfolioTests.CreateContext();
         db.Profiles.Add(new Profile { Id = Guid.NewGuid(), SingletonKey = 1, FullName = "Owner", IsPublished = true });
-        db.Projects.AddRange(Project("featured", true, true, 1), Project("regular", true, false, 0), Project("hidden", false, true, 0));
+        db.Projects.AddRange(
+            Project("featured", true, true, 1, Guid.Parse("00000000-0000-0000-0000-000000000002")),
+            Project("regular", true, false, 0, Guid.Parse("00000000-0000-0000-0000-000000000001")),
+            Project("hidden", false, true, 0));
         db.Skills.AddRange(
             new Skill { Id = Guid.NewGuid(), Name = "Visible", Category = "Backend", ExperienceLevel = "USED", IsPublished = true, DisplayOrder = 1 },
             new Skill { Id = Guid.NewGuid(), Name = "Hidden", Category = "Backend", ExperienceLevel = "USED", IsPublished = false, DisplayOrder = 0 });
@@ -178,7 +181,8 @@ public sealed class Phase4BTests
 
         Assert.Equal("featured", result.FeaturedProjects.Single().Slug);
         Assert.Equal("Visible", result.Skills.Single().Name);
-        Assert.Empty(result.Experiences); Assert.Empty(result.Educations); Assert.Empty(result.Journey);
+        Assert.Empty(result.Experiences); Assert.Empty(result.Educations);
+        Assert.Equal(new[] { "regular", "featured" }, result.Journey.Select(item => item.Title));
     }
 
     private static Technology Technology(string name, bool active) => new() { Id = Guid.NewGuid(), Name = name, Category = "Backend", IsActive = active };

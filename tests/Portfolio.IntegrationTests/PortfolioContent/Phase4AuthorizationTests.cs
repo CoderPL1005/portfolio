@@ -161,6 +161,7 @@ public sealed class Phase4AuthorizationTests(AuthApiFactory factory) : IClassFix
         ,{ "PUT", "/api/v1/admin/projects/11111111-1111-1111-1111-111111111111/media/22222222-2222-2222-2222-222222222222" }
         ,{ "DELETE", "/api/v1/admin/projects/11111111-1111-1111-1111-111111111111/media/22222222-2222-2222-2222-222222222222" }
         ,{ "GET", "/api/v1/admin/journey" }
+        ,{ "GET", "/api/v1/admin/journey/timeline" }
         ,{ "GET", "/api/v1/admin/journey/11111111-1111-1111-1111-111111111111" }
         ,{ "POST", "/api/v1/admin/journey" }
         ,{ "PUT", "/api/v1/admin/journey/11111111-1111-1111-1111-111111111111" }

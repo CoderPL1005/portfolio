@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { routes } from './app.routes';
+import { ProjectEditorShellComponent } from './features/admin/projects/project-editor-shell.component';
+import { TechnologyPageComponent } from './features/admin/technologies/technology-page.component';
 
 describe('application routes', () => {
   it('defines the public shell and required public routes', () => {
@@ -31,6 +33,22 @@ describe('application routes', () => {
     expect(admin.children!.some((route) => route.path?.startsWith('contact-messages'))).toBe(false);
     expect(admin.children!.find((route) => route.path === 'profile')?.canDeactivate?.length).toBe(1);
     expect(admin.children!.find((route) => route.path === 'projects/:id')?.canDeactivate?.length).toBe(1);
+  });
+
+  it('loads the project editor shell for the existing-project route', async () => {
+    const admin = routes.find((route) => route.path === 'admin')!;
+    const projectRoute = admin.children!.find((route) => route.path === 'projects/:id')!;
+
+    expect(await projectRoute.loadComponent!()).toBe(ProjectEditorShellComponent);
+  });
+
+  it('defines the guarded Technologies page inside the authenticated admin tree', async () => {
+    const admin = routes.find((route) => route.path === 'admin')!;
+    const technologyRoute = admin.children!.find((route) => route.path === 'technologies')!;
+
+    expect(technologyRoute).toBeDefined();
+    expect(technologyRoute.canDeactivate).toHaveLength(1);
+    expect(await technologyRoute.loadComponent!()).toBe(TechnologyPageComponent);
   });
 
   it('ends with a lazy wildcard not-found route', () => {

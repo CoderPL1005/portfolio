@@ -139,6 +139,7 @@ public static class DependencyInjection
         services.AddScoped<IRequestValidator<UpdateProjectMediaCommand>, UpdateProjectMediaCommandValidator>();
 
         services.AddScoped<IRequestHandler<GetJourneyItemsQuery, IReadOnlyCollection<JourneyResult>>, GetJourneyItemsQueryHandler>();
+        services.AddScoped<IRequestHandler<GetAdminJourneyTimelineQuery, IReadOnlyCollection<AdminJourneyTimelineResult>>, GetAdminJourneyTimelineQueryHandler>();
         services.AddScoped<IRequestHandler<GetJourneyItemQuery, JourneyResult>, GetJourneyItemQueryHandler>();
         services.AddScoped<IRequestHandler<CreateJourneyItemCommand, JourneyResult>, CreateJourneyItemCommandHandler>();
         services.AddScoped<IRequestHandler<UpdateJourneyItemCommand, JourneyResult>, UpdateJourneyItemCommandHandler>();

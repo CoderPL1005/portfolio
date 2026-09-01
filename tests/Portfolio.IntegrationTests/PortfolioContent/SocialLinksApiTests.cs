@@ -150,7 +150,7 @@ public sealed class SocialLinksApiTests(AuthApiFactory factory) : IClassFixture<
             return Task.FromResult(new PortfolioHomeResult(
                 new PublicProfileResult("Owner", null, null, null, null, null, null, null,
                     null, null, null, null, null),
-                [], [], [], [], [], [], [], links));
+                [], [], [], [], [], [], [], [], links));
         }
     }
 }

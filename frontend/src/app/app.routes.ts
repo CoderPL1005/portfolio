@@ -29,6 +29,7 @@ export const routes: Routes = [
       { path: 'projects/new', canDeactivate: [unsavedChangesGuard], loadComponent: () => import('./features/admin/projects/project-editor-shell.component').then(m => m.ProjectEditorShellComponent) },
       { path: 'projects/:id', canDeactivate: [unsavedChangesGuard], loadComponent: () => import('./features/admin/projects/project-editor-shell.component').then(m => m.ProjectEditorShellComponent) },
       { path: 'skills', canDeactivate: [unsavedChangesGuard], loadComponent: () => import('./features/admin/skills/skills-page.component').then(m => m.SkillsAdminPageComponent) },
+      { path: 'technologies', canDeactivate: [unsavedChangesGuard], loadComponent: () => import('./features/admin/technologies/technology-page.component').then(m => m.TechnologyPageComponent) },
       { path: 'journey', canDeactivate: [unsavedChangesGuard], loadComponent: () => import('./features/admin/journey/journey-page.component').then(m => m.JourneyAdminPageComponent) },
       { path: 'social-links', canDeactivate: [unsavedChangesGuard], loadComponent: () => import('./features/admin/social-links/social-links-page.component').then(m => m.SocialLinksPageComponent) },
       { path: 'site-settings', canDeactivate: [unsavedChangesGuard], loadComponent: () => import('./features/admin/site-settings/site-settings-page.component').then(m => m.SiteSettingsPageComponent) },

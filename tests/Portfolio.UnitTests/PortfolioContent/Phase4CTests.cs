@@ -75,6 +75,92 @@ public sealed class Phase4CTests
     }
 
     [Fact]
+    public async Task Public_journey_aggregates_published_sources_with_stable_ids_mappings_and_chronology()
+    {
+        await using var db = PublicPortfolioTests.CreateContext();
+        db.Profiles.Add(new Profile { Id = Guid.NewGuid(), SingletonKey = 1, FullName = "Owner", IsPublished = true });
+        var sharedSourceId = Guid.Parse("10000000-0000-0000-0000-000000000001");
+        var manualId = Guid.Parse("20000000-0000-0000-0000-000000000001");
+        db.Educations.AddRange(
+            new Education { Id = sharedSourceId, Institution = "University", Degree = "BSc", FieldOfStudy = "Software Engineering", StartDate = new DateOnly(2020, 1, 1), EndDate = null, Description = "Education description", IsPublished = true },
+            new Education { Id = Guid.NewGuid(), Institution = "Hidden education", IsPublished = false });
+        db.Experiences.AddRange(
+            new Experience { Id = Guid.NewGuid(), CompanyName = "Company", RoleTitle = "Engineer", StartDate = new DateOnly(2021, 2, 1), EndDate = new DateOnly(2021, 12, 1), Summary = "Experience summary", IsPublished = true },
+            new Experience { Id = Guid.NewGuid(), CompanyName = "Hidden company", RoleTitle = "Hidden experience", StartDate = new DateOnly(2019, 1, 1), IsPublished = false });
+        db.Projects.AddRange(
+            new Project { Id = sharedSourceId, Slug = "published-project", Title = "Published project", Subtitle = "Project subtitle", Role = "Project role", ShortDescription = "Project description", StartDate = new DateOnly(2022, 3, 1), EndDate = new DateOnly(2022, 8, 1), Status = "COMPLETED", IsPublished = true },
+            new Project { Id = Guid.NewGuid(), Slug = "fallback-project", Title = "Fallback project", Subtitle = "Fallback subtitle", ShortDescription = "Fallback description", StartDate = new DateOnly(2022, 4, 1), Status = "ACTIVE", IsPublished = true },
+            new Project { Id = Guid.NewGuid(), Slug = "hidden-project", Title = "Hidden project", Status = "ACTIVE", IsPublished = false });
+        db.Trainings.AddRange(
+            new Training { Id = Guid.NewGuid(), Title = "Training", Provider = "Provider", Description = "Training description", StartDate = new DateOnly(2021, 6, 1), EndDate = new DateOnly(2021, 8, 1), IsPublished = true },
+            new Training { Id = Guid.NewGuid(), Title = "Hidden training", IsPublished = false });
+        db.Certificates.AddRange(
+            new Certificate { Id = Guid.NewGuid(), Name = "Certificate", Issuer = "Issuer", IssuedAt = new DateOnly(2023, 4, 1), IsPublished = true },
+            new Certificate { Id = Guid.NewGuid(), Name = "Hidden certificate", IsPublished = false });
+        db.JourneyItems.AddRange(
+            new JourneyItem { Id = manualId, Title = "Foundation", OccurredAt = null, DisplayOrder = 1, IsPublished = true },
+            new JourneyItem { Id = Guid.NewGuid(), Title = "Manual launch", Subtitle = "Custom milestone", Description = "Manual description", OccurredAt = new DateOnly(2022, 3, 1), DisplayOrder = 2, IsPublished = true },
+            new JourneyItem { Id = Guid.NewGuid(), Title = "Hidden manual", IsPublished = false });
+        await db.SaveChangesAsync();
+        var persistedManualCount = await db.JourneyItems.CountAsync();
+        var handler = new GetPublicPortfolioQueryHandler(db);
+
+        var first = await handler.HandleAsync(new());
+        var second = await handler.HandleAsync(new());
+        var adminHandler = new GetAdminJourneyTimelineQueryHandler(db);
+        var adminFirst = await adminHandler.HandleAsync(new());
+        var adminSecond = await adminHandler.HandleAsync(new());
+
+        Assert.Equal(
+            ["BSc", "Engineer", "Training", "Published project", "Fallback project", "Foundation", "Manual launch", "Certificate"],
+            first.Journey.Select(item => item.Title));
+        Assert.DoesNotContain(first.Journey, item => item.Title.StartsWith("Hidden", StringComparison.Ordinal));
+        Assert.Equal(first.Journey.Select(item => item.Id), second.Journey.Select(item => item.Id));
+        Assert.Equal(first.Journey.Select(item => item.Id), adminFirst.Select(item => item.Id));
+        Assert.Equal(first.Journey.Select(item => item.Title), adminFirst.Select(item => item.Title));
+        Assert.Equal(adminFirst.Select(item => item.Id), adminSecond.Select(item => item.Id));
+        Assert.Equal(first.Journey.Count, first.Journey.Select(item => item.Id).Distinct().Count());
+        Assert.Equal(manualId, first.Journey.Single(item => item.Title == "Foundation").Id);
+        Assert.NotEqual(
+            first.Journey.Single(item => item.Title == "BSc").Id,
+            first.Journey.Single(item => item.Title == "Published project").Id);
+
+        var education = first.Journey.Single(item => item.Title == "BSc");
+        Assert.Equal("University", education.Subtitle); Assert.Equal("Education description", education.Description); Assert.Equal(new DateOnly(2020, 1, 1), education.OccurredAt); Assert.Equal(education.OccurredAt, education.StartAt); Assert.Null(education.EndAt); Assert.True(education.IsOngoing); Assert.Equal("PERIOD", education.TimelineKind);
+        var experience = first.Journey.Single(item => item.Title == "Engineer");
+        Assert.Equal("Company", experience.Subtitle); Assert.Equal("Experience summary", experience.Description); Assert.Equal(new DateOnly(2021, 2, 1), experience.StartAt); Assert.Equal(new DateOnly(2021, 12, 1), experience.EndAt); Assert.False(experience.IsOngoing); Assert.Equal("PERIOD", experience.TimelineKind);
+        var project = first.Journey.Single(item => item.Title == "Published project");
+        Assert.Equal("Project role", project.Subtitle); Assert.Equal("Project description", project.Description); Assert.Equal(new DateOnly(2022, 3, 1), project.StartAt); Assert.Equal(new DateOnly(2022, 8, 1), project.EndAt); Assert.False(project.IsOngoing); Assert.Equal("PERIOD", project.TimelineKind);
+        var ongoingProject = first.Journey.Single(item => item.Title == "Fallback project");
+        Assert.Equal("Fallback subtitle", ongoingProject.Subtitle); Assert.Null(ongoingProject.EndAt); Assert.True(ongoingProject.IsOngoing);
+        var training = first.Journey.Single(item => item.Title == "Training");
+        Assert.Equal("Provider", training.Subtitle); Assert.Equal("Training description", training.Description); Assert.Equal(new DateOnly(2021, 6, 1), training.StartAt); Assert.Equal(new DateOnly(2021, 8, 1), training.EndAt); Assert.False(training.IsOngoing); Assert.Equal("PERIOD", training.TimelineKind);
+        var certificate = first.Journey.Single(item => item.Title == "Certificate");
+        Assert.Equal("Issuer", certificate.Subtitle); Assert.Null(certificate.Description); Assert.Equal(new DateOnly(2023, 4, 1), certificate.StartAt); Assert.Null(certificate.EndAt); Assert.False(certificate.IsOngoing); Assert.Equal("POINT", certificate.TimelineKind);
+        var manual = first.Journey.Single(item => item.Title == "Manual launch");
+        Assert.Equal("Custom milestone", manual.Subtitle); Assert.Equal("Manual description", manual.Description); Assert.Equal(manual.OccurredAt, manual.StartAt); Assert.Null(manual.EndAt); Assert.False(manual.IsOngoing); Assert.Equal("POINT", manual.TimelineKind);
+        Assert.Equal(
+            ["EDUCATION", "EXPERIENCE", "TRAINING", "PROJECT", "PROJECT", "MANUAL", "MANUAL", "CERTIFICATE"],
+            adminFirst.Select(item => item.SourceType));
+        Assert.Equal(manualId, adminFirst.Single(item => item.Title == "Foundation").SourceId);
+        Assert.True(adminFirst.Single(item => item.Title == "Foundation").IsManual);
+        Assert.False(adminFirst.Single(item => item.Title == "Published project").IsManual);
+        Assert.Equal(sharedSourceId, adminFirst.Single(item => item.Title == "BSc").SourceId);
+        Assert.Equal((await db.Experiences.SingleAsync(item => item.RoleTitle == "Engineer")).Id,
+            adminFirst.Single(item => item.Title == "Engineer").SourceId);
+        Assert.Equal(sharedSourceId, adminFirst.Single(item => item.Title == "Published project").SourceId);
+        Assert.Equal((await db.Trainings.SingleAsync(item => item.Title == "Training")).Id,
+            adminFirst.Single(item => item.Title == "Training").SourceId);
+        Assert.Equal((await db.Certificates.SingleAsync(item => item.Name == "Certificate")).Id,
+            adminFirst.Single(item => item.Title == "Certificate").SourceId);
+        Assert.Equal(first.Journey.Select(item => new { item.StartAt, item.EndAt, item.IsOngoing, item.TimelineKind }),
+            adminFirst.Select(item => new { item.StartAt, item.EndAt, item.IsOngoing, item.TimelineKind }));
+        Assert.Equal(persistedManualCount, await db.JourneyItems.CountAsync());
+        Assert.Equal(["Id", "Title", "Subtitle", "Description", "OccurredAt", "IconKey", "SourceType", "SourceId", "StartAt", "EndAt", "IsOngoing", "TimelineKind"],
+            first.Journey.First().GetType().GetProperties().Select(property => property.Name));
+    }
+
+    [Fact]
     public async Task Site_settings_map_typed_values_to_only_approved_json_rows()
     {
         await using var db = PublicPortfolioTests.CreateContext(); db.SiteSettings.Add(new SiteSetting { Key = "unexpected", Value = JsonDocument.Parse("{\"unsafe\":true}") }); await db.SaveChangesAsync();

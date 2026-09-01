@@ -38,7 +38,8 @@ export class AdminSidebarComponent {
       { label: 'Profile', path: '/admin/profile' }, { label: 'Experience', path: '/admin/experience' },
       { label: 'Education', path: '/admin/education' }, { label: 'Trainings', path: '/admin/trainings' },
       { label: 'Certificates', path: '/admin/certificates' }, { label: 'Projects', path: '/admin/projects' },
-      { label: 'Skills', path: '/admin/skills' }, { label: 'Journey', path: '/admin/journey' },
+      { label: 'Skills', path: '/admin/skills' }, { label: 'Technologies', path: '/admin/technologies' },
+      { label: 'Journey', path: '/admin/journey' },
     ] },
     { label: 'Website', links: [
       { label: 'Social Links', path: '/admin/social-links' }, { label: 'Site Settings', path: '/admin/site-settings' },

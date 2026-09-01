@@ -4,6 +4,7 @@ using System.Reflection;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Portfolio.Application.Features.Journey;
 using Portfolio.Application.Features.Phase4B;
 using Portfolio.Application.Features.Phase4C;
 using Portfolio.Application.Features.PortfolioContent;
@@ -69,7 +70,7 @@ public sealed class Phase5ApiHardeningTests(AuthApiFactory factory) : IClassFixt
         var adminEndpoints = apiEndpoints.Where(x => x.Route.StartsWith("api/v1/admin/", StringComparison.OrdinalIgnoreCase)).ToList();
 
         Assert.Empty(duplicates);
-        Assert.Equal(78, adminEndpoints.Count);
+        Assert.Equal(79, adminEndpoints.Count);
         Assert.All(adminEndpoints, endpoint =>
             Assert.NotNull(endpoint.Endpoint.Metadata.GetMetadata<IAuthorizeData>()));
     }
@@ -85,8 +86,20 @@ public sealed class Phase5ApiHardeningTests(AuthApiFactory factory) : IClassFixt
         AssertProperties<PublicProjectListItem>("Id", "Slug", "Title", "Subtitle", "ShortDescription", "Role", "Status", "Featured", "ThumbnailUrl", "Technologies");
         AssertProperties<PublicTechnologyResult>("Id", "Name", "Category");
         AssertProperties<PublicSkillResult>("Id", "Name", "Category", "ExperienceLevel", "Description", "TechnologyId");
-        AssertProperties<PublicJourneyResult>("Id", "Title", "Subtitle", "Description", "OccurredAt", "IconKey");
+        AssertProperties<PublicJourneyResult>("Id", "Title", "Subtitle", "Description", "OccurredAt", "IconKey",
+            "SourceType", "SourceId", "StartAt", "EndAt", "IsOngoing", "TimelineKind");
         AssertProperties<PublicSocialLinkResult>("Id", "Platform", "Label", "Url", "IconKey");
+    }
+
+    [Fact]
+    public void Journey_dtos_add_duration_metadata_without_removing_legacy_occurred_at()
+    {
+        AssertProperties<AdminJourneyTimelineResult>("Id", "Title", "Subtitle", "Description",
+            "OccurredAt", "IconKey", "SourceType", "SourceId", "IsManual", "StartAt", "EndAt",
+            "IsOngoing", "TimelineKind");
+        AssertProperties<PublicJourneyResult>("Id", "Title", "Subtitle", "Description",
+            "OccurredAt", "IconKey", "SourceType", "SourceId", "StartAt", "EndAt",
+            "IsOngoing", "TimelineKind");
     }
 
     [Fact]

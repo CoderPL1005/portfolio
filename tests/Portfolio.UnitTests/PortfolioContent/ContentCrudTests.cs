@@ -72,6 +72,24 @@ public sealed class ContentCrudTests
     }
 
     [Fact]
+    public async Task Education_list_orders_entities_by_display_order_then_id_before_projection()
+    {
+        await using var context = PublicPortfolioTests.CreateContext();
+        var firstId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        var secondId = Guid.Parse("00000000-0000-0000-0000-000000000002");
+        var laterId = Guid.Parse("00000000-0000-0000-0000-000000000003");
+        context.Educations.AddRange(
+            new Education { Id = laterId, Institution = "Later", DisplayOrder = 2 },
+            new Education { Id = secondId, Institution = "Second tie", DisplayOrder = 1 },
+            new Education { Id = firstId, Institution = "First tie", DisplayOrder = 1 });
+        await context.SaveChangesAsync();
+
+        var result = await new GetEducationsQueryHandler(context).HandleAsync(new());
+
+        Assert.Equal([firstId, secondId, laterId], result.Select(item => item.Id));
+    }
+
+    [Fact]
     public async Task Training_complete_crud_and_url_validation_work()
     {
         await using var context = PublicPortfolioTests.CreateContext();
@@ -86,6 +104,24 @@ public sealed class ContentCrudTests
                 new DateOnly(2025, 1, 1), "data:text/plain,bad", -1, true));
         Assert.True(failures.Count >= 4);
         await new DeleteTrainingCommandHandler(context).HandleAsync(new(created.Id));
+    }
+
+    [Fact]
+    public async Task Training_list_orders_entities_by_display_order_then_id_before_projection()
+    {
+        await using var context = PublicPortfolioTests.CreateContext();
+        var firstId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        var secondId = Guid.Parse("00000000-0000-0000-0000-000000000002");
+        var laterId = Guid.Parse("00000000-0000-0000-0000-000000000003");
+        context.Trainings.AddRange(
+            new Training { Id = laterId, Title = "Later", DisplayOrder = 2 },
+            new Training { Id = secondId, Title = "Second tie", DisplayOrder = 1 },
+            new Training { Id = firstId, Title = "First tie", DisplayOrder = 1 });
+        await context.SaveChangesAsync();
+
+        var result = await new GetTrainingsQueryHandler(context).HandleAsync(new());
+
+        Assert.Equal([firstId, secondId, laterId], result.Select(item => item.Id));
     }
 
     [Fact]
@@ -104,6 +140,24 @@ public sealed class ContentCrudTests
         Assert.True(updated.IsPublished);
         Assert.Contains(failures, item => item.PropertyName == "expiresAt");
         await new DeleteCertificateCommandHandler(context).HandleAsync(new(created.Id));
+    }
+
+    [Fact]
+    public async Task Certificate_list_orders_entities_by_display_order_then_id_before_projection()
+    {
+        await using var context = PublicPortfolioTests.CreateContext();
+        var firstId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        var secondId = Guid.Parse("00000000-0000-0000-0000-000000000002");
+        var laterId = Guid.Parse("00000000-0000-0000-0000-000000000003");
+        context.Certificates.AddRange(
+            new Certificate { Id = laterId, Name = "Later", DisplayOrder = 2 },
+            new Certificate { Id = secondId, Name = "Second tie", DisplayOrder = 1 },
+            new Certificate { Id = firstId, Name = "First tie", DisplayOrder = 1 });
+        await context.SaveChangesAsync();
+
+        var result = await new GetCertificatesQueryHandler(context).HandleAsync(new());
+
+        Assert.Equal([firstId, secondId, laterId], result.Select(item => item.Id));
     }
 
     [Fact]

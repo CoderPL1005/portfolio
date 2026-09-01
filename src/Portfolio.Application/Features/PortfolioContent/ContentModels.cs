@@ -61,6 +61,7 @@ public sealed record PortfolioHomeResult(
     PublicProfileResult Profile,
     IReadOnlyCollection<PublicExperienceResult> Experiences,
     IReadOnlyCollection<PublicProjectListItem> FeaturedProjects,
+    IReadOnlyCollection<TechnologySummary> Technologies,
     IReadOnlyCollection<PublicSkillResult> Skills,
     IReadOnlyCollection<PublicEducationResult> Educations,
     IReadOnlyCollection<PublicTrainingResult> Trainings,

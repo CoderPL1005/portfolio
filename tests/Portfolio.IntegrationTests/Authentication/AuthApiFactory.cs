@@ -122,7 +122,7 @@ public sealed class AuthApiFactory : WebApplicationFactory<Program>
             Task.FromResult(new PortfolioHomeResult(
                 new PublicProfileResult("Owner", null, null, null, null, null, null, null,
                     null, null, null, null, null),
-                [], [], [], [], [], [], [], []));
+                [], [], [], [], [], [], [], [], []));
     }
 
     public sealed class FakePublicProjectsHandler : IRequestHandler<GetPublicProjectsQuery, IReadOnlyCollection<PublicProjectListItem>>

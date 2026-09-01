@@ -25,8 +25,8 @@ public sealed class GetEducationsQueryHandler(IApplicationDbContext dbContext)
     : IRequestHandler<GetEducationsQuery, IReadOnlyCollection<EducationResult>>
 {
     public async Task<IReadOnlyCollection<EducationResult>> HandleAsync(GetEducationsQuery request, CancellationToken cancellationToken = default) =>
-        await EducationProjection.Project(dbContext.Educations.AsNoTracking())
-            .OrderBy(item => item.DisplayOrder).ThenBy(item => item.Id).ToListAsync(cancellationToken);
+        await EducationProjection.Project(dbContext.Educations.AsNoTracking()
+            .OrderBy(item => item.DisplayOrder).ThenBy(item => item.Id)).ToListAsync(cancellationToken);
 }
 
 public sealed class GetEducationQueryHandler(IApplicationDbContext dbContext)

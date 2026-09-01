@@ -10,7 +10,10 @@ export class PublicPortfolioService {
   private readonly api = inject(ApiClientService);
 
   getPortfolio(): Observable<PortfolioAggregate> {
-    return this.api.get<ApiResponse<PortfolioAggregate>>('public/portfolio').pipe(map(requireData));
+    return this.api.get<ApiResponse<PortfolioAggregate>>('public/portfolio').pipe(
+      map(requireData),
+      map(portfolio => portfolio.technologies ? portfolio : { ...portfolio, technologies: [] }),
+    );
   }
 
   getProjects(featured?: boolean): Observable<PublicProjectListItem[]> {

@@ -21,7 +21,7 @@ public sealed record ReorderTrainingsCommand(IReadOnlyCollection<ReorderItem> It
 public sealed class GetTrainingsQueryHandler(IApplicationDbContext dbContext) : IRequestHandler<GetTrainingsQuery, IReadOnlyCollection<TrainingResult>>
 {
     public async Task<IReadOnlyCollection<TrainingResult>> HandleAsync(GetTrainingsQuery request, CancellationToken cancellationToken = default) =>
-        await TrainingProjection.Project(dbContext.Trainings.AsNoTracking()).OrderBy(item => item.DisplayOrder).ThenBy(item => item.Id).ToListAsync(cancellationToken);
+        await TrainingProjection.Project(dbContext.Trainings.AsNoTracking().OrderBy(item => item.DisplayOrder).ThenBy(item => item.Id)).ToListAsync(cancellationToken);
 }
 public sealed class GetTrainingQueryHandler(IApplicationDbContext dbContext) : IRequestHandler<GetTrainingQuery, TrainingResult>
 {

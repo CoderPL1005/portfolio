@@ -83,6 +83,12 @@ export interface PublicJourneyItem {
   description: string | null;
   occurredAt: string | null;
   iconKey: string | null;
+  sourceType: 'MANUAL' | 'EDUCATION' | 'EXPERIENCE' | 'PROJECT' | 'TRAINING' | 'CERTIFICATE';
+  sourceId: string;
+  startAt: string | null;
+  endAt: string | null;
+  isOngoing: boolean;
+  timelineKind: 'PERIOD' | 'POINT';
 }
 
 export interface PublicSocialLink {
@@ -150,6 +156,7 @@ export interface PortfolioAggregate {
   profile: PublicProfile;
   experiences: PublicExperience[];
   featuredProjects: PublicProjectListItem[];
+  technologies: PublicTechnology[];
   skills: PublicSkill[];
   educations: PublicEducation[];
   trainings: PublicTraining[];

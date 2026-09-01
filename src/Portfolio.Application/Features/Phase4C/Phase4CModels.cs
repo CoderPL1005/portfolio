@@ -4,7 +4,9 @@ public sealed record JourneyResult(Guid Id, string Title, string? Subtitle, stri
     DateOnly? OccurredAt, string? IconKey, int DisplayOrder, bool IsPublished,
     DateTimeOffset UpdatedAt);
 public sealed record PublicJourneyResult(Guid Id, string Title, string? Subtitle,
-    string? Description, DateOnly? OccurredAt, string? IconKey);
+    string? Description, DateOnly? OccurredAt, string? IconKey, string SourceType,
+    Guid SourceId, DateOnly? StartAt, DateOnly? EndAt, bool IsOngoing,
+    string TimelineKind);
 public sealed record SocialLinkResult(Guid Id, string Platform, string? Label, string Url,
     string? IconKey, int DisplayOrder, bool IsVisible, DateTimeOffset UpdatedAt);
 public sealed record PublicSocialLinkResult(Guid Id, string Platform, string? Label, string Url,

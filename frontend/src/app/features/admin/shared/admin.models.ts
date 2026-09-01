@@ -17,6 +17,8 @@ export type SkillLevel = 'USED'|'LEARNING'|'EXPLORING';
 export interface Skill { id: string; name: string; category: string; experienceLevel: SkillLevel; description: string | null; technologyId: string | null; displayOrder: number; isPublished: boolean; updatedAt: string; }
 export type SkillRequest = Omit<Skill, 'id'|'updatedAt'>;
 export interface JourneyItem { id: string; title: string; subtitle: string | null; description: string | null; occurredAt: string | null; iconKey: string | null; displayOrder: number; isPublished: boolean; updatedAt: string; }
+export type JourneySourceType = 'MANUAL'|'EDUCATION'|'EXPERIENCE'|'PROJECT'|'TRAINING'|'CERTIFICATE';
+export interface JourneyTimelineItem { id: string; title: string; subtitle: string | null; description: string | null; occurredAt: string | null; iconKey: string | null; sourceType: JourneySourceType; sourceId: string; isManual: boolean; startAt: string | null; endAt: string | null; isOngoing: boolean; timelineKind: 'PERIOD'|'POINT'; }
 export type JourneyRequest = Omit<JourneyItem, 'id'|'updatedAt'>;
 export interface SocialLink { id: string; platform: string; label: string | null; url: string; iconKey: string | null; displayOrder: number; isVisible: boolean; updatedAt: string; }
 export type SocialLinkRequest = Omit<SocialLink, 'id'|'updatedAt'>;

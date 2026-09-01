@@ -15,6 +15,10 @@ public sealed class SeedingTests
         Assert.Equal(25, seed.Technologies.Count);
         Assert.Equal(3, seed.Projects.Count);
         Assert.Equal(17, seed.Skills.Count);
+        Assert.Equal(3, seed.Journey.Count);
+        Assert.Equal(
+            ["C# / .NET Foundations", "Angular & Full-stack Development", "AI & Cloud Engineering"],
+            seed.Journey.Select(item => item.Title));
         Assert.Equal(seed.Technologies.Count,
             seed.Technologies.Select(item => item.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count());
         Assert.Equal(seed.Projects.Count,

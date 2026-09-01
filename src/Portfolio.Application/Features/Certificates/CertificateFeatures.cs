@@ -21,7 +21,7 @@ public sealed record ReorderCertificatesCommand(IReadOnlyCollection<ReorderItem>
 public sealed class GetCertificatesQueryHandler(IApplicationDbContext dbContext) : IRequestHandler<GetCertificatesQuery, IReadOnlyCollection<CertificateResult>>
 {
     public async Task<IReadOnlyCollection<CertificateResult>> HandleAsync(GetCertificatesQuery request, CancellationToken cancellationToken = default) =>
-        await CertificateProjection.Project(dbContext.Certificates.AsNoTracking()).OrderBy(item => item.DisplayOrder).ThenBy(item => item.Id).ToListAsync(cancellationToken);
+        await CertificateProjection.Project(dbContext.Certificates.AsNoTracking().OrderBy(item => item.DisplayOrder).ThenBy(item => item.Id)).ToListAsync(cancellationToken);
 }
 public sealed class GetCertificateQueryHandler(IApplicationDbContext dbContext) : IRequestHandler<GetCertificateQuery, CertificateResult>
 {

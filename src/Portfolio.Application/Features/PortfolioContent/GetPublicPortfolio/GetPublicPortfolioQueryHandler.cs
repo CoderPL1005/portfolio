@@ -26,58 +26,22 @@ public sealed class GetPublicPortfolioQueryHandler(IApplicationDbContext dbConte
             .SingleOrDefaultAsync(cancellationToken)
             ?? throw new NotFoundException("PROFILE_NOT_FOUND", "The published profile was not found.");
 
-        var experiences = await dbContext.Experiences.AsNoTracking()
-            .Where(item => item.IsPublished)
-            .OrderBy(item => item.DisplayOrder).ThenBy(item => item.Id)
-            .Select(item => new PublicExperienceResult(
-                item.Id, item.CompanyName, item.RoleTitle, item.Location, item.StartDate,
-                item.EndDate, item.IsCurrent, item.Summary, item.ResponsibilitiesMarkdown,
-                item.CompanyUrl,
-                dbContext.ExperienceTechnologies
-                    .Where(link => link.ExperienceId == item.Id && link.Technology.IsActive)
-                    .OrderBy(link => link.DisplayOrder).ThenBy(link => link.TechnologyId)
-                    .Select(link => new TechnologySummary(
-                        link.Technology.Id, link.Technology.Name, link.Technology.Category,
-                        link.Technology.IconKey)).ToList()))
-            .ToListAsync(cancellationToken);
-
-        var educations = await dbContext.Educations.AsNoTracking()
-            .Where(item => item.IsPublished)
-            .OrderBy(item => item.DisplayOrder).ThenBy(item => item.Id)
-            .Select(item => new PublicEducationResult(
-                item.Id, item.Institution, item.Degree, item.FieldOfStudy, item.StartDate,
-                item.EndDate, item.Description, item.Location))
-            .ToListAsync(cancellationToken);
-        var trainings = await dbContext.Trainings.AsNoTracking()
-            .Where(item => item.IsPublished)
-            .OrderBy(item => item.DisplayOrder).ThenBy(item => item.Id)
-            .Select(item => new PublicTrainingResult(
-                item.Id, item.Title, item.Provider, item.Description, item.StartDate,
-                item.EndDate, item.CredentialUrl))
-            .ToListAsync(cancellationToken);
-        var certificates = await dbContext.Certificates.AsNoTracking()
-            .Where(item => item.IsPublished)
-            .OrderBy(item => item.DisplayOrder).ThenBy(item => item.Id)
-            .Select(item => new PublicCertificateResult(
-                item.Id, item.Name, item.Issuer, item.IssuedAt, item.ExpiresAt,
-                item.CredentialId, item.CredentialUrl,
-                item.CertificateMedia == null ? null : item.CertificateMedia.PublicUrl))
-            .ToListAsync(cancellationToken);
+        var timeline = await PublicJourneyTimeline.LoadAsync(dbContext, cancellationToken);
 
         var featuredProjects = await new GetPublicProjectsQueryHandler(dbContext)
             .HandleAsync(new GetPublicProjectsQuery(true), cancellationToken);
+        var technologies = await dbContext.Technologies.AsNoTracking()
+            .Where(item => item.IsActive)
+            .OrderBy(item => item.DisplayOrder).ThenBy(item => item.Id)
+            .Select(item => new TechnologySummary(
+                item.Id, item.Name, item.Category, item.IconKey))
+            .ToListAsync(cancellationToken);
         var skills = await dbContext.Skills.AsNoTracking()
             .Where(item => item.IsPublished)
             .OrderBy(item => item.DisplayOrder).ThenBy(item => item.Id)
             .Select(item => new PublicSkillResult(
                 item.Id, item.Name, item.Category, item.ExperienceLevel, item.Description,
                 item.Technology != null && item.Technology.IsActive ? item.TechnologyId : null))
-            .ToListAsync(cancellationToken);
-        var journey = await dbContext.JourneyItems.AsNoTracking()
-            .Where(item => item.IsPublished)
-            .OrderBy(item => item.DisplayOrder).ThenBy(item => item.Id)
-            .Select(item => new PublicJourneyResult(item.Id, item.Title, item.Subtitle,
-                item.Description, item.OccurredAt, item.IconKey))
             .ToListAsync(cancellationToken);
         var socialLinks = await dbContext.SocialLinks.AsNoTracking()
             .Where(item => item.IsVisible)
@@ -87,7 +51,8 @@ public sealed class GetPublicPortfolioQueryHandler(IApplicationDbContext dbConte
             .ToListAsync(cancellationToken);
 
         return new PortfolioHomeResult(
-            profile, experiences, featuredProjects, skills, educations, trainings, certificates,
-            journey, socialLinks);
+            profile, timeline.Experiences, featuredProjects, technologies, skills,
+            timeline.Educations, timeline.Trainings, timeline.Certificates,
+            timeline.PublicItems, socialLinks);
     }
 }

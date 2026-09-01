@@ -3,7 +3,7 @@ import { RouterLink } from '@angular/router';
 import { LoadingIndicatorComponent } from '../../../shared/components/loading-indicator/loading-indicator.component';
 import { PortfolioStore } from '../shared/portfolio.store';
 import { ProjectCardComponent } from '../shared/project-card.component';
-import { PublicSkill } from '../shared/public.models';
+import { PortfolioAggregate, PublicSkill, PublicTechnology } from '../shared/public.models';
 import { formatPortfolioDate, isExternalUrl, safeHttpUrl, safeSocialUrl } from '../shared/public-utils';
 
 @Component({
@@ -24,22 +24,22 @@ import { formatPortfolioDate, isExternalUrl, safeHttpUrl, safeSocialUrl } from '
             <h1 id="home-title">{{ portfolio.profile.heroHeadline || portfolio.profile.professionalTitle || portfolio.profile.fullName }}</h1>
             @if (portfolio.profile.heroSummary || portfolio.profile.aboutMarkdown) { <p class="hero-copy pre-line">{{ portfolio.profile.heroSummary || portfolio.profile.aboutMarkdown }}</p> }
             <div class="actions"><a class="primary-button" routerLink="/projects">View projects <span aria-hidden="true">&rarr;</span></a><a class="secondary-button" routerLink="/contact">Contact me</a></div>
-            @if (coreSkills().length) { <div class="core-stack"><span>Core Stack</span><ul>@for (skill of coreSkills(); track skill.id) { <li>{{ skill.name }}</li> }</ul></div> }
+            @if (coreTechnologies().length) { <div class="core-stack"><span>Core Stack</span><ul>@for (technology of coreTechnologies(); track technology.id) { <li>{{ technology.name }}</li> }</ul></div> }
           </div>
           <div class="identity-card" aria-label="Technical identity">
             <div class="terminal-bar"><i></i><i></i><i></i><span>engineer_identity.json</span></div>
-            <div class="terminal-body"><strong>{{ portfolio.profile.professionalTitle || 'Software Engineer' }}</strong>@for (group of skillGroups().slice(0, 3); track group.category) { <div class="tree"><span>{{ group.category }}</span>@for (skill of group.skills.slice(0, 2); track skill.id) { <small>{{ skill.name }}</small> }</div> }</div>
+            <div class="terminal-body"><strong>{{ portfolio.profile.professionalTitle || 'Software Engineer' }}</strong>@for (group of technologyGroups().slice(0, 3); track group.category) { <div class="tree"><span>{{ group.category }}</span>@for (technology of group.technologies.slice(0, 2); track technology.id) { <small>{{ technology.name }}</small> }</div> }</div>
           </div>
         </section>
 
         <section class="fact-strip" aria-label="Portfolio quick facts">
           @if (portfolio.profile.availabilityStatus) { <div><span>Status</span><strong>{{ portfolio.profile.availabilityStatus }}</strong></div> }
-          @if (coreSkills().length) { <div><span>Primary Stack</span><strong>{{ coreSkills().slice(0, 3).map(skillName).join(' + ') }}</strong></div> }
+          @if (coreTechnologies().length) { <div><span>Primary Stack</span><strong>{{ coreTechnologies().slice(0, 3).map(technologyName).join(' + ') }}</strong></div> }
           @if (portfolio.featuredProjects[0]; as project) { <div><span>Featured Project</span><strong>{{ project.title }}</strong></div> }
           @if (portfolio.profile.secondaryTitle || portfolio.profile.professionalTitle; as focus) { <div><span>Current Focus</span><strong>{{ focus }}</strong></div> }
         </section>
 
-        <section class="about" id="about"><div class="about-copy"><div class="section-title"><span></span><h2>System Logic &amp; Data Flow</h2></div><p class="pre-line">{{ portfolio.profile.aboutMarkdown || portfolio.profile.heroSummary }}</p></div><aside><h3>Quick Facts</h3>@if (portfolio.profile.professionalTitle) { <div><span>Focus</span><strong>{{ portfolio.profile.professionalTitle }}</strong></div> }@if (coreSkills().length) { <div><span>Stack</span><strong>{{ coreSkills().slice(0, 3).map(skillName).join(', ') }}</strong></div> }@if (portfolio.profile.university || portfolio.profile.major) { <div><span>Education</span><strong>{{ portfolio.profile.major || portfolio.profile.university }}</strong></div> }@if (portfolio.profile.location) { <div><span>Location</span><strong>{{ portfolio.profile.location }}</strong></div> }</aside></section>
+        <section class="about" id="about"><div class="about-copy"><div class="section-title"><span></span><h2>System Logic &amp; Data Flow</h2></div><p class="pre-line">{{ portfolio.profile.aboutMarkdown || portfolio.profile.heroSummary }}</p></div><aside><h3>Quick Facts</h3>@if (portfolio.profile.professionalTitle) { <div><span>Focus</span><strong>{{ portfolio.profile.professionalTitle }}</strong></div> }@if (coreTechnologies().length) { <div><span>Stack</span><strong>{{ coreTechnologies().slice(0, 3).map(technologyName).join(', ') }}</strong></div> }@if (educationSummary(); as education) { <div><span>Education</span><strong>{{ education }}</strong></div> }@if (portfolio.profile.location) { <div><span>Location</span><strong>{{ portfolio.profile.location }}</strong></div> }</aside></section>
 
         @if (portfolio.featuredProjects.length) {
           <section class="section-block" id="projects"><div class="section-heading"><div><span class="eyebrow">Selected work</span><h2>Featured projects</h2></div><a routerLink="/projects">All projects</a></div><div class="card-grid">@for (project of portfolio.featuredProjects; track project.id) { <app-project-card [project]="project" /> }</div></section>
@@ -80,8 +80,10 @@ export class HomePageComponent {
   readonly store = inject(PortfolioStore);
   readonly http = safeHttpUrl; readonly socialUrl = safeSocialUrl; readonly external = isExternalUrl; readonly date = formatPortfolioDate;
   readonly skillGroups = computed(() => groupSkills(this.store.data()?.skills ?? []).slice(0, 4));
-  readonly coreSkills = computed(() => (this.store.data()?.skills ?? []).slice(0, 6));
-  readonly skillName = (skill: PublicSkill) => skill.name;
+  readonly coreTechnologies = computed(() => (this.store.data()?.technologies ?? []).slice(0, 6));
+  readonly technologyGroups = computed(() => groupTechnologies(this.store.data()?.technologies ?? []));
+  readonly educationSummary = computed(() => educationLabel(this.store.data()));
+  readonly technologyName = (technology: PublicTechnology) => technology.name;
   constructor() { this.store.load(); }
 }
 
@@ -89,4 +91,19 @@ function groupSkills(skills: PublicSkill[]): { category: string; skills: PublicS
   const groups = new Map<string, PublicSkill[]>();
   for (const skill of skills) groups.set(skill.category, [...(groups.get(skill.category) ?? []), skill]);
   return [...groups].map(([category, items]) => ({ category, skills: items }));
+}
+
+function groupTechnologies(technologies: PublicTechnology[]): { category: string; technologies: PublicTechnology[] }[] {
+  const groups = new Map<string, PublicTechnology[]>();
+  for (const technology of technologies) groups.set(technology.category, [...(groups.get(technology.category) ?? []), technology]);
+  return [...groups].map(([category, items]) => ({ category, technologies: items }));
+}
+
+function educationLabel(portfolio: PortfolioAggregate | null): string | null {
+  if (!portfolio) return null;
+  const education = portfolio.educations[0];
+  if (education?.institution) return education.institution;
+  if (education?.degree && education.fieldOfStudy) return `${education.degree} in ${education.fieldOfStudy}`;
+  return education?.degree || education?.fieldOfStudy
+    || portfolio.profile.university || portfolio.profile.major || null;
 }

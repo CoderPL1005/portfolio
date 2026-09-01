@@ -7,7 +7,7 @@
       }
     </nav>
     <div class="header-actions">
-      <div class="social-actions">@for (social of socialLinks(); track social.id) { @if (socialUrl(social.url); as url) { <a [href]="url" [attr.target]="external(url) ? '_blank' : null" [attr.rel]="external(url) ? 'noopener noreferrer' : null" [attr.aria-label]="social.label || social.platform">{{ (social.label || social.platform).slice(0, 1) }}</a> } }</div>
+      <div class="social-actions">@for (social of socialLinks(); track social.id) { @if (socialUrl(social.url); as url) { <a [href]="url" [attr.target]="external(url) ? '_blank' : null" [attr.rel]="external(url) ? 'noopener noreferrer' : null" [attr.aria-label]="social.label || social.platform" [attr.title]="social.label || social.platform"><app-social-icon [iconKey]="social.iconKey" [label]="social.label || social.platform" /></a> } }</div>
       @if (http(profile()?.cvUrl); as cv) { <a class="cv-button" [href]="cv" target="_blank" rel="noopener noreferrer">CV</a> }
       <button class="menu-button" type="button" (click)="toggleMenu()" [attr.aria-expanded]="menuOpen()" aria-controls="mobile-navigation">
       <span class="sr-only">Toggle navigation</span>
@@ -27,5 +27,4 @@
 <app-chat-widget />
 <footer class="public-footer">
   <div><strong>{{ initials() }}</strong><span>{{ profile()?.professionalTitle || 'Technical portfolio' }}</span></div>
-  <a routerLink="/admin/login">Admin</a>
 </footer>

@@ -666,26 +666,6 @@
       "isPublished": true
     },
     {
-      "seedKey": "journey-rtc",
-      "title": "Software Developer Internship",
-      "subtitle": "RTC Technology Vietnam",
-      "description": "Started working with enterprise ERP code and WinForms-to-Web migration.",
-      "occurredAt": "2025-08-01",
-      "iconKey": "briefcase",
-      "displayOrder": 3,
-      "isPublished": true
-    },
-    {
-      "seedKey": "journey-schoolsaas",
-      "title": "SchoolSaaS",
-      "subtitle": "Multi-tenant backend architecture",
-      "description": "Worked with multi-tenancy, authentication, Redis, feature access and backend architecture.",
-      "occurredAt": "2026-05-01",
-      "iconKey": "layers",
-      "displayOrder": 4,
-      "isPublished": true
-    },
-    {
       "seedKey": "journey-ai-cloud",
       "title": "AI & Cloud Engineering",
       "subtitle": "Hands-on learning",
@@ -693,26 +673,6 @@
       "occurredAt": "2026-08-01",
       "iconKey": "cloud",
       "displayOrder": 5,
-      "isPublished": true
-    },
-    {
-      "seedKey": "journey-p234",
-      "title": "P-234",
-      "subtitle": "Secure RAG/backend integration",
-      "description": "Worked on authorization-aware regulatory-document backend and RAG integration.",
-      "occurredAt": "2026-08-01",
-      "iconKey": "brain",
-      "displayOrder": 6,
-      "isPublished": true
-    },
-    {
-      "seedKey": "journey-portfolio-agent",
-      "title": "Personal Portfolio + AI Agent",
-      "subtitle": "Full-stack portfolio platform",
-      "description": "Building a dynamic portfolio CMS with PostgreSQL/pgvector and a personal RAG assistant.",
-      "occurredAt": "2026-08-27",
-      "iconKey": "terminal",
-      "displayOrder": 7,
       "isPublished": true
     }
   ],

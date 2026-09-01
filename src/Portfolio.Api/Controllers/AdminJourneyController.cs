@@ -10,6 +10,7 @@ namespace Portfolio.Api.Controllers;
 [ApiController, Authorize, Route("api/v1/admin/journey")]
 public sealed class AdminJourneyController(IRequestDispatcher dispatcher) : ControllerBase
 {
+    [HttpGet("timeline")] public async Task<ActionResult<ApiResponse<IReadOnlyCollection<AdminJourneyTimelineResult>>>> Timeline(CancellationToken ct) => Ok(ApiResponse<IReadOnlyCollection<AdminJourneyTimelineResult>>.Ok(await dispatcher.DispatchAsync(new GetAdminJourneyTimelineQuery(), ct)));
     [HttpGet] public async Task<ActionResult<ApiResponse<IReadOnlyCollection<JourneyResult>>>> List(CancellationToken ct) => Ok(ApiResponse<IReadOnlyCollection<JourneyResult>>.Ok(await dispatcher.DispatchAsync(new GetJourneyItemsQuery(), ct)));
     [HttpGet("{id:guid}")] public async Task<ActionResult<ApiResponse<JourneyResult>>> Get(Guid id, CancellationToken ct) => Ok(ApiResponse<JourneyResult>.Ok(await dispatcher.DispatchAsync(new GetJourneyItemQuery(id), ct)));
     [HttpPost] public async Task<ActionResult<ApiResponse<JourneyResult>>> Create(JourneyRequest request, CancellationToken ct) { var result = await dispatcher.DispatchAsync(request.Create(), ct); return CreatedAtAction(nameof(Get), new { id = result.Id }, ApiResponse<JourneyResult>.Ok(result)); }
