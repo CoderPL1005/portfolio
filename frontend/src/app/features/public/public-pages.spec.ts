@@ -242,6 +242,9 @@ describe('public aggregate pages', () => {
     expect(item.cardRight).toBeLessThan(layout.plotWidth);
   });
   it('uses real project titles with collision-safe anchored cards and a readable project index', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-01T00:00:00Z'));
+    try {
     const sourceProjects: PublicJourneyItem[] = [
       { id:'hotel-id',title:'Hotel Management System',subtitle:'Project',description:'Hotel project.',occurredAt:'2025-04-01',iconKey:null,sourceType:'PROJECT',sourceId:'hotel-source',startAt:'2025-04-01',endAt:'2025-06-30',isOngoing:false,timelineKind:'PERIOD' },
       { id:'school-id',title:'SchoolSaaS',subtitle:'Project',description:'School SaaS.',occurredAt:'2026-05-01',iconKey:null,sourceType:'PROJECT',sourceId:'school-source',startAt:'2026-05-01',endAt:null,isOngoing:true,timelineKind:'PERIOD' },
@@ -294,6 +297,9 @@ describe('public aggregate pages', () => {
     expect(indexText).toContain('Hotel Management System');expect(indexText).toContain('SchoolSaaS');
     expect(indexText).toContain('PolicyMeta AI');expect(indexText).toContain('Developer Portfolio & Personal AI Agent');
     expect(indexText).not.toMatch(/PRJ[1-4]/);
+    } finally {
+      vi.useRealTimers();
+    }
   });
   it('keeps manual and certificate events as indexed point markers', async () => {
     const certificate: PublicJourneyItem = {
