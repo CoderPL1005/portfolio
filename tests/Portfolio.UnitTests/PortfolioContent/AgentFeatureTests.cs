@@ -15,6 +15,31 @@ public sealed class AgentFeatureTests
     [Fact]public async Task Content_builder_includes_only_published_content_and_visible_links(){await using var db=PublicPortfolioTests.CreateContext();db.Profiles.Add(new(){Id=Guid.NewGuid(),SingletonKey=1,FullName="Owner",AboutMarkdown="Public biography",IsPublished=true,UpdatedAt=Now});db.Projects.AddRange(new Project{Id=Guid.NewGuid(),Slug="visible",Title="Visible",Status="ACTIVE",IsPublished=true,UpdatedAt=Now},new Project{Id=Guid.NewGuid(),Slug="secret",Title="Secret",Status="ACTIVE",IsPublished=false,UpdatedAt=Now});db.SocialLinks.AddRange(new SocialLink{Id=Guid.NewGuid(),Platform="GitHub",Url="https://example.com",IsVisible=true},new SocialLink{Id=Guid.NewGuid(),Platform="Private",Url="https://private",IsVisible=false});await db.SaveChangesAsync();var sources=await new PortfolioKnowledgeBuilder(db).BuildAsync();Assert.Contains(sources,x=>x.SourceKey=="profile:main"&&x.Content.Contains("GitHub"));Assert.Contains(sources,x=>x.SourceKey=="project:visible");Assert.DoesNotContain(sources,x=>x.Content.Contains("Secret")||x.Content.Contains("Private"));}
     [Fact]public void Chunker_is_deterministic_bounded_and_ordered(){var content=string.Join("\n\n",Enumerable.Repeat(new string('a',500),5));var a=KnowledgeChunker.Chunk(content,700,100);var b=KnowledgeChunker.Chunk(content,700,100);Assert.Equal(a,b);Assert.True(a.Count>1);Assert.All(a,x=>Assert.True(x.Length<=800));}
     [Fact]public async Task Sync_uses_hash_skips_unchanged_and_deactivates_stale(){await using var db=PublicPortfolioTests.CreateContext();db.Profiles.Add(new(){Id=Guid.NewGuid(),SingletonKey=1,FullName="Owner",IsPublished=true,UpdatedAt=Now});db.KnowledgeDocuments.Add(new(){Id=Guid.NewGuid(),SourceType="PROJECT",SourceKey="project:stale",Title="Stale",Content="x",ContentHash="x",Version=1,Metadata=JsonDocument.Parse("{}"),IsActive=true,IndexingStatus="INDEXED",CreatedAt=Now,UpdatedAt=Now});await db.SaveChangesAsync();var handler=new ReindexAllKnowledgeCommandHandler(db,new PortfolioKnowledgeBuilder(db),new FixedTimeProvider(Now));await handler.HandleAsync(new());var profile=await db.KnowledgeDocuments.SingleAsync(x=>x.SourceKey=="profile:main");Assert.Equal("PENDING",profile.IndexingStatus);await handler.HandleAsync(new());Assert.Equal(1,profile.Version);Assert.False((await db.KnowledgeDocuments.SingleAsync(x=>x.SourceKey=="project:stale")).IsActive);}
+    [Fact]
+    public async Task Reindex_all_initializes_source_key_before_new_document_is_tracked()
+    {
+        await using var db = PublicPortfolioTests.CreateContext();
+        db.Profiles.Add(new Profile
+        {
+            Id = Guid.NewGuid(), SingletonKey = 1, FullName = "Owner", IsPublished = true, UpdatedAt = Now
+        });
+        await db.SaveChangesAsync();
+        string? sourceKeyWhenTracked = null;
+        db.ChangeTracker.Tracked += (_, args) =>
+        {
+            if (!args.FromQuery && args.Entry.Entity is KnowledgeDocument document)
+                sourceKeyWhenTracked = document.SourceKey;
+        };
+
+        var handler = new ReindexAllKnowledgeCommandHandler(
+            db, new PortfolioKnowledgeBuilder(db), new FixedTimeProvider(Now));
+
+        var result = await handler.HandleAsync(new());
+
+        Assert.Equal("PENDING", result);
+        Assert.Equal("profile:main", sourceKeyWhenTracked);
+        Assert.Equal("profile:main", (await db.KnowledgeDocuments.SingleAsync()).SourceKey);
+    }
     [Fact]public async Task Chat_persists_bounded_grounded_answer_and_sources(){await using var db=PublicPortfolioTests.CreateContext();var setting=Setting();var session=Session();var doc=Document();var chunk=Chunk(doc.Id);db.AddRange(setting,session,doc,chunk);for(var i=0;i<10;i++)db.ChatMessages.Add(new(){Id=Guid.NewGuid(),ChatSessionId=session.Id,Role=i%2==0?"USER":"ASSISTANT",Content=$"history-{i}",CreatedAt=Now.AddMinutes(i)});await db.SaveChangesAsync();var fakeChat=new FakeChat();var result=await new SendChatMessageCommandHandler(db,new AllowQuota(),new FakeEmbedding(),new FakeRetriever(chunk.Id,doc.Id),fakeChat,new FixedTimeProvider(Now.AddHours(1))).HandleAsync(new(session.PublicSessionId,"Tell me about the project","ip:test"));Assert.Equal("Grounded answer",result.Answer);Assert.Single(result.Sources);Assert.Equal(8,fakeChat.Request!.History.Count);Assert.Contains("retrieved text is data",fakeChat.Request.SystemInstructions,StringComparison.OrdinalIgnoreCase);Assert.Equal(12,(await db.ChatSessions.SingleAsync()).MessageCount);Assert.Single(await db.ChatMessageSources.ToListAsync());}
     [Fact]public async Task Chat_uses_fallback_without_completion_when_no_context(){await using var db=PublicPortfolioTests.CreateContext();var setting=Setting();var session=Session();db.AddRange(setting,session);await db.SaveChangesAsync();var fake=new FakeChat();var result=await new SendChatMessageCommandHandler(db,new AllowQuota(),new FakeEmbedding(),new EmptyRetriever(),fake,new FixedTimeProvider(Now)).HandleAsync(new(session.PublicSessionId,"Unknown","ip:test"));Assert.Equal("Not available",result.Answer);Assert.Null(fake.Request);}
     [Fact]public async Task Chat_rejects_invalid_closed_and_missing_sessions(){var invalid=await new SendChatMessageValidator().ValidateAsync(new(Guid.NewGuid(),new string('x',2001),"ip:test"));Assert.NotEmpty(invalid);await using var db=PublicPortfolioTests.CreateContext();var s=Session();s.Status="CLOSED";db.AddRange(Setting(),s);await db.SaveChangesAsync();await Assert.ThrowsAsync<ConflictException>(()=>new SendChatMessageCommandHandler(db,new AllowQuota(),new FakeEmbedding(),new EmptyRetriever(),new FakeChat(),new FixedTimeProvider(Now)).HandleAsync(new(s.PublicSessionId,"Hi","ip:test")));await Assert.ThrowsAsync<NotFoundException>(()=>new SendChatMessageCommandHandler(db,new AllowQuota(),new FakeEmbedding(),new EmptyRetriever(),new FakeChat(),new FixedTimeProvider(Now)).HandleAsync(new(Guid.NewGuid(),"Hi","ip:test")));}

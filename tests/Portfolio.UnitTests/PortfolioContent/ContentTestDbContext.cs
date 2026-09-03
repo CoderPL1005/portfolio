@@ -76,6 +76,7 @@ internal sealed class ContentTestDbContext(DbContextOptions<ContentTestDbContext
             value => value.RootElement.GetRawText(), value => System.Text.Json.JsonDocument.Parse(
                 value, default(System.Text.Json.JsonDocumentOptions)));
         modelBuilder.Entity<KnowledgeDocument>().HasKey(item => item.Id);
+        modelBuilder.Entity<KnowledgeDocument>().HasAlternateKey(item => item.SourceKey);
         modelBuilder.Entity<AgentSetting>().HasKey(item => item.Id);
         modelBuilder.Entity<KnowledgeChunk>().HasKey(item => item.Id);
         modelBuilder.Entity<KnowledgeChunk>().Ignore(item => item.Embedding);
