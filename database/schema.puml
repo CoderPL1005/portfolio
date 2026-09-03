@@ -327,6 +327,7 @@ package "Personal Agent / RAG" {
     last_message_at : timestamptz
     closed_at : timestamptz
     message_count : int
+    user_message_count : int
     metadata : jsonb
   }
 
@@ -361,6 +362,15 @@ package "Personal Agent / RAG" {
     comment : text
     created_at : timestamptz
   }
+
+  entity chat_usage_daily {
+    * usage_date : date <<PK>>
+    * visitor_key : varchar(80) <<PK>>
+    --
+    accepted_message_count : int
+    created_at : timestamptz
+    updated_at : timestamptz
+  }
 }
 
 admin_refresh_tokens }o--|| admin_users : admin_user_id
@@ -388,6 +398,12 @@ chat_messages }o--|| chat_sessions : chat_session_id
 chat_message_sources }o--|| chat_messages : chat_message_id
 chat_message_sources }o--|| knowledge_chunks : knowledge_chunk_id
 chat_message_feedback }o--|| chat_messages : chat_message_id
+
+note right of chat_usage_daily
+visitor_key is either an HMAC-SHA256 IP key
+or the reserved global key. Raw IP is not stored.
+Counters reset by UTC usage_date.
+end note
 
 note right of knowledge_documents
 Portfolio source tables are canonical.

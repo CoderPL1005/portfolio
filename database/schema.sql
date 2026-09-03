@@ -1140,6 +1140,8 @@ CREATE TABLE chat_sessions (
 
     message_count INTEGER NOT NULL DEFAULT 0,
 
+    user_message_count INTEGER NOT NULL DEFAULT 0,
+
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
 
     CONSTRAINT uq_chat_sessions_public_session_id
@@ -1156,6 +1158,11 @@ CREATE TABLE chat_sessions (
     CONSTRAINT ck_chat_sessions_message_count
         CHECK (
             message_count >= 0
+        ),
+
+    CONSTRAINT ck_chat_sessions_user_message_count
+        CHECK (
+            user_message_count >= 0
         )
 );
 
@@ -1304,5 +1311,31 @@ CREATE TABLE chat_message_feedback (
                 'POSITIVE',
                 'NEGATIVE'
             )
+        )
+);
+
+
+
+-- ============================================================
+-- 27. CHAT USAGE DAILY
+-- ============================================================
+
+CREATE TABLE chat_usage_daily (
+    usage_date DATE NOT NULL,
+
+    visitor_key VARCHAR(80) NOT NULL,
+
+    accepted_message_count INTEGER NOT NULL DEFAULT 0,
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT chat_usage_daily_pkey
+        PRIMARY KEY (usage_date, visitor_key),
+
+    CONSTRAINT ck_chat_usage_daily_count
+        CHECK (
+            accepted_message_count >= 0
         )
 );

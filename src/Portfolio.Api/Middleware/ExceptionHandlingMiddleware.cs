@@ -44,6 +44,9 @@ public sealed class ExceptionHandlingMiddleware(
             ServiceUnavailableException unavailableException => (
                 StatusCodes.Status503ServiceUnavailable,
                 new ApiError(unavailableException.Code, unavailableException.Message)),
+            TooManyRequestsException tooManyRequestsException => (
+                StatusCodes.Status429TooManyRequests,
+                new ApiError(tooManyRequestsException.Code, tooManyRequestsException.Message)),
             _ => (
                 StatusCodes.Status500InternalServerError,
                 new ApiError("INTERNAL_ERROR", "An unexpected error occurred.")),

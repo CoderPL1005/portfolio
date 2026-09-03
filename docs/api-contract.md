@@ -1761,9 +1761,9 @@ Response:
     "id": "uuid",
     "name": "portfolio-agent",
     "enabled": true,
-    "provider": "OpenAI",
+    "provider": "Gemini",
     "modelName": "...",
-    "embeddingProvider": "OpenAI",
+    "embeddingProvider": "Gemini",
     "embeddingModel": "...",
     "embeddingDimensions": 1536,
     "systemPrompt": "...",
@@ -1791,9 +1791,9 @@ Request:
 ```json
 {
   "enabled": true,
-  "provider": "OpenAI",
+  "provider": "Gemini",
   "modelName": "...",
-  "embeddingProvider": "OpenAI",
+  "embeddingProvider": "Gemini",
   "embeddingModel": "...",
   "systemPrompt": "...",
   "welcomeMessage": "...",
@@ -1983,7 +1983,7 @@ chat_sessions
 
 Security:
 
-- rate limit by client/IP/session
+- session creation does not consume AI message quota
 - do not expose internal chat session DB UUID if a public session identifier exists
 
 ---
@@ -2029,7 +2029,11 @@ Server flow:
 ```text
 validate request
 ↓
-load active agent settings
+resolve trusted forwarded headers and normalized client IP
+-> apply 3/minute/IP burst limiter
+-> derive HMAC visitor key
+-> load active session and agent settings
+-> atomically reserve session + daily IP + global quotas
 ↓
 embed question
 ↓
@@ -2077,9 +2081,33 @@ Errors:
 400 VALIDATION_ERROR
 404 CHAT_SESSION_NOT_FOUND
 409 CHAT_SESSION_CLOSED
-429 TOO_MANY_REQUESTS
+429 CHAT_RATE_LIMITED
+429 CHAT_DAILY_LIMIT_REACHED
+429 CHAT_SESSION_LIMIT_REACHED
+429 CHAT_GLOBAL_LIMIT_REACHED
 503 AGENT_UNAVAILABLE
 ```
+
+Chat-message protection flow:
+
+```text
+trusted forwarded headers
+-> normalized client IP
+-> 3/minute/IP burst limiter
+-> HMAC-SHA256 visitor key
+-> active session and settings checks
+-> atomic session + daily IP + global quota reservation
+-> Gemini embedding
+-> retrieval
+-> optional Gemini generation
+```
+
+Durable limits are `20/UTC day/HMAC visitor`, `20 USER messages/session`, and
+`150/UTC day` globally. The 429 codes are `CHAT_RATE_LIMITED`,
+`CHAT_DAILY_LIMIT_REACHED`, `CHAT_SESSION_LIMIT_REACHED`, and
+`CHAT_GLOBAL_LIMIT_REACHED`. Raw IP is not persisted. Provider failures after a
+successful reservation are not refunded. Session creation and feedback do not
+consume AI quota.
 
 ---
 

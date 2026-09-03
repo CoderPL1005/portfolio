@@ -30,6 +30,7 @@ internal sealed class ContentTestDbContext(DbContextOptions<ContentTestDbContext
     public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
     public DbSet<ChatMessageSource> ChatMessageSources => Set<ChatMessageSource>();
     public DbSet<ChatMessageFeedback> ChatMessageFeedback => Set<ChatMessageFeedback>();
+    public DbSet<ChatUsageDaily> ChatUsageDaily => Set<ChatUsageDaily>();
 
     DbSet<AdminUser> IApplicationDbContext.AdminUsers => throw new NotSupportedException();
     DbSet<AdminRefreshToken> IApplicationDbContext.AdminRefreshTokens => throw new NotSupportedException();
@@ -87,6 +88,7 @@ internal sealed class ContentTestDbContext(DbContextOptions<ContentTestDbContext
         modelBuilder.Entity<ChatMessage>().HasKey(item=>item.Id);modelBuilder.Entity<ChatMessage>().HasOne(item=>item.ChatSession).WithMany().HasForeignKey(item=>item.ChatSessionId);
         modelBuilder.Entity<ChatMessageSource>().HasKey(item=>item.Id);modelBuilder.Entity<ChatMessageSource>().HasOne(item=>item.ChatMessage).WithMany().HasForeignKey(item=>item.ChatMessageId);modelBuilder.Entity<ChatMessageSource>().HasOne(item=>item.KnowledgeChunk).WithMany().HasForeignKey(item=>item.KnowledgeChunkId);
         modelBuilder.Entity<ChatMessageFeedback>().HasKey(item=>item.Id);modelBuilder.Entity<ChatMessageFeedback>().HasOne(item=>item.ChatMessage).WithMany().HasForeignKey(item=>item.ChatMessageId);
+        modelBuilder.Entity<ChatUsageDaily>().HasKey(item => new { item.UsageDate, item.VisitorKey });
         modelBuilder.Entity<ChatSession>().Property(item => item.Metadata).HasConversion(
             value => value.RootElement.GetRawText(), value => System.Text.Json.JsonDocument.Parse(
                 value, default(System.Text.Json.JsonDocumentOptions)));

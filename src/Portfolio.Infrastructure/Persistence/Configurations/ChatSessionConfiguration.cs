@@ -12,6 +12,7 @@ public sealed class ChatSessionConfiguration : IEntityTypeConfiguration<ChatSess
         {
             table.HasCheckConstraint("ck_chat_sessions_status", "status IN ('ACTIVE', 'CLOSED')");
             table.HasCheckConstraint("ck_chat_sessions_message_count", "message_count >= 0");
+            table.HasCheckConstraint("ck_chat_sessions_user_message_count", "user_message_count >= 0");
         });
         builder.HasKey(entity => entity.Id).HasName("chat_sessions_pkey");
         builder.Property(entity => entity.Id).HasColumnName("id").HasColumnType("uuid").HasDefaultValueSql("gen_random_uuid()");
@@ -21,6 +22,7 @@ public sealed class ChatSessionConfiguration : IEntityTypeConfiguration<ChatSess
         builder.Property(entity => entity.LastMessageAt).HasColumnName("last_message_at").HasColumnType("timestamp with time zone");
         builder.Property(entity => entity.ClosedAt).HasColumnName("closed_at").HasColumnType("timestamp with time zone");
         builder.Property(entity => entity.MessageCount).HasColumnName("message_count").HasDefaultValue(0);
+        builder.Property(entity => entity.UserMessageCount).HasColumnName("user_message_count").HasDefaultValue(0);
         builder.Property(entity => entity.Metadata).HasColumnName("metadata").HasColumnType("jsonb").HasDefaultValueSql("'{}'::jsonb");
         builder.HasAlternateKey(entity => entity.PublicSessionId).HasName("uq_chat_sessions_public_session_id");
         builder.HasIndex(entity => new { entity.Status, entity.LastMessageAt }).HasDatabaseName("ix_chat_sessions_status_last_message").IsDescending(false, true);

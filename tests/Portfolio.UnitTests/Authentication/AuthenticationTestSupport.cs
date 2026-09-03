@@ -99,6 +99,7 @@ internal sealed class AuthTestDbContext(DbContextOptions<AuthTestDbContext> opti
     DbSet<ChatMessage> IApplicationDbContext.ChatMessages => throw new NotSupportedException();
     DbSet<ChatMessageSource> IApplicationDbContext.ChatMessageSources => throw new NotSupportedException();
     DbSet<ChatMessageFeedback> IApplicationDbContext.ChatMessageFeedback => throw new NotSupportedException();
+    DbSet<ChatUsageDaily> IApplicationDbContext.ChatUsageDaily => throw new NotSupportedException();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -125,6 +126,7 @@ internal sealed class AuthTestDbContext(DbContextOptions<AuthTestDbContext> opti
         modelBuilder.Ignore<ChatMessage>();
         modelBuilder.Ignore<ChatMessageSource>();
         modelBuilder.Ignore<ChatMessageFeedback>();
+        modelBuilder.Ignore<ChatUsageDaily>();
         modelBuilder.Entity<AdminUser>().HasKey(admin => admin.Id);
         modelBuilder.Entity<AdminRefreshToken>().HasKey(token => token.Id);
         modelBuilder.Entity<AdminRefreshToken>()

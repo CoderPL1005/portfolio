@@ -12,7 +12,7 @@ The backend stack is:
 - PostgreSQL / Neon
 - PostgreSQL + pgvector
 - Cloudflare R2
-- OpenAI API
+- Gemini API
 - ASP.NET Core BackgroundService
 - Angular frontend consuming REST API
 
@@ -101,7 +101,7 @@ Domain
 must not know about:
 EF Core
 PostgreSQL
-OpenAI
+Gemini
 Cloudflare R2
 HTTP
 Angular
@@ -393,7 +393,7 @@ Use specialized abstractions only when a true infrastructure boundary exists, su
 
 ```text
 Cloudflare R2
-OpenAI
+Gemini
 JWT
 Password hashing
 pgvector search
@@ -459,8 +459,8 @@ Portfolio.Infrastructure/
 │   └── R2FileStorage.cs
 │
 ├── AI/
-│   ├── OpenAIEmbeddingService.cs
-│   └── OpenAIChatCompletionService.cs
+│   ├── GeminiEmbeddingService.cs
+│   └── GeminiChatCompletionService.cs
 │
 ├── Knowledge/
 │   ├── KnowledgeContentBuilder.cs
@@ -507,6 +507,10 @@ builder.Property(x => x.Embedding)
 ```
 
 Application must not depend directly on pgvector implementation details.
+
+Every stored vector and query vector must come from the same embedding model.
+After changing embedding providers/models, mark all active knowledge documents
+for reindexing and rebuild their chunks before relying on retrieval results.
 
 Use:
 
@@ -567,7 +571,7 @@ Wrong:
 ```text
 PUT Project
    ↓
-OpenAI embedding
+Gemini embedding
    ↓
 wait
    ↓
@@ -597,7 +601,7 @@ KnowledgeContentBuilder
         ↓
 KnowledgeChunker
         ↓
-OpenAIEmbeddingService
+GeminiEmbeddingService
         ↓
 replace chunks safely
         ↓
@@ -700,7 +704,7 @@ update chat session
 return grounded answer
 ```
 
-Do NOT call OpenAI directly from a Controller.
+Do NOT call Gemini directly from a Controller.
 
 The agent is portfolio-scoped.
 
@@ -871,7 +875,7 @@ Controllers must not contain:
 
 ```text
 EF queries
-OpenAI calls
+Gemini calls
 R2 calls
 business rules
 knowledge chunking logic
@@ -928,7 +932,7 @@ Do not expose:
 stack traces
 raw exception text
 connection strings
-OpenAI provider errors
+Gemini provider errors
 API secrets
 R2 credentials
 ```
@@ -1085,7 +1089,22 @@ ConnectionStrings__Database
 
 Jwt__SecretKey
 
-OpenAI__ApiKey
+Gemini__ApiKey
+Gemini__ChatModel
+Gemini__EmbeddingModel
+Gemini__EmbeddingDimensions
+Gemini__EnableIndexingWorker
+
+ChatProtection__BurstPermitLimit
+ChatProtection__BurstWindowSeconds
+ChatProtection__DailyPerVisitorLimit
+ChatProtection__SessionUserMessageLimit
+ChatProtection__GlobalDailyLimit
+ChatProtection__IpHashSecret
+
+Proxy__ForwardLimit
+Proxy__KnownProxies__0
+Proxy__KnownNetworks__0
 
 R2__AccountId
 R2__AccessKeyId
@@ -1093,6 +1112,19 @@ R2__SecretAccessKey
 R2__BucketName
 R2__PublicBaseUrl
 ```
+
+Current Gemini defaults are `gemini-3.1-flash-lite` for chat,
+`gemini-embedding-2` for embeddings, and `1536` embedding dimensions. The API
+key remains environment-only.
+
+Public chat messages use a `3/minute/IP` in-process burst limiter and durable
+PostgreSQL quotas of `20/UTC day/HMAC visitor`, `20 USER messages/session`, and
+`150/UTC day` globally. `ChatProtection__IpHashSecret` is a distinct required
+secret and raw client IP addresses are never persisted. Configure Render's
+actual trusted proxy addresses/networks through `Proxy__KnownProxies__N` or
+`Proxy__KnownNetworks__N`; forwarded headers from untrusted peers are ignored.
+Session, visitor, and global reservations are made atomically before Gemini
+calls, and no database transaction remains open during provider HTTP requests.
 
 Never commit real secrets.
 
@@ -1143,7 +1175,7 @@ PostgreSQL
 Ordinary tests should not call real:
 
 ```text
-OpenAI
+Gemini
 Cloudflare R2
 ```
 
@@ -1245,7 +1277,7 @@ should use an intentional transaction where those operations belong to one busin
 
 Do not call `SaveChangesAsync()` repeatedly without reason inside one use case.
 
-External systems such as R2/OpenAI cannot participate in PostgreSQL transactions; handle them explicitly with safe sequencing/compensation where required.
+External systems such as R2/Gemini cannot participate in PostgreSQL transactions; handle them explicitly with safe sequencing/compensation where required.
 
 ---
 
@@ -1368,7 +1400,7 @@ Infrastructure
 │
 ├── Cloudflare R2
 │
-├── OpenAI
+├── Gemini
 │    ├── Embeddings
 │    └── Chat Completion
 │

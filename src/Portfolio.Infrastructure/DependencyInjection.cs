@@ -10,7 +10,9 @@ using Portfolio.Infrastructure.Persistence.Seeding;
 using Portfolio.Application.Common.Abstractions.Storage;
 using Portfolio.Infrastructure.Storage;
 using Portfolio.Application.Common.Abstractions.AI;
+using Portfolio.Application.Common.Abstractions.Chat;
 using Portfolio.Infrastructure.AI;
+using Portfolio.Infrastructure.ChatProtection;
 
 namespace Portfolio.Infrastructure;
 
@@ -34,12 +36,24 @@ public static class DependencyInjection
         services.AddScoped<IRefreshTokenStore, RefreshTokenStore>();
         services.AddOptions<R2Settings>().Bind(configuration.GetSection(R2Settings.SectionName));
         services.AddSingleton<IFileStorage, R2FileStorage>();
-        services.AddOptions<OpenAISettings>().Bind(configuration.GetSection(OpenAISettings.SectionName));
-        services.AddSingleton<IEmbeddingService, OpenAIEmbeddingService>();
-        services.AddSingleton<IChatCompletionService, OpenAIChatCompletionService>();
+        services.AddOptions<GeminiSettings>().Bind(configuration.GetSection(GeminiSettings.SectionName));
+        services.AddHttpClient<IEmbeddingService, GeminiEmbeddingService>(client =>
+            client.Timeout = TimeSpan.FromSeconds(30));
+        services.AddHttpClient<IChatCompletionService, GeminiChatCompletionService>(client =>
+            client.Timeout = TimeSpan.FromSeconds(30));
         services.AddScoped<IKnowledgeRetriever, PgvectorKnowledgeRetriever>();
         services.AddScoped<IKnowledgeIndexer, KnowledgeIndexer>();
         services.AddHostedService<KnowledgeIndexingWorker>();
+        services.AddOptions<ChatProtectionSettings>()
+            .Bind(configuration.GetSection(ChatProtectionSettings.SectionName))
+            .Validate(settings => settings.BurstPermitLimit > 0, "ChatProtection:BurstPermitLimit must be positive.")
+            .Validate(settings => settings.BurstWindowSeconds > 0, "ChatProtection:BurstWindowSeconds must be positive.")
+            .Validate(settings => settings.DailyPerVisitorLimit > 0, "ChatProtection:DailyPerVisitorLimit must be positive.")
+            .Validate(settings => settings.SessionUserMessageLimit > 0, "ChatProtection:SessionUserMessageLimit must be positive.")
+            .Validate(settings => settings.GlobalDailyLimit >= settings.DailyPerVisitorLimit, "ChatProtection:GlobalDailyLimit must be at least DailyPerVisitorLimit.")
+            .Validate(settings => settings.IpHashSecret?.Length >= 32, "ChatProtection:IpHashSecret must contain at least 32 characters.")
+            .ValidateOnStart();
+        services.AddScoped<IChatQuotaService, PostgresChatQuotaService>();
         services.AddOptions<JwtSettings>()
             .Bind(configuration.GetSection(JwtSettings.SectionName))
             .Validate(settings => !string.IsNullOrWhiteSpace(settings.Issuer), "Jwt:Issuer is required.")

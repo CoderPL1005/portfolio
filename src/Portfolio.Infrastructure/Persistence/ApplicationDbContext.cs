@@ -33,6 +33,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
     public DbSet<ChatMessageSource> ChatMessageSources => Set<ChatMessageSource>();
     public DbSet<ChatMessageFeedback> ChatMessageFeedback => Set<ChatMessageFeedback>();
+    public DbSet<ChatUsageDaily> ChatUsageDaily => Set<ChatUsageDaily>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {

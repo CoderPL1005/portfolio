@@ -30,6 +30,7 @@ public interface IApplicationDbContext
     DbSet<ChatMessage> ChatMessages { get; }
     DbSet<ChatMessageSource> ChatMessageSources { get; }
     DbSet<ChatMessageFeedback> ChatMessageFeedback { get; }
+    DbSet<ChatUsageDaily> ChatUsageDaily { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

@@ -68,7 +68,7 @@ External services:
 
 ```text
 Cloudflare R2
-OpenAI API
+Gemini API
 ```
 
 Deployment target:
@@ -116,7 +116,7 @@ Controllers must remain thin.
 Angular must not directly call:
 
 ```text
-OpenAI
+Gemini
 Cloudflare R2 with secrets
 PostgreSQL
 ```
@@ -928,7 +928,7 @@ Implement:
 Agent Settings backend
 KnowledgeContentBuilder
 KnowledgeChunker
-OpenAIEmbeddingService
+GeminiEmbeddingService
 KnowledgeIndexer
 KnowledgeSearchService
 KnowledgeIndexingWorker
@@ -1194,7 +1194,7 @@ Chat session/message/feedback
 
 External providers should use fakes/test doubles.
 
-Do not call real OpenAI or real R2 during standard CI tests.
+Do not call real Gemini or real R2 during standard CI tests.
 
 ## Exit criteria
 
@@ -1236,7 +1236,22 @@ Jwt__SecretKey
 AdminBootstrap__Email
 AdminBootstrap__Password
 
-OpenAI__ApiKey
+Gemini__ApiKey
+Gemini__ChatModel
+Gemini__EmbeddingModel
+Gemini__EmbeddingDimensions
+Gemini__EnableIndexingWorker
+
+ChatProtection__BurstPermitLimit
+ChatProtection__BurstWindowSeconds
+ChatProtection__DailyPerVisitorLimit
+ChatProtection__SessionUserMessageLimit
+ChatProtection__GlobalDailyLimit
+ChatProtection__IpHashSecret
+
+Proxy__ForwardLimit
+Proxy__KnownProxies__0
+Proxy__KnownNetworks__0
 
 R2__AccountId
 R2__AccessKeyId
@@ -1245,7 +1260,19 @@ R2__BucketName
 R2__PublicBaseUrl
 ```
 
+Use `gemini-3.1-flash-lite` for chat and `gemini-embedding-2` with output
+dimensionality `1536` for the existing pgvector schema. Keep the Gemini API key
+in deployment secrets only. Reindex all active knowledge after changing the
+embedding provider/model so stored and query vectors share one embedding space.
+
 Do NOT commit real values.
+
+Before production chat is enabled, apply the additive durable chat-protection
+migration and configure a separate `ChatProtection__IpHashSecret` plus Render's
+trusted proxy/network values. Public AI messages are limited to 3/minute/IP,
+20/UTC day/HMAC visitor, 20 USER messages/session, and 150/UTC day globally.
+Quota reservation occurs before Gemini work; session creation and feedback do
+not consume AI quota. There is no OpenAI or paid-provider fallback.
 
 Create:
 
@@ -1275,7 +1302,7 @@ Media
 → Cloudflare R2
 
 LLM / Embedding
-→ OpenAI API
+→ Gemini API
 ```
 
 Deployment order:
@@ -1451,7 +1478,7 @@ AI AGENT
 INFRASTRUCTURE
 ✅ Neon PostgreSQL
 ✅ Cloudflare R2
-✅ OpenAI backend integration
+✅ Gemini backend integration
 ✅ Deployment configuration
 
 QUALITY

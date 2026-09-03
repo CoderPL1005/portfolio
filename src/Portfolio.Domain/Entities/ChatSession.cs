@@ -11,5 +11,6 @@ public sealed class ChatSession
     public DateTimeOffset? LastMessageAt { get; set; }
     public DateTimeOffset? ClosedAt { get; set; }
     public int MessageCount { get; set; }
+    public int UserMessageCount { get; set; }
     public JsonDocument Metadata { get; set; } = null!;
 }

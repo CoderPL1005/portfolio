@@ -18,11 +18,11 @@ public sealed class ApplicationDbContextModelTests
         "project_sections", "project_media", "skills", "educations", "trainings", "certificates",
         "journey_items", "social_links", "site_settings", "agent_settings",
         "knowledge_documents", "knowledge_chunks", "chat_sessions", "chat_messages",
-        "chat_message_sources", "chat_message_feedback"
+        "chat_message_sources", "chat_message_feedback", "chat_usage_daily"
     ];
 
     [Fact]
-    public void Model_contains_all_25_expected_tables_and_excludes_contact_messages()
+    public void Model_contains_all_26_expected_tables_and_excludes_contact_messages()
     {
         using var context = CreateContext();
         var tables = context.Model.GetEntityTypes().Select(entity => entity.GetTableName()).Order().ToArray();
@@ -33,13 +33,13 @@ public sealed class ApplicationDbContextModelTests
     }
 
     [Fact]
-    public void Application_context_contract_exposes_all_25_sets()
+    public void Application_context_contract_exposes_all_26_sets()
     {
         var dbSetCount = typeof(IApplicationDbContext).GetProperties()
             .Count(property => property.PropertyType.IsGenericType &&
                 property.PropertyType.GetGenericTypeDefinition() == typeof(DbSet<>));
 
-        Assert.Equal(25, dbSetCount);
+        Assert.Equal(26, dbSetCount);
     }
 
     [Fact]
@@ -58,7 +58,7 @@ public sealed class ApplicationDbContextModelTests
         var model = context.GetService<IDesignTimeModel>().Model;
 
         Assert.Equal(19, model.GetEntityTypes().SelectMany(entity => entity.GetForeignKeys()).Count());
-        Assert.Equal(33, model.GetEntityTypes().SelectMany(entity => entity.GetCheckConstraints()).Count());
+        Assert.Equal(35, model.GetEntityTypes().SelectMany(entity => entity.GetCheckConstraints()).Count());
         Assert.Equal(22, model.GetEntityTypes().SelectMany(entity => entity.GetIndexes()).Count());
 
         var experienceTechnology = model.FindEntityType(typeof(ExperienceTechnology))!;
@@ -76,6 +76,11 @@ public sealed class ApplicationDbContextModelTests
             Assert.Equal(new[] { nameof(Project.Id) }, foreignKey.PrincipalKey.Properties.Select(property => property.Name)));
         var socialLink = model.FindEntityType(typeof(SocialLink))!;
         Assert.Equal(new[] { nameof(SocialLink.Id) }, socialLink.FindPrimaryKey()!.Properties.Select(property => property.Name));
+        var usage = model.FindEntityType(typeof(ChatUsageDaily))!;
+        Assert.Equal(
+            new[] { nameof(ChatUsageDaily.UsageDate), nameof(ChatUsageDaily.VisitorKey) },
+            usage.FindPrimaryKey()!.Properties.Select(property => property.Name));
+        Assert.NotNull(model.FindEntityType(typeof(ChatSession))!.FindProperty(nameof(ChatSession.UserMessageCount)));
 
         var chunkForeignKey = model.FindEntityType(typeof(KnowledgeChunk))!.GetForeignKeys().Single();
         Assert.Equal(DeleteBehavior.Cascade, chunkForeignKey.DeleteBehavior);
@@ -104,11 +109,12 @@ public sealed class ApplicationDbContextModelTests
         using var context = CreateContext();
         var migrations = context.Database.GetMigrations().ToArray();
 
-        Assert.Equal(4, migrations.Length);
+        Assert.Equal(5, migrations.Length);
         Assert.EndsWith("_InitialPortfolioSchema", migrations[0], StringComparison.Ordinal);
         Assert.EndsWith("_RemoveContactMessages", migrations[1], StringComparison.Ordinal);
         Assert.EndsWith("_AllowDuplicateSocialLinkPlatforms", migrations[2], StringComparison.Ordinal);
         Assert.EndsWith("_AllowProjectSlugUpdates", migrations[3], StringComparison.Ordinal);
+        Assert.EndsWith("_AddDurableChatProtection", migrations[4], StringComparison.Ordinal);
     }
 
     [Fact]
@@ -188,6 +194,29 @@ public sealed class ApplicationDbContextModelTests
         Assert.DoesNotContain("DROP TABLE", downScript, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("CREATE TABLE", downScript, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("FOREIGN KEY", downScript, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Chat_protection_migration_is_additive_and_preserves_vector_schema()
+    {
+        using var context = CreateContext();
+        var migrations = context.Database.GetMigrations().ToArray();
+        var migrator = context.GetService<IMigrator>();
+        var upScript = migrator.GenerateScript(migrations[3], migrations[4]);
+        var downScript = migrator.GenerateScript(migrations[4], migrations[3]);
+
+        Assert.Contains("ADD user_message_count integer", upScript, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("CREATE TABLE chat_usage_daily", upScript, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("PRIMARY KEY (usage_date, visitor_key)", upScript, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("message.role = 'USER'", upScript, StringComparison.Ordinal);
+        Assert.DoesNotContain("knowledge_chunks", upScript, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("vector(1536)", upScript, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("DROP TABLE", upScript, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("DELETE FROM", upScript, StringComparison.OrdinalIgnoreCase);
+
+        Assert.Contains("DROP TABLE chat_usage_daily", downScript, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("DROP COLUMN user_message_count", downScript, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("knowledge_chunks", downScript, StringComparison.OrdinalIgnoreCase);
     }
 
     private static ApplicationDbContext CreateContext()
