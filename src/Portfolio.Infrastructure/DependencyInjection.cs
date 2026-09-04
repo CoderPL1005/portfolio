@@ -39,6 +39,8 @@ public static class DependencyInjection
         services.AddOptions<GeminiSettings>().Bind(configuration.GetSection(GeminiSettings.SectionName));
         services.AddHttpClient<IEmbeddingService, GeminiEmbeddingService>(client =>
             client.Timeout = TimeSpan.FromSeconds(30));
+        services.AddHttpClient<IRetrievalQueryRewriter, GeminiRetrievalQueryRewriter>(client =>
+            client.Timeout = TimeSpan.FromSeconds(30));
         services.AddHttpClient<IChatCompletionService, GeminiChatCompletionService>(client =>
             client.Timeout = TimeSpan.FromSeconds(30));
         services.AddScoped<IKnowledgeRetriever, PgvectorKnowledgeRetriever>();
