@@ -1,6 +1,6 @@
-import { HttpErrorResponse } from '@angular/common/http';
 import { TestBed } from '@angular/core/testing';
 import { of, Subject, throwError } from 'rxjs';
+import { ApiHttpError } from '../../core/api/api-error.model';
 import { AgentService } from './agent.service';
 import { ChatWidgetComponent } from './chat-widget.component';
 
@@ -123,10 +123,59 @@ describe('ChatWidgetComponent', () => {
     expect(component.error()).not.toContain('credential');
   });
 
-  it('preserves safe rate-limit error presentation', () => {
-    api.send.mockReturnValue(throwError(() => new HttpErrorResponse({ status: 429, error: { message: 'Too many requests.' } })));
+  it.each([
+    ['CHAT_RATE_LIMITED', 'Bạn đang gửi tin nhắn quá nhanh. Vui lòng đợi một chút rồi thử lại.'],
+    ['CHAT_DAILY_LIMIT_REACHED', 'Bạn đã đạt giới hạn sử dụng chatbot trong ngày. Vui lòng thử lại vào ngày mai.'],
+    ['CHAT_SESSION_LIMIT_REACHED', 'Phiên trò chuyện này đã đạt giới hạn tin nhắn. Hãy tạo một phiên trò chuyện mới.'],
+    ['CHAT_GLOBAL_LIMIT_REACHED', 'Chatbot đã đạt giới hạn sử dụng trong ngày. Vui lòng thử lại sau.'],
+  ])('maps 429 %s to its visitor-facing message', (code, message) => {
+    api.send.mockReturnValue(throwError(() => new ApiHttpError(429, { code, message: 'Backend message.' })));
+
     const { fixture, component } = createAndSend('Hi');
-    expect(component.error()).toBeTruthy();
-    expect(fixture.nativeElement.querySelector('[role="alert"]')).not.toBeNull();
+
+    expect(component.error()).toBe(message);
+    expect(fixture.nativeElement.querySelector('[role="alert"]')?.textContent).toContain(message);
+  });
+
+  it.each(['UNKNOWN_LIMIT', 'HTTP_429'])('uses the generic message for 429 code %s', code => {
+    api.send.mockReturnValue(throwError(() => new ApiHttpError(429, { code, message: 'Unknown limit.' })));
+
+    const { component } = createAndSend('Hi');
+
+    expect(component.error()).toBe('Bạn đang gửi tin nhắn quá nhanh. Vui lòng đợi một chút rồi thử lại.');
+  });
+
+  it('ends loading, allows another input, does not retry, and adds no fake assistant answer after 429', () => {
+    api.send.mockReturnValue(throwError(() => new ApiHttpError(429, {
+      code: 'CHAT_RATE_LIMITED',
+      message: 'Too many messages.',
+    })));
+
+    const { fixture, component } = createAndSend('Keep this message');
+    const textarea = fixture.nativeElement.querySelector('textarea') as HTMLTextAreaElement;
+
+    expect(component.loading()).toBe(false);
+    expect(api.send).toHaveBeenCalledTimes(1);
+    expect(component.lines().filter(line => line.role === 'USER').map(line => line.content)).toEqual(['Keep this message']);
+    expect(component.lines().filter(line => line.role === 'ASSISTANT')).toHaveLength(1);
+    expect(textarea.disabled).toBe(false);
+    expect((fixture.nativeElement.querySelector('form button') as HTMLButtonElement).disabled).toBe(true);
+
+    api.send.mockReturnValue(of({ messageId: 'next', answer: 'Available again', sources: [] }));
+    component.draft = 'Try later';
+    component.send();
+    expect(api.send).toHaveBeenCalledTimes(2);
+    expect(component.lines().at(-1)?.content).toBe('Available again');
+  });
+
+  it('preserves existing non-429 API error behavior', () => {
+    api.send.mockReturnValue(throwError(() => new ApiHttpError(503, {
+      code: 'AGENT_UNAVAILABLE',
+      message: 'The portfolio assistant is temporarily unavailable.',
+    })));
+
+    const { component } = createAndSend('Hi');
+
+    expect(component.error()).toBe('The portfolio assistant is temporarily unavailable.');
   });
 });

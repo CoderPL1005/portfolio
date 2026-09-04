@@ -104,8 +104,8 @@ if (app.Environment.IsDevelopment())
 
 app.UseForwardedHeaders();
 app.UseMiddleware<ExceptionHandlingMiddleware>();
-app.UseRateLimiter();
 app.UseCors(FrontendCorsPolicy);
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseMiddleware<AuthenticationResponseMiddleware>();
 app.UseAuthorization();

@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, ElementRef, inject, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { finalize, take } from 'rxjs';
+import { ApiHttpError } from '../../core/api/api-error.model';
 import { safeAdminError } from '../admin/shared/admin-api';
 import { ChatSource } from './agent.models';
 import { AgentService } from './agent.service';
@@ -8,6 +9,20 @@ import { AssistantMarkdownComponent } from './assistant-markdown.component';
 
 interface Line { role: 'USER' | 'ASSISTANT'; content: string; id?: string; sources?: ChatSource[] }
 type FeedbackState = 'PENDING' | 'POSITIVE' | 'NEGATIVE';
+
+const genericRateLimitMessage = 'Bạn đang gửi tin nhắn quá nhanh. Vui lòng đợi một chút rồi thử lại.';
+const rateLimitMessages: Readonly<Record<string, string>> = {
+  CHAT_RATE_LIMITED: genericRateLimitMessage,
+  CHAT_DAILY_LIMIT_REACHED: 'Bạn đã đạt giới hạn sử dụng chatbot trong ngày. Vui lòng thử lại vào ngày mai.',
+  CHAT_SESSION_LIMIT_REACHED: 'Phiên trò chuyện này đã đạt giới hạn tin nhắn. Hãy tạo một phiên trò chuyện mới.',
+  CHAT_GLOBAL_LIMIT_REACHED: 'Chatbot đã đạt giới hạn sử dụng trong ngày. Vui lòng thử lại sau.',
+};
+
+export function chatErrorMessage(error: unknown): string {
+  if (error instanceof ApiHttpError && error.status === 429)
+    return rateLimitMessages[error.apiError.code] ?? genericRateLimitMessage;
+  return safeAdminError(error);
+}
 
 @Component({
   selector: 'app-chat-widget',
@@ -139,7 +154,7 @@ export class ChatWidgetComponent {
         this.scrollConversation();
       },
       error: error => {
-        this.error.set(safeAdminError(error));
+        this.error.set(chatErrorMessage(error));
         this.scrollConversation();
       },
     });
