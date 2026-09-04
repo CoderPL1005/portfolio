@@ -3,7 +3,11 @@ namespace Portfolio.Application.Common.Abstractions.AI;
 public interface IEmbeddingService { Task<float[]> GenerateEmbeddingAsync(string text, CancellationToken cancellationToken = default); }
 public interface IRetrievalQueryRewriter { Task<RetrievalQueryRewriteResult> RewriteAsync(string originalMessage, CancellationToken cancellationToken = default); }
 public interface IChatCompletionService { Task<ChatCompletionResult> CompleteAsync(ChatCompletionRequest request, CancellationToken cancellationToken = default); }
-public interface IKnowledgeRetriever { Task<IReadOnlyCollection<RetrievedKnowledge>> RetrieveAsync(float[] embedding, int topK, decimal? minimumSimilarity, CancellationToken cancellationToken = default); }
+public interface IKnowledgeRetriever
+{
+    Task<IReadOnlyCollection<RetrievedKnowledge>> RetrieveAsync(float[] embedding, int topK, decimal? minimumSimilarity, CancellationToken cancellationToken = default);
+    Task<IReadOnlyCollection<RetrievedKnowledge>> RetrieveCollectionAsync(float[] embedding, string sourceType, int topK, decimal? minimumSimilarity, CancellationToken cancellationToken = default);
+}
 public interface IKnowledgeIndexer { Task IndexPendingAsync(CancellationToken cancellationToken = default); }
 public sealed record ChatHistoryItem(string Role,string Content);
 public sealed record RetrievalQueryRewriteResult(bool Usable,string? Query)

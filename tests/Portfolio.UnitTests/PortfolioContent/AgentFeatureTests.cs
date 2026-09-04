@@ -93,6 +93,34 @@ public sealed class AgentFeatureTests
 
         Assert.Equal(["quota", "embedding", "completion"], calls);
     }
+
+    [Fact]
+    public async Task Ordinary_success_preserves_normal_retrieval_without_rewrite()
+    {
+        await using var db = PublicPortfolioTests.CreateContext();
+        var session = Session();
+        var document = Document();
+        var chunk = Chunk(document.Id);
+        db.AddRange(Setting(), session, document, chunk);
+        await db.SaveChangesAsync();
+        var context = new RetrievedKnowledge(
+            chunk.Id, document.Id, "SchoolSaaS", "PROJECT", document.SourceRefId,
+            "school-saas", "Project context", 1, .8m);
+        var embedding = new TrackingEmbedding();
+        var retriever = new SequenceRetriever(new[] { context });
+        var rewriter = new CountingRewriter(RetrievalQueryRewriteResult.Unusable);
+
+        await new SendChatMessageCommandHandler(
+            db, new CountingQuota(), embedding, retriever, rewriter, new FakeChat(), new FixedTimeProvider(Now))
+            .HandleAsync(new(session.PublicSessionId, "Tell me about SchoolSaaS.", "ip:test"));
+
+        Assert.Single(embedding.Inputs);
+        var normalCall = Assert.Single(retriever.Calls);
+        Assert.Equal(6, normalCall.TopK);
+        Assert.Equal(.6m, normalCall.MinimumSimilarity);
+        Assert.Empty(retriever.CollectionCalls);
+        Assert.Equal(0, rewriter.Calls);
+    }
     [Theory]
     [InlineData("Give me a recipe for pho.")]
     [InlineData("Tell me more.")]
@@ -116,6 +144,7 @@ public sealed class AgentFeatureTests
         Assert.Equal(1, quota.Calls);
         Assert.Equal([message], embedding.Inputs);
         Assert.Single(retriever.Calls);
+        Assert.Empty(retriever.CollectionCalls);
         Assert.Equal(1, rewriter.Calls);
         Assert.Equal([message], rewriter.Messages);
         Assert.Equal(0, completion.Calls);
@@ -145,6 +174,8 @@ public sealed class AgentFeatureTests
     [Fact]
     public async Task Usable_rewrite_retrieves_once_with_same_limits_and_preserves_original_message()
     {
+        const string classifiedOriginal = "Ph\u00fac c\u00f3 nh\u1eefng kinh nghi\u1ec7m l\u00e0m vi\u1ec7c n\u00e0o?";
+        const string classifiedRewrite = "What work experience does Ph\u00fac have?";
         await using var db = PublicPortfolioTests.CreateContext();
         var session = Session();
         var document = Document();
@@ -156,32 +187,36 @@ public sealed class AgentFeatureTests
         var repairedContext = new RetrievedKnowledge(
             chunk.Id, document.Id, "RTC Technology Vietnam", "EXPERIENCE", Guid.NewGuid(), null,
             "Software Developer Intern", 1, .72m);
+        _ = original;
+        _ = rewritten;
         var quota = new CountingQuota();
         var embedding = new TrackingEmbedding();
         var retriever = new SequenceRetriever(
             Array.Empty<RetrievedKnowledge>(),
             new[] { repairedContext });
-        var rewriter = new CountingRewriter(new(true, rewritten));
+        var rewriter = new CountingRewriter(new(true, classifiedRewrite));
         var completion = new FakeChat();
 
         var result = await new SendChatMessageCommandHandler(
             db, quota, embedding, retriever, rewriter, completion, new FixedTimeProvider(Now))
-            .HandleAsync(new(session.PublicSessionId, original, "ip:test"));
+            .HandleAsync(new(session.PublicSessionId, classifiedOriginal, "ip:test"));
 
-        Assert.Equal([original, rewritten], embedding.Inputs);
+        Assert.Equal([classifiedOriginal, classifiedRewrite], embedding.Inputs);
         Assert.Equal(1, rewriter.Calls);
-        Assert.Equal(2, retriever.Calls.Count);
-        Assert.All(retriever.Calls, call =>
+        Assert.Empty(retriever.Calls);
+        Assert.Equal(2, retriever.CollectionCalls.Count);
+        Assert.All(retriever.CollectionCalls, call =>
         {
+            Assert.Equal("EXPERIENCE", call.SourceType);
             Assert.Equal(6, call.TopK);
             Assert.Equal(.6m, call.MinimumSimilarity);
         });
-        Assert.Equal(original, completion.Request!.UserMessage);
+        Assert.Equal(classifiedOriginal, completion.Request!.UserMessage);
         Assert.Equal(repairedContext, completion.Request.Context.Single());
         Assert.Equal(repairedContext.Title, result.Sources.Single().Title);
         Assert.Equal(1, quota.Calls);
-        Assert.Equal(original, (await db.ChatMessages.SingleAsync(item => item.Role == "USER")).Content);
-        Assert.DoesNotContain(await db.ChatMessages.ToListAsync(), item => item.Content == rewritten);
+        Assert.Equal(classifiedOriginal, (await db.ChatMessages.SingleAsync(item => item.Role == "USER")).Content);
+        Assert.DoesNotContain(await db.ChatMessages.ToListAsync(), item => item.Content == classifiedRewrite);
         var source = await db.ChatMessageSources.SingleAsync();
         Assert.Equal(chunk.Id, source.KnowledgeChunkId);
     }
@@ -211,6 +246,104 @@ public sealed class AgentFeatureTests
         Assert.Equal(0, completion.Calls);
         Assert.Empty(await db.ChatMessageSources.ToListAsync());
     }
+
+    [Theory]
+    [InlineData("What projects has Ph\u00fac built?")]
+    [InlineData("Ph\u00fac \u0111\u00e3 l\u00e0m nh\u1eefng d\u1ef1 \u00e1n n\u00e0o?")]
+    public async Task Direct_collection_success_uses_one_embedding_without_rewrite_or_normal_retrieval(
+        string originalMessage)
+    {
+        await using var db = PublicPortfolioTests.CreateContext();
+        var session = Session();
+        var document = Document();
+        var chunk = Chunk(document.Id);
+        db.AddRange(Setting(), session, document, chunk);
+        await db.SaveChangesAsync();
+        var context = new RetrievedKnowledge(
+            chunk.Id, document.Id, "SchoolSaaS", "PROJECT", document.SourceRefId,
+            "school-saas", "Project context", 1, .74m);
+        var quota = new CountingQuota();
+        var embedding = new TrackingEmbedding();
+        var retriever = new SequenceRetriever(new[] { context });
+        var rewriter = new CountingRewriter(RetrievalQueryRewriteResult.Unusable);
+        var completion = new FakeChat();
+
+        var result = await new SendChatMessageCommandHandler(
+            db, quota, embedding, retriever, rewriter, completion, new FixedTimeProvider(Now))
+            .HandleAsync(new(session.PublicSessionId, originalMessage, "ip:test"));
+
+        Assert.Equal([originalMessage], embedding.Inputs);
+        Assert.Empty(retriever.Calls);
+        var collectionCall = Assert.Single(retriever.CollectionCalls);
+        Assert.Equal("PROJECT", collectionCall.SourceType);
+        Assert.Equal(6, collectionCall.TopK);
+        Assert.Equal(.6m, collectionCall.MinimumSimilarity);
+        Assert.Equal(0, rewriter.Calls);
+        Assert.Equal(1, quota.Calls);
+        Assert.Equal(originalMessage, completion.Request!.UserMessage);
+        Assert.Equal(context, completion.Request.Context.Single());
+        Assert.Equal(context.Title, result.Sources.Single().Title);
+        Assert.Equal(chunk.Id, (await db.ChatMessageSources.SingleAsync()).KnowledgeChunkId);
+    }
+
+    [Fact]
+    public async Task Collection_rewrite_failure_fails_closed_without_retry()
+    {
+        await using var db = PublicPortfolioTests.CreateContext();
+        var session = Session();
+        db.AddRange(Setting(), session);
+        await db.SaveChangesAsync();
+        const string original = "Ph\u00fac \u0111\u00e3 l\u00e0m nh\u1eefng d\u1ef1 \u00e1n n\u00e0o?";
+        var embedding = new TrackingEmbedding();
+        var retriever = new SequenceRetriever(Array.Empty<RetrievedKnowledge>());
+        var rewriter = new ThrowingRewriter();
+
+        var result = await new SendChatMessageCommandHandler(
+            db, new CountingQuota(), embedding, retriever, rewriter, new CountingChat(), new FixedTimeProvider(Now))
+            .HandleAsync(new(session.PublicSessionId, original, "ip:test"));
+
+        Assert.Equal("Not available", result.Answer);
+        Assert.Equal([original], embedding.Inputs);
+        Assert.Empty(retriever.Calls);
+        var collectionCall = Assert.Single(retriever.CollectionCalls);
+        Assert.Equal("PROJECT", collectionCall.SourceType);
+        Assert.Equal(1, rewriter.Calls);
+    }
+
+    [Fact]
+    public async Task Empty_repaired_collection_uses_fallback_without_retry_or_persisted_rewrite()
+    {
+        await using var db = PublicPortfolioTests.CreateContext();
+        var session = Session();
+        db.AddRange(Setting(), session);
+        await db.SaveChangesAsync();
+        const string original = "Ph\u00fac \u0111\u00e3 l\u00e0m nh\u1eefng d\u1ef1 \u00e1n n\u00e0o?";
+        const string rewritten = "What projects has Ph\u00fac built?";
+        var embedding = new TrackingEmbedding();
+        var retriever = new SequenceRetriever(
+            Array.Empty<RetrievedKnowledge>(),
+            Array.Empty<RetrievedKnowledge>());
+        var rewriter = new CountingRewriter(new(true, rewritten));
+        var completion = new CountingChat();
+
+        var result = await new SendChatMessageCommandHandler(
+            db, new CountingQuota(), embedding, retriever, rewriter, completion, new FixedTimeProvider(Now))
+            .HandleAsync(new(session.PublicSessionId, original, "ip:test"));
+
+        Assert.Equal("Not available", result.Answer);
+        Assert.Equal([original, rewritten], embedding.Inputs);
+        Assert.Empty(retriever.Calls);
+        Assert.Equal(2, retriever.CollectionCalls.Count);
+        Assert.All(retriever.CollectionCalls, call =>
+        {
+            Assert.Equal("PROJECT", call.SourceType);
+            Assert.Equal(6, call.TopK);
+            Assert.Equal(.6m, call.MinimumSimilarity);
+        });
+        Assert.Equal(1, rewriter.Calls);
+        Assert.Equal(0, completion.Calls);
+        Assert.DoesNotContain(await db.ChatMessages.ToListAsync(), item => item.Content == rewritten);
+    }
     [Fact]public async Task Feedback_is_assistant_only_and_unique(){await using var db=PublicPortfolioTests.CreateContext();var s=Session();var m=new ChatMessage{Id=Guid.NewGuid(),ChatSessionId=s.Id,Role="ASSISTANT",Content="a",CreatedAt=Now};db.AddRange(s,m);await db.SaveChangesAsync();var handler=new SubmitChatFeedbackCommandHandler(db,new FixedTimeProvider(Now));await handler.HandleAsync(new(m.Id,"positive",null));var conflict=await Assert.ThrowsAsync<ConflictException>(()=>handler.HandleAsync(new(m.Id,"NEGATIVE",null)));Assert.Equal("FEEDBACK_ALREADY_EXISTS",conflict.Code);}
     [Fact]public async Task Settings_validation_and_update_never_include_api_key(){var failures=await new UpdateAgentSettingsCommandValidator().ValidateAsync(new(true,null,null,null,null,"",null,null,0,2,3));Assert.True(failures.Count>=4);Assert.DoesNotContain(typeof(AgentSettingsResult).GetProperties(),x=>x.Name.Contains("Key"));}
     private static AgentSetting Setting()=>new(){Id=Guid.NewGuid(),Name="portfolio-agent",Enabled=true,EmbeddingDimensions=1536,SystemPrompt="Ground answers.",FallbackMessage="Not available",MaxContextChunks=6,MinimumSimilarity=.6m,Temperature=.2m,CreatedAt=Now,UpdatedAt=Now};private static ChatSession Session()=>new(){Id=Guid.NewGuid(),PublicSessionId=Guid.NewGuid(),Status="ACTIVE",StartedAt=Now,MessageCount=10,Metadata=JsonDocument.Parse("{}")};private static KnowledgeDocument Document()=>new(){Id=Guid.NewGuid(),SourceType="PROJECT",SourceRefId=Guid.NewGuid(),SourceKey="project:test",Title="Test",Content="context",ContentHash="h",Version=1,Metadata=JsonDocument.Parse("{\"projectSlug\":\"test\"}"),IsActive=true,IndexingStatus="INDEXED",CreatedAt=Now,UpdatedAt=Now};private static KnowledgeChunk Chunk(Guid doc)=>new(){Id=Guid.NewGuid(),KnowledgeDocumentId=doc,ChunkIndex=0,Content="context",EmbeddingModel="fake",Metadata=JsonDocument.Parse("{}"),CreatedAt=Now};
@@ -222,8 +355,8 @@ public sealed class AgentFeatureTests
     private sealed class CountingEmbedding:IEmbeddingService{public int Calls{get;private set;}public Task<float[]> GenerateEmbeddingAsync(string t,CancellationToken c=default){Calls++;return Task.FromResult(new float[1536]);}}
     private sealed class TrackingEmbedding:IEmbeddingService{public List<string> Inputs{get;}=[];public Task<float[]> GenerateEmbeddingAsync(string t,CancellationToken c=default){Inputs.Add(t);return Task.FromResult(new float[1536]);}}
     private sealed class OrderedEmbedding(List<string> calls):IEmbeddingService{public Task<float[]> GenerateEmbeddingAsync(string t,CancellationToken c=default){calls.Add("embedding");return Task.FromResult(new float[1536]);}}
-    private sealed class WrongDimensionEmbedding:IEmbeddingService{public Task<float[]> GenerateEmbeddingAsync(string t,CancellationToken c=default)=>Task.FromResult(new float[3]);}private sealed class ThrowingEmbedding:IEmbeddingService{public Task<float[]> GenerateEmbeddingAsync(string t,CancellationToken c=default)=>throw new InvalidOperationException("provider credential detail");}private sealed class EmptyRetriever:IKnowledgeRetriever{public Task<IReadOnlyCollection<RetrievedKnowledge>> RetrieveAsync(float[] e,int k,decimal? m,CancellationToken c=default)=>Task.FromResult<IReadOnlyCollection<RetrievedKnowledge>>([]);}private sealed class FakeRetriever(Guid chunk,Guid doc):IKnowledgeRetriever{public Task<IReadOnlyCollection<RetrievedKnowledge>> RetrieveAsync(float[] e,int k,decimal? m,CancellationToken c=default)=>Task.FromResult<IReadOnlyCollection<RetrievedKnowledge>>([new(chunk,doc,"Test","PROJECT",Guid.NewGuid(),"test","context",1,.9m)]);}private sealed class FakeChat:IChatCompletionService{public ChatCompletionRequest? Request{get;private set;}public Task<ChatCompletionResult> CompleteAsync(ChatCompletionRequest r,CancellationToken c=default){Request=r;return Task.FromResult(new ChatCompletionResult("Grounded answer","fake",10,5,1));}}
-    private sealed class SequenceRetriever(params IReadOnlyCollection<RetrievedKnowledge>[] results):IKnowledgeRetriever{private readonly Queue<IReadOnlyCollection<RetrievedKnowledge>> results=new(results);public List<(int TopK,decimal? MinimumSimilarity)> Calls{get;}=[];public Task<IReadOnlyCollection<RetrievedKnowledge>> RetrieveAsync(float[] e,int k,decimal? m,CancellationToken c=default){Calls.Add((k,m));return Task.FromResult(results.Dequeue());}}
+    private sealed class WrongDimensionEmbedding:IEmbeddingService{public Task<float[]> GenerateEmbeddingAsync(string t,CancellationToken c=default)=>Task.FromResult(new float[3]);}private sealed class ThrowingEmbedding:IEmbeddingService{public Task<float[]> GenerateEmbeddingAsync(string t,CancellationToken c=default)=>throw new InvalidOperationException("provider credential detail");}private sealed class EmptyRetriever:IKnowledgeRetriever{public Task<IReadOnlyCollection<RetrievedKnowledge>> RetrieveAsync(float[] e,int k,decimal? m,CancellationToken c=default)=>Task.FromResult<IReadOnlyCollection<RetrievedKnowledge>>([]);public Task<IReadOnlyCollection<RetrievedKnowledge>> RetrieveCollectionAsync(float[] e,string s,int k,decimal? m,CancellationToken c=default)=>Task.FromResult<IReadOnlyCollection<RetrievedKnowledge>>([]);}private sealed class FakeRetriever(Guid chunk,Guid doc):IKnowledgeRetriever{private IReadOnlyCollection<RetrievedKnowledge> Result=>[new(chunk,doc,"Test","PROJECT",Guid.NewGuid(),"test","context",1,.9m)];public Task<IReadOnlyCollection<RetrievedKnowledge>> RetrieveAsync(float[] e,int k,decimal? m,CancellationToken c=default)=>Task.FromResult(Result);public Task<IReadOnlyCollection<RetrievedKnowledge>> RetrieveCollectionAsync(float[] e,string s,int k,decimal? m,CancellationToken c=default)=>Task.FromResult(Result);}private sealed class FakeChat:IChatCompletionService{public ChatCompletionRequest? Request{get;private set;}public Task<ChatCompletionResult> CompleteAsync(ChatCompletionRequest r,CancellationToken c=default){Request=r;return Task.FromResult(new ChatCompletionResult("Grounded answer","fake",10,5,1));}}
+    private sealed class SequenceRetriever(params IReadOnlyCollection<RetrievedKnowledge>[] results):IKnowledgeRetriever{private readonly Queue<IReadOnlyCollection<RetrievedKnowledge>> results=new(results);public List<(int TopK,decimal? MinimumSimilarity)> Calls{get;}=[];public List<(string SourceType,int TopK,decimal? MinimumSimilarity)> CollectionCalls{get;}=[];public Task<IReadOnlyCollection<RetrievedKnowledge>> RetrieveAsync(float[] e,int k,decimal? m,CancellationToken c=default){Calls.Add((k,m));return Task.FromResult(results.Dequeue());}public Task<IReadOnlyCollection<RetrievedKnowledge>> RetrieveCollectionAsync(float[] e,string s,int k,decimal? m,CancellationToken c=default){CollectionCalls.Add((s,k,m));return Task.FromResult(results.Dequeue());}}
     private sealed class UnusableRewriter:IRetrievalQueryRewriter{public Task<RetrievalQueryRewriteResult> RewriteAsync(string m,CancellationToken c=default)=>Task.FromResult(RetrievalQueryRewriteResult.Unusable);}
     private sealed class CountingRewriter(RetrievalQueryRewriteResult result):IRetrievalQueryRewriter{public int Calls{get;private set;}public List<string> Messages{get;}=[];public Task<RetrievalQueryRewriteResult> RewriteAsync(string m,CancellationToken c=default){Calls++;Messages.Add(m);return Task.FromResult(result);}}
     private sealed class ThrowingRewriter:IRetrievalQueryRewriter{public int Calls{get;private set;}public Task<RetrievalQueryRewriteResult> RewriteAsync(string m,CancellationToken c=default){Calls++;throw new InvalidOperationException("provider failure");}}

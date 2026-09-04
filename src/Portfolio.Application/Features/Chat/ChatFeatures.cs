@@ -58,16 +58,24 @@ public sealed class SendChatMessageCommandHandler(
             .Select(item => new ChatHistoryItem(item.Role, item.Content))
             .ToListAsync(cancellationToken);
 
+        var collectionType = CollectionIntentClassifier.Classify(originalMessage);
         IReadOnlyCollection<RetrievedKnowledge> context;
         try
         {
             var vector = await embeddings.GenerateEmbeddingAsync(originalMessage, cancellationToken);
             EnsureEmbeddingDimensions(vector);
-            context = await retriever.RetrieveAsync(
-                vector,
-                settings.MaxContextChunks,
-                settings.MinimumSimilarity,
-                cancellationToken);
+            context = collectionType is null
+                ? await retriever.RetrieveAsync(
+                    vector,
+                    settings.MaxContextChunks,
+                    settings.MinimumSimilarity,
+                    cancellationToken)
+                : await retriever.RetrieveCollectionAsync(
+                    vector,
+                    collectionType,
+                    settings.MaxContextChunks,
+                    settings.MinimumSimilarity,
+                    cancellationToken);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -80,6 +88,7 @@ public sealed class SendChatMessageCommandHandler(
         {
             context = await TryRepairRetrievalAsync(
                 originalMessage,
+                collectionType,
                 settings.MaxContextChunks,
                 settings.MinimumSimilarity,
                 cancellationToken);
@@ -164,6 +173,7 @@ public sealed class SendChatMessageCommandHandler(
 
     private async Task<IReadOnlyCollection<RetrievedKnowledge>> TryRepairRetrievalAsync(
         string originalMessage,
+        string? collectionType,
         int topK,
         decimal? minimumSimilarity,
         CancellationToken cancellationToken)
@@ -178,11 +188,18 @@ public sealed class SendChatMessageCommandHandler(
 
             var vector = await embeddings.GenerateEmbeddingAsync(rewrite.Query, cancellationToken);
             EnsureEmbeddingDimensions(vector);
-            return await retriever.RetrieveAsync(
-                vector,
-                topK,
-                minimumSimilarity,
-                cancellationToken);
+            return collectionType is null
+                ? await retriever.RetrieveAsync(
+                    vector,
+                    topK,
+                    minimumSimilarity,
+                    cancellationToken)
+                : await retriever.RetrieveCollectionAsync(
+                    vector,
+                    collectionType,
+                    topK,
+                    minimumSimilarity,
+                    cancellationToken);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
