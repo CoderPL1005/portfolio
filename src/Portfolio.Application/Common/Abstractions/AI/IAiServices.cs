@@ -6,7 +6,7 @@ public interface IChatCompletionService { Task<ChatCompletionResult> CompleteAsy
 public interface IKnowledgeRetriever
 {
     Task<IReadOnlyCollection<RetrievedKnowledge>> RetrieveAsync(float[] embedding, int topK, decimal? minimumSimilarity, CancellationToken cancellationToken = default);
-    Task<IReadOnlyCollection<RetrievedKnowledge>> RetrieveCollectionAsync(float[] embedding, string sourceType, int topK, decimal? minimumSimilarity, CancellationToken cancellationToken = default);
+    Task<IReadOnlyCollection<RetrievedKnowledge>> RetrieveCollectionAsync(float[] embedding, IReadOnlyList<KnowledgeCollectionMember> canonicalMembers, CancellationToken cancellationToken = default);
 }
 public interface IKnowledgeIndexer { Task IndexPendingAsync(CancellationToken cancellationToken = default); }
 public sealed record ChatHistoryItem(string Role,string Content);
@@ -16,4 +16,5 @@ public sealed record RetrievalQueryRewriteResult(bool Usable,string? Query)
 }
 public sealed record ChatCompletionRequest(string SystemInstructions,string UserMessage,IReadOnlyCollection<ChatHistoryItem> History,IReadOnlyCollection<RetrievedKnowledge> Context,decimal Temperature,int MaxOutputTokens);
 public sealed record ChatCompletionResult(string Content,string? ModelName,int? PromptTokens,int? CompletionTokens,int? LatencyMs);
+public sealed record KnowledgeCollectionMember(string SourceType,Guid SourceRefId,string SourceKey,string ContentHash,int Ordinal);
 public sealed record RetrievedKnowledge(Guid ChunkId,Guid DocumentId,string Title,string SourceType,Guid? SourceRefId,string? ProjectSlug,string Content,int Rank,decimal SimilarityScore);

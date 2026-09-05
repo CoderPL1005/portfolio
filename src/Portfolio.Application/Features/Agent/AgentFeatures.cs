@@ -8,6 +8,7 @@ using Portfolio.Application.Common.Abstractions.Persistence;
 using Portfolio.Application.Common.Abstractions.Validation;
 using Portfolio.Application.Common.Exceptions;
 using Portfolio.Application.Common.Models;
+using Portfolio.Application.Features.PortfolioContent.GetPublicPortfolio;
 using Portfolio.Domain.Entities;
 
 namespace Portfolio.Application.Features.Agent;
@@ -36,13 +37,32 @@ public sealed record KnowledgeSource(string SourceType,Guid? SourceRefId,string 
 public sealed class PortfolioKnowledgeBuilder(IApplicationDbContext db)
 {
     public async Task<IReadOnlyCollection<KnowledgeSource>> BuildAsync(CancellationToken ct=default){var list=new List<KnowledgeSource>();var profile=await db.Profiles.AsNoTracking().SingleOrDefaultAsync(x=>x.IsPublished,ct);if(profile is not null){var links=await db.SocialLinks.AsNoTracking().Where(x=>x.IsVisible).OrderBy(x=>x.DisplayOrder).ThenBy(x=>x.Id).Select(x=>x.Platform+": "+x.Url).ToListAsync(ct);Add(list,"PROFILE",profile.Id,"profile:main",profile.FullName,Join($"Name: {profile.FullName}",$"Professional title: {profile.ProfessionalTitle}",$"Headline: {profile.HeroHeadline}",profile.HeroSummary,profile.AboutMarkdown,$"Location: {profile.Location}",$"Education: {profile.University} — {profile.Major}",string.Join("\n",links)),profile.UpdatedAt,"/");}
-    var exps=await db.Experiences.AsNoTracking().Where(x=>x.IsPublished).OrderBy(x=>x.DisplayOrder).ThenBy(x=>x.Id).ToListAsync(ct);foreach(var x in exps){var tech=await db.ExperienceTechnologies.AsNoTracking().Where(t=>t.ExperienceId==x.Id&&t.Technology.IsActive).OrderBy(t=>t.DisplayOrder).Select(t=>t.Technology.Name).ToListAsync(ct);Add(list,"EXPERIENCE",x.Id,$"experience:{x.Id}",$"{x.CompanyName} — {x.RoleTitle}",Join($"Company: {x.CompanyName}",$"Role: {x.RoleTitle}",$"Location: {x.Location}",$"Dates: {x.StartDate} to {(x.IsCurrent?"Present":x.EndDate?.ToString())}",x.Summary,x.ResponsibilitiesMarkdown,$"Technologies: {string.Join(", ",tech)}"),x.UpdatedAt,"/experience");}
-    var projects=await db.Projects.AsNoTracking().Where(x=>x.IsPublished).OrderBy(x=>x.DisplayOrder).ThenBy(x=>x.Id).ToListAsync(ct);foreach(var x in projects){var tech=await db.ProjectTechnologies.AsNoTracking().Where(t=>t.ProjectId==x.Id&&t.Technology.IsActive).OrderBy(t=>t.DisplayOrder).Select(t=>t.Technology.Name).ToListAsync(ct);var sectionEntities=await db.ProjectSections.AsNoTracking().Where(s=>s.ProjectId==x.Id&&s.IsVisible).OrderBy(s=>s.DisplayOrder).ThenBy(s=>s.Id).ToListAsync(ct);var sections=sectionEntities.Select(s=>Join(s.Title,s.Subtitle,s.ContentMarkdown,s.ContentJson.RootElement.GetRawText()));Add(list,"PROJECT",x.Id,$"project:{x.Slug}",x.Title,Join($"Project: {x.Title}",x.Subtitle,x.ShortDescription,x.OverviewMarkdown,$"Role: {x.Role}",$"Status: {x.Status}",$"Technologies: {string.Join(", ",tech)}",string.Join("\n\n",sections),$"GitHub: {x.GithubUrl}",$"Live: {x.LiveUrl}"),x.UpdatedAt,$"/projects/{x.Slug}",x.Slug);}
+    var exps=await db.Experiences.AsNoTracking().Where(x=>x.IsPublished).OrderBy(x=>x.DisplayOrder).ThenBy(x=>x.Id).ToListAsync(ct);foreach(var x in exps){var tech=await db.ExperienceTechnologies.AsNoTracking().Where(t=>t.ExperienceId==x.Id&&t.Technology.IsActive).OrderBy(t=>t.DisplayOrder).ThenBy(t=>t.TechnologyId).Select(t=>t.Technology.Name).ToListAsync(ct);Add(list,"EXPERIENCE",x.Id,$"experience:{x.Id}",$"{x.CompanyName} — {x.RoleTitle}",Join($"Company: {x.CompanyName}",$"Role: {x.RoleTitle}",$"Location: {x.Location}",$"Dates: {x.StartDate} to {(x.IsCurrent?"Present":x.EndDate?.ToString())}",x.Summary,x.ResponsibilitiesMarkdown,$"Technologies: {string.Join(", ",tech)}"),x.UpdatedAt,"/experience");}
+    var projects=await db.Projects.AsNoTracking().Where(x=>x.IsPublished).OrderBy(x=>x.DisplayOrder).ThenBy(x=>x.Id).ToListAsync(ct);foreach(var x in projects){var tech=await db.ProjectTechnologies.AsNoTracking().Where(t=>t.ProjectId==x.Id&&t.Technology.IsActive).OrderBy(t=>t.DisplayOrder).ThenBy(t=>t.TechnologyId).Select(t=>t.Technology.Name).ToListAsync(ct);var sectionEntities=await db.ProjectSections.AsNoTracking().Where(s=>s.ProjectId==x.Id&&s.IsVisible).OrderBy(s=>s.DisplayOrder).ThenBy(s=>s.Id).ToListAsync(ct);var sections=sectionEntities.Select(s=>Join(s.Title,s.Subtitle,s.ContentMarkdown,s.ContentJson.RootElement.GetRawText()));Add(list,"PROJECT",x.Id,$"project:{x.Slug}",x.Title,Join($"Project: {x.Title}",x.Subtitle,x.ShortDescription,x.OverviewMarkdown,$"Role: {x.Role}",$"Status: {x.Status}",$"Technologies: {string.Join(", ",tech)}",string.Join("\n\n",sections),$"GitHub: {x.GithubUrl}",$"Live: {x.LiveUrl}"),x.UpdatedAt,$"/projects/{x.Slug}",x.Slug);}
     var skills=await db.Skills.AsNoTracking().Where(x=>x.IsPublished).OrderBy(x=>x.DisplayOrder).ThenBy(x=>x.Id).ToListAsync(ct);if(skills.Count>0)Add(list,"SKILLS",null,"skills:all","Technical skills",string.Join("\n",skills.Select(x=>$"{x.Name} — {x.Category} — {x.ExperienceLevel}. {x.Description}")),skills.Max(x=>x.UpdatedAt),"/skills");
     foreach(var x in await db.Educations.AsNoTracking().Where(x=>x.IsPublished).OrderBy(x=>x.DisplayOrder).ThenBy(x=>x.Id).ToListAsync(ct))Add(list,"EDUCATION",x.Id,$"education:{x.Id}",x.Institution,Join($"Institution: {x.Institution}",$"Degree: {x.Degree}",$"Field: {x.FieldOfStudy}",$"Dates: {x.StartDate} to {x.EndDate}",x.Description,$"Location: {x.Location}"),x.UpdatedAt,"/experience");
     foreach(var x in await db.Trainings.AsNoTracking().Where(x=>x.IsPublished).OrderBy(x=>x.DisplayOrder).ThenBy(x=>x.Id).ToListAsync(ct))Add(list,"TRAINING",x.Id,$"training:{x.Id}",x.Title,Join($"Training: {x.Title}",$"Provider: {x.Provider}",x.Description,$"Dates: {x.StartDate} to {x.EndDate}",$"Credential: {x.CredentialUrl}"),x.UpdatedAt,"/experience");
     foreach(var x in await db.Certificates.AsNoTracking().Where(x=>x.IsPublished).OrderBy(x=>x.DisplayOrder).ThenBy(x=>x.Id).ToListAsync(ct))Add(list,"CERTIFICATE",x.Id,$"certificate:{x.Id}",x.Name,Join($"Certificate: {x.Name}",$"Issuer: {x.Issuer}",$"Issued: {x.IssuedAt}",$"Expires: {x.ExpiresAt}",$"Credential: {x.CredentialUrl}"),x.UpdatedAt,"/");
     foreach(var x in await db.JourneyItems.AsNoTracking().Where(x=>x.IsPublished).OrderBy(x=>x.DisplayOrder).ThenBy(x=>x.Id).ToListAsync(ct))Add(list,"JOURNEY",x.Id,$"journey:{x.Id}",x.Title,Join($"Journey: {x.Title}",x.Subtitle,x.Description,$"Date: {x.OccurredAt}"),x.UpdatedAt,"/journey");return list;}
+    public async Task<IReadOnlyList<KnowledgeCollectionMember>> BuildCollectionAsync(string sourceType,CancellationToken ct=default)
+    {
+        var normalized=sourceType.Trim().ToUpperInvariant();
+        if(normalized is not ("PROJECT" or "EXPERIENCE" or "EDUCATION" or "TRAINING" or "CERTIFICATE" or "JOURNEY"))throw new ArgumentOutOfRangeException(nameof(sourceType),"Collection source type is unsupported.");
+        var sources=await BuildAsync(ct);
+        if(normalized!="JOURNEY")return sources.Where(x=>x.SourceType==normalized).Select((x,index)=>Member(x,index+1)).ToList();
+
+        var byIdentity=sources.Where(x=>x.SourceRefId.HasValue).ToDictionary(x=>(x.SourceType,x.SourceRefId!.Value));
+        var timeline=(await PublicJourneyTimeline.LoadAsync(db,ct)).PublicItems;
+        var members=new List<KnowledgeCollectionMember>(timeline.Count);
+        foreach(var item in timeline)
+        {
+            var knowledgeType=item.SourceType=="MANUAL"?"JOURNEY":item.SourceType;
+            if(!byIdentity.TryGetValue((knowledgeType,item.SourceId),out var source))throw new InvalidOperationException("A public journey item has no canonical knowledge source.");
+            members.Add(Member(source,members.Count+1));
+        }
+        return members;
+    }
+    private static KnowledgeCollectionMember Member(KnowledgeSource source,int ordinal)=>new(source.SourceType,source.SourceRefId??throw new InvalidOperationException("Collection knowledge sources require a source reference."),source.SourceKey,source.ContentHash,ordinal);
     private static string Join(params string?[] values)=>string.Join("\n",values.Where(x=>!string.IsNullOrWhiteSpace(x)).Select(x=>x!.Trim()));private static void Add(List<KnowledgeSource> list,string type,Guid? id,string key,string title,string content,DateTimeOffset? updated,string url,string? slug=null){var hash=Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content))).ToLowerInvariant();list.Add(new(type,id,key,title,content,hash,updated,JsonSerializer.Serialize(new{publicUrl=url,projectSlug=slug})));}
 }
 

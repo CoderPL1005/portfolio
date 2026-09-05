@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Portfolio.Application.Common.Abstractions.AI;
 using Portfolio.Application.Features.Chat;
 using Portfolio.Infrastructure.AI;
 using Portfolio.Infrastructure.Persistence;
@@ -64,9 +65,13 @@ public sealed class CollectionIntentClassifierTests
     {
         await using var db = CreateContext();
         var retriever = new PgvectorKnowledgeRetriever(db);
+        var members = new[]
+        {
+            new KnowledgeCollectionMember(sourceType, Guid.NewGuid(), "source:test", "hash", 1)
+        };
 
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
-            retriever.RetrieveCollectionAsync(new float[1536], sourceType, 6, .6m));
+            retriever.RetrieveCollectionAsync(new float[1536], members));
     }
 
     [Fact]
@@ -74,9 +79,60 @@ public sealed class CollectionIntentClassifierTests
     {
         await using var db = CreateContext();
         var retriever = new PgvectorKnowledgeRetriever(db);
+        var members = new[]
+        {
+            new KnowledgeCollectionMember("PROJECT", Guid.NewGuid(), "project:test", "hash", 1)
+        };
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            retriever.RetrieveCollectionAsync(new float[3], "PROJECT", 6, .6m));
+            retriever.RetrieveCollectionAsync(new float[3], members));
+    }
+
+    [Fact]
+    public async Task Collection_retriever_rejects_missing_current_identity_and_noncanonical_ordinals()
+    {
+        await using var db = CreateContext();
+        var retriever = new PgvectorKnowledgeRetriever(db);
+        var id = Guid.NewGuid();
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => retriever.RetrieveCollectionAsync(
+            new float[1536],
+            [new("PROJECT", id, "", "hash", 1)]));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => retriever.RetrieveCollectionAsync(
+            new float[1536],
+            [new("PROJECT", id, "project:test", "", 1)]));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => retriever.RetrieveCollectionAsync(
+            new float[1536],
+            [new("PROJECT", id, "project:test", "hash", 2)]));
+    }
+
+    [Fact]
+    public async Task Collection_retriever_rejects_duplicate_canonical_identities_before_database_access()
+    {
+        await using var db = CreateContext();
+        var retriever = new PgvectorKnowledgeRetriever(db);
+        var id = Guid.NewGuid();
+        var members = new[]
+        {
+            new KnowledgeCollectionMember("PROJECT", id, "project:test", "hash", 1),
+            new KnowledgeCollectionMember("PROJECT", id, "project:other", "other-hash", 2)
+        };
+
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            retriever.RetrieveCollectionAsync(new float[1536], members));
+    }
+
+    [Fact]
+    public async Task Empty_canonical_collection_returns_without_database_access()
+    {
+        await using var db = CreateContext();
+        var retriever = new PgvectorKnowledgeRetriever(db);
+
+        var result = await retriever.RetrieveCollectionAsync(
+            new float[1536],
+            Array.Empty<KnowledgeCollectionMember>());
+
+        Assert.Empty(result);
     }
 
     private static ApplicationDbContext CreateContext()

@@ -44,25 +44,36 @@ ORDER BY kc.embedding <=> @embedding, kc.id LIMIT @top_k
 
     public async Task<IReadOnlyCollection<RetrievedKnowledge>> RetrieveCollectionAsync(
         float[] embedding,
-        string sourceType,
-        int topK,
-        decimal? minimumSimilarity,
+        IReadOnlyList<KnowledgeCollectionMember> canonicalMembers,
         CancellationToken ct = default)
     {
         EnsureEmbeddingDimensions(embedding);
-        if (string.IsNullOrWhiteSpace(sourceType))
+        if (canonicalMembers.Count == 0)
         {
-            throw new ArgumentOutOfRangeException(
-                nameof(sourceType),
-                "Collection source type is unsupported.");
+            return [];
         }
 
-        var normalizedSourceType = sourceType.Trim().ToUpperInvariant();
-        if (!CollectionSourceTypes.Contains(normalizedSourceType))
+        for (var index = 0; index < canonicalMembers.Count; index++)
         {
-            throw new ArgumentOutOfRangeException(
-                nameof(sourceType),
-                "Collection source type is unsupported.");
+            var member = canonicalMembers[index];
+            if (!CollectionSourceTypes.Contains(member.SourceType)
+                || member.SourceRefId == Guid.Empty
+                || string.IsNullOrWhiteSpace(member.SourceKey)
+                || string.IsNullOrWhiteSpace(member.ContentHash)
+                || member.Ordinal != index + 1)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(canonicalMembers),
+                    "A canonical collection member is invalid or unsupported.");
+            }
+        }
+
+        if (canonicalMembers.Select(item => (item.SourceType, item.SourceRefId)).Distinct().Count() != canonicalMembers.Count
+            || canonicalMembers.Select(item => item.SourceKey).Distinct(StringComparer.Ordinal).Count() != canonicalMembers.Count)
+        {
+            throw new ArgumentException(
+                "Canonical collection members must have unique identities and source keys.",
+                nameof(canonicalMembers));
         }
 
         var connection = db.Database.GetDbConnection();
@@ -73,47 +84,54 @@ ORDER BY kc.embedding <=> @embedding, kc.id LIMIT @top_k
 
         await using var command = connection.CreateCommand();
         command.CommandText = """
-WITH eligible AS (
+WITH requested AS (
     SELECT
-        kc.id AS chunk_id,
-        kc.chunk_index,
-        kc.content,
-        kd.id AS document_id,
-        kd.title,
-        kd.source_type,
-        kd.source_ref_id,
-        kd.metadata->>'projectSlug' AS project_slug,
-        kc.embedding <=> @embedding AS distance
-    FROM knowledge_chunks kc
-    JOIN knowledge_documents kd ON kd.id=kc.knowledge_document_id
-    WHERE kd.is_active=TRUE
-      AND kd.indexing_status='INDEXED'
-      AND kd.source_type=@source_type
-      AND (@minimum IS NULL OR 1-(kc.embedding <=> @embedding)>=@minimum)
-),
-best_per_document AS (
-    SELECT DISTINCT ON (document_id)
-        chunk_id,
-        document_id,
-        title,
         source_type,
         source_ref_id,
-        project_slug,
-        content,
-        distance
-    FROM eligible
-    ORDER BY document_id, distance, chunk_id
+        source_key,
+        content_hash,
+        ordinal
+    FROM unnest(
+        @source_types::text[],
+        @source_ref_ids::uuid[],
+        @source_keys::text[],
+        @content_hashes::text[]
+    ) WITH ORDINALITY AS requested(source_type,source_ref_id,source_key,content_hash,ordinal)
 )
-SELECT chunk_id,document_id,title,source_type,source_ref_id,project_slug,content,1-distance AS similarity
-FROM best_per_document
-ORDER BY distance, document_id
-LIMIT @top_k
+SELECT
+    best.chunk_id,
+    kd.id AS document_id,
+    kd.title,
+    kd.source_type,
+    kd.source_ref_id,
+    kd.metadata->>'projectSlug' AS project_slug,
+    best.content,
+    1-best.distance AS similarity
+FROM requested
+JOIN knowledge_documents kd
+  ON kd.source_type=requested.source_type
+ AND kd.source_ref_id=requested.source_ref_id
+ AND kd.source_key=requested.source_key
+ AND kd.content_hash=requested.content_hash
+ AND kd.is_active=TRUE
+ AND kd.indexing_status='INDEXED'
+CROSS JOIN LATERAL (
+    SELECT
+        kc.id AS chunk_id,
+        kc.content,
+        kc.embedding <=> @embedding AS distance
+    FROM knowledge_chunks kc
+    WHERE kc.knowledge_document_id=kd.id
+    ORDER BY kc.embedding <=> @embedding,kc.chunk_index,kc.id
+    LIMIT 1
+) best
+ORDER BY requested.ordinal,kd.id
 """;
-        AddCommonParameters(command, embedding, topK, minimumSimilarity);
-        var sourceTypeParameter = command.CreateParameter();
-        sourceTypeParameter.ParameterName = "source_type";
-        sourceTypeParameter.Value = normalizedSourceType;
-        command.Parameters.Add(sourceTypeParameter);
+        AddParameter(command, "embedding", new Vector(embedding));
+        AddParameter(command, "source_types", canonicalMembers.Select(item => item.SourceType).ToArray());
+        AddParameter(command, "source_ref_ids", canonicalMembers.Select(item => item.SourceRefId).ToArray());
+        AddParameter(command, "source_keys", canonicalMembers.Select(item => item.SourceKey).ToArray());
+        AddParameter(command, "content_hashes", canonicalMembers.Select(item => item.ContentHash).ToArray());
         return await ReadResultsAsync(command, ct);
     }
 
@@ -143,6 +161,17 @@ LIMIT @top_k
         top.ParameterName = "top_k";
         top.Value = Math.Clamp(topK, 1, 20);
         command.Parameters.Add(top);
+    }
+
+    private static void AddParameter(
+        System.Data.Common.DbCommand command,
+        string name,
+        object value)
+    {
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = name;
+        parameter.Value = value;
+        command.Parameters.Add(parameter);
     }
 
     private static async Task<IReadOnlyCollection<RetrievedKnowledge>> ReadResultsAsync(

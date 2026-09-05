@@ -6,6 +6,7 @@ using Portfolio.Application.Common.Abstractions.Persistence;
 using Portfolio.Application.Common.Abstractions.Validation;
 using Portfolio.Application.Common.Exceptions;
 using Portfolio.Application.Common.Models;
+using Portfolio.Application.Features.Agent;
 using Portfolio.Domain.Entities;
 
 namespace Portfolio.Application.Features.Chat;
@@ -25,8 +26,11 @@ public sealed class SendChatMessageCommandHandler(
     IKnowledgeRetriever retriever,
     IRetrievalQueryRewriter rewriter,
     IChatCompletionService chat,
+    PortfolioKnowledgeBuilder knowledgeBuilder,
     TimeProvider clock) : IRequestHandler<SendChatMessageCommand, ChatAnswerResult>
 {
+    private const int MaximumStructuredContextCharacters = 20 * 1200;
+
     public async Task<ChatAnswerResult> HandleAsync(
         SendChatMessageCommand request,
         CancellationToken cancellationToken = default)
@@ -60,38 +64,63 @@ public sealed class SendChatMessageCommandHandler(
 
         var collectionType = CollectionIntentClassifier.Classify(originalMessage);
         IReadOnlyCollection<RetrievedKnowledge> context;
-        try
+        if (collectionType is null)
         {
-            var vector = await embeddings.GenerateEmbeddingAsync(originalMessage, cancellationToken);
-            EnsureEmbeddingDimensions(vector);
-            context = collectionType is null
-                ? await retriever.RetrieveAsync(
+            try
+            {
+                var vector = await embeddings.GenerateEmbeddingAsync(originalMessage, cancellationToken);
+                EnsureEmbeddingDimensions(vector);
+                context = await retriever.RetrieveAsync(
                     vector,
-                    settings.MaxContextChunks,
-                    settings.MinimumSimilarity,
-                    cancellationToken)
-                : await retriever.RetrieveCollectionAsync(
-                    vector,
-                    collectionType,
                     settings.MaxContextChunks,
                     settings.MinimumSimilarity,
                     cancellationToken);
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            throw new ServiceUnavailableException(
-                "AGENT_UNAVAILABLE",
-                "The portfolio agent is currently unavailable.");
-        }
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                throw new ServiceUnavailableException(
+                    "AGENT_UNAVAILABLE",
+                    "The portfolio agent is currently unavailable.");
+            }
 
-        if (context.Count == 0)
+            if (context.Count == 0)
+            {
+                context = await TryRepairRetrievalAsync(
+                    originalMessage,
+                    settings.MaxContextChunks,
+                    settings.MinimumSimilarity,
+                    cancellationToken);
+            }
+        }
+        else
         {
-            context = await TryRepairRetrievalAsync(
-                originalMessage,
-                collectionType,
-                settings.MaxContextChunks,
-                settings.MinimumSimilarity,
-                cancellationToken);
+            try
+            {
+                var canonicalMembers = await knowledgeBuilder.BuildCollectionAsync(
+                    collectionType,
+                    cancellationToken);
+                if (canonicalMembers.Count == 0)
+                {
+                    context = [];
+                }
+                else
+                {
+                    var vector = await embeddings.GenerateEmbeddingAsync(originalMessage, cancellationToken);
+                    EnsureEmbeddingDimensions(vector);
+                    context = await retriever.RetrieveCollectionAsync(
+                        vector,
+                        canonicalMembers,
+                        cancellationToken);
+                    EnsureCompleteStructuredContext(canonicalMembers, context);
+                }
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                throw new ServiceUnavailableException(
+                    "AGENT_UNAVAILABLE",
+                    "The portfolio agent is currently unavailable.");
+            }
+
         }
 
         var fallback = settings.FallbackMessage
@@ -173,7 +202,6 @@ public sealed class SendChatMessageCommandHandler(
 
     private async Task<IReadOnlyCollection<RetrievedKnowledge>> TryRepairRetrievalAsync(
         string originalMessage,
-        string? collectionType,
         int topK,
         decimal? minimumSimilarity,
         CancellationToken cancellationToken)
@@ -188,18 +216,11 @@ public sealed class SendChatMessageCommandHandler(
 
             var vector = await embeddings.GenerateEmbeddingAsync(rewrite.Query, cancellationToken);
             EnsureEmbeddingDimensions(vector);
-            return collectionType is null
-                ? await retriever.RetrieveAsync(
-                    vector,
-                    topK,
-                    minimumSimilarity,
-                    cancellationToken)
-                : await retriever.RetrieveCollectionAsync(
-                    vector,
-                    collectionType,
-                    topK,
-                    minimumSimilarity,
-                    cancellationToken);
+            return await retriever.RetrieveAsync(
+                vector,
+                topK,
+                minimumSimilarity,
+                cancellationToken);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -216,6 +237,39 @@ public sealed class SendChatMessageCommandHandler(
         if (vector.Length != 1536)
         {
             throw new InvalidOperationException("Embedding dimension mismatch.");
+        }
+    }
+
+    private static void EnsureCompleteStructuredContext(
+        IReadOnlyList<KnowledgeCollectionMember> canonicalMembers,
+        IReadOnlyCollection<RetrievedKnowledge> context)
+    {
+        if (context.Count != canonicalMembers.Count
+            || context.Select(item => item.DocumentId).Distinct().Count() != context.Count
+            || context.Select(item => item.ChunkId).Distinct().Count() != context.Count)
+        {
+            throw new InvalidOperationException("The canonical portfolio collection is not completely grounded.");
+        }
+
+        var expected = canonicalMembers.ToDictionary(
+            item => (item.SourceType, item.SourceRefId),
+            item => item.Ordinal);
+        var actual = new HashSet<(string SourceType, Guid SourceRefId)>();
+        foreach (var item in context)
+        {
+            if (!item.SourceRefId.HasValue
+                || !expected.TryGetValue((item.SourceType, item.SourceRefId.Value), out var ordinal)
+                || item.Rank != ordinal
+                || !actual.Add((item.SourceType, item.SourceRefId.Value)))
+            {
+                throw new InvalidOperationException("The canonical portfolio collection contains an unexpected grounding result.");
+            }
+        }
+
+        if (actual.Count != expected.Count
+            || context.Sum(item => (long)item.Content.Length) > MaximumStructuredContextCharacters)
+        {
+            throw new InvalidOperationException("The canonical portfolio collection exceeds safe grounding limits.");
         }
     }
 
