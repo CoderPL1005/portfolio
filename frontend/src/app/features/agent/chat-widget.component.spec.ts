@@ -36,7 +36,11 @@ describe('ChatWidgetComponent', () => {
 
   beforeEach(() => {
     api = {
-      createSession: vi.fn(() => of({ sessionId: 's', status: 'ACTIVE', welcomeMessage: 'Welcome' })),
+      createSession: vi.fn(() => of({
+        sessionId: 's',
+        status: 'ACTIVE',
+        welcomeMessage: "Hi! I'm Nguyễn Đình Phúc's AI representative. You can ask me about my experience, projects, technical skills, and engineering background.",
+      })),
       send: vi.fn(() => of({
         messageId: 'm',
         answer: '**Project overview**\n\n* Angular frontend\n* .NET API\n\nRead the [repository](https://github.com/example/project) and use `dotnet test`.',
@@ -64,7 +68,7 @@ describe('ChatWidgetComponent', () => {
     fixture.componentInstance.toggle();
     fixture.detectChanges();
     expect(api.createSession).toHaveBeenCalledTimes(1);
-    expect(fixture.nativeElement.textContent).toContain('Welcome');
+    expect(fixture.nativeElement.textContent).toContain("I'm Nguyễn Đình Phúc's AI representative");
   });
 
   it('renders assistant Markdown as structured, safe content', () => {

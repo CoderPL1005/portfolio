@@ -26,6 +26,8 @@ public sealed class SeedingTests
         Assert.Equal(seed.Skills.Count,
             seed.Skills.Select(item => PortfolioSeeder.CompositeKey(item.Name, item.Category))
                 .Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.Contains("Nguyễn Đình Phúc's AI representative", seed.AgentSettings.WelcomeMessage);
+        Assert.Contains("retrieved portfolio context", seed.AgentSettings.SystemPrompt);
     }
 
     [Fact]
