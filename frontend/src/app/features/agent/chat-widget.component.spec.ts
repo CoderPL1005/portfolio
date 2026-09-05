@@ -1,8 +1,31 @@
+import { Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
+import { provideRouter, Router, RouterOutlet, Routes } from '@angular/router';
+import { RouterTestingHarness } from '@angular/router/testing';
 import { of, Subject, throwError } from 'rxjs';
 import { ApiHttpError } from '../../core/api/api-error.model';
 import { AgentService } from './agent.service';
 import { ChatWidgetComponent } from './chat-widget.component';
+
+@Component({ selector: 'app-test-public-page', template: '<p>Public page</p>' })
+class TestPublicPageComponent {}
+
+@Component({
+  selector: 'app-test-public-layout',
+  imports: [RouterOutlet, ChatWidgetComponent],
+  template: '<router-outlet /><app-chat-widget />',
+})
+class TestPublicLayoutComponent {}
+
+const testRoutes: Routes = [{
+  path: '',
+  component: TestPublicLayoutComponent,
+  children: [
+    { path: '', pathMatch: 'full', component: TestPublicPageComponent },
+    { path: 'projects/:slug', component: TestPublicPageComponent },
+  ],
+}];
 
 describe('ChatWidgetComponent', () => {
   let api: {
@@ -21,7 +44,9 @@ describe('ChatWidgetComponent', () => {
       })),
       feedback: vi.fn(() => of({})),
     };
-    TestBed.configureTestingModule({ providers: [{ provide: AgentService, useValue: api }] });
+    TestBed.configureTestingModule({
+      providers: [provideRouter(testRoutes), { provide: AgentService, useValue: api }],
+    });
   });
 
   function createAndSend(message = 'Project?') {
@@ -80,13 +105,59 @@ describe('ChatWidgetComponent', () => {
   });
 
   it('renders structured citations separately from the answer', () => {
+    api.send.mockReturnValue(of({
+      messageId: 'm',
+      answer: 'Project answer',
+      sources: [
+        { title: 'Project', sourceType: 'PROJECT', sourceRefId: null, projectSlug: 'project', rank: 1, similarityScore: .9 },
+        { title: 'Profile', sourceType: 'PROFILE', sourceRefId: null, projectSlug: null, rank: 2, similarityScore: .8 },
+      ],
+    }));
     const { fixture } = createAndSend();
     const message = fixture.nativeElement.querySelector('.assistant-message:last-of-type');
     const sources = message.querySelector('.sources');
     expect(sources.textContent).toContain('Sources');
     expect(sources.textContent).toContain('Project');
+    expect(sources.textContent).toContain('Profile');
+    expect(sources.querySelectorAll('a')).toHaveLength(1);
     expect(sources.querySelector('a')?.getAttribute('href')).toBe('/projects/project');
     expect(message.querySelector('.answer .sources')).toBeNull();
+  });
+
+  it('uses SPA source navigation and preserves the same chat state across child-route changes', async () => {
+    const harness = await RouterTestingHarness.create('/');
+    const router = TestBed.inject(Router);
+    const widgetDebug = harness.fixture.debugElement.query(By.directive(ChatWidgetComponent));
+    const widget = widgetDebug.componentInstance as ChatWidgetComponent;
+
+    widget.toggle();
+    widget.draft = 'Project?';
+    widget.send();
+    widget.rate('m', 'POSITIVE');
+    harness.fixture.detectChanges();
+
+    const source = harness.fixture.nativeElement.querySelector('.sources a') as HTMLAnchorElement;
+    expect(source.getAttribute('href')).toBe('/projects/project');
+    source.click();
+    await harness.fixture.whenStable();
+    harness.fixture.detectChanges();
+
+    expect(router.url).toBe('/projects/project');
+    expect(harness.fixture.debugElement.query(By.directive(ChatWidgetComponent)).componentInstance).toBe(widget);
+    expect(widget.open()).toBe(true);
+    expect(widget.session).toBe('s');
+    expect(widget.lines().map(line => line.content)).toContain('Project?');
+    expect(widget.lines().at(-1)?.sources?.[0].title).toBe('Project');
+    expect(widget.feedback()['m']).toBe('POSITIVE');
+    expect(api.createSession).toHaveBeenCalledTimes(1);
+
+    await harness.navigateByUrl('/');
+    harness.fixture.detectChanges();
+
+    expect(router.url).toBe('/');
+    expect(harness.fixture.debugElement.query(By.directive(ChatWidgetComponent)).componentInstance).toBe(widget);
+    expect(widget.lines().map(line => line.content)).toContain('Project?');
+    expect(api.createSession).toHaveBeenCalledTimes(1);
   });
 
   it('submits feedback once and shows its selected state', () => {

@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, ElementRef, inject, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 import { finalize, take } from 'rxjs';
 import { ApiHttpError } from '../../core/api/api-error.model';
 import { safeAdminError } from '../admin/shared/admin-api';
@@ -26,7 +27,7 @@ export function chatErrorMessage(error: unknown): string {
 
 @Component({
   selector: 'app-chat-widget',
-  imports: [FormsModule, AssistantMarkdownComponent],
+  imports: [FormsModule, RouterLink, AssistantMarkdownComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <button class="launcher" type="button" (click)="toggle()" [attr.aria-expanded]="open()" aria-controls="portfolio-chat">
@@ -55,7 +56,7 @@ export function chatErrorMessage(error: unknown): string {
                       <li>
                         <span class="source-number">{{ source.rank }}</span>
                         @if (source.projectSlug) {
-                          <a [href]="'/projects/' + source.projectSlug">{{ source.title }}</a>
+                          <a [routerLink]="['/projects', source.projectSlug]">{{ source.title }}</a>
                         } @else {
                           <span>{{ source.title }}</span>
                         }
