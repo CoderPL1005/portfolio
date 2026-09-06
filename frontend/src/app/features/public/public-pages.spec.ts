@@ -410,8 +410,9 @@ describe('public aggregate pages', () => {
     const fixture=await renderJourney();
     const project=fixture.nativeElement.querySelector('[data-track="PROJECTS"] .timeline-item') as HTMLButtonElement;
     project.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));fixture.detectChanges();
-    expect(fixture.nativeElement.querySelector('.pinned')?.textContent).toContain('Jul 2026');
-    expect(fixture.nativeElement.querySelector('.pinned')?.textContent).toContain('Aug 2026');
+    expect(fixture.nativeElement.querySelector('.pinned')?.textContent).toContain('Jul 27, 2026');
+    expect(fixture.nativeElement.querySelector('.pinned')?.textContent).toContain('Aug 20, 2026');
+    expect(fixture.nativeElement.querySelector('.pinned')?.textContent).toContain('24 days');
     document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('.pinned')).toBeNull();
     const point=fixture.nativeElement.querySelector('[data-track="MILESTONES"] .timeline-item') as HTMLButtonElement;
