@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, ElementRef, inject, signal, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, HostListener, inject, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { finalize, take } from 'rxjs';
@@ -86,7 +86,7 @@ export function chatErrorMessage(error: unknown): string {
         </div>
         <form (ngSubmit)="send()">
           <label class="sr-only" for="chat-message">Message</label>
-          <textarea id="chat-message" [(ngModel)]="draft" name="message" maxlength="2000" rows="2" placeholder="Ask about experience, projects, or skills"></textarea>
+          <textarea id="chat-message" [(ngModel)]="draft" name="message" maxlength="2000" rows="2" placeholder="Ask about experience, projects, or skills" (keydown.enter)="handleEnter($event)"></textarea>
           <button type="submit" [disabled]="loading() || !draft.trim()">Send</button>
         </form>
       </section>
@@ -115,6 +115,7 @@ export function chatErrorMessage(error: unknown): string {
 })
 export class ChatWidgetComponent {
   private readonly api = inject(AgentService);
+  private readonly hostElement = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly messagesElement = viewChild<ElementRef<HTMLDivElement>>('messages');
   readonly open = signal(false);
   readonly loading = signal(false);
@@ -127,6 +128,19 @@ export class ChatWidgetComponent {
   toggle() {
     this.open.update(value => !value);
     if (this.open() && !this.session) this.start();
+  }
+
+  @HostListener('document:pointerdown', ['$event'])
+  closeOnOutsidePointer(event: PointerEvent) {
+    const target = event.target;
+    if (this.open() && (!target || !this.hostElement.nativeElement.contains(target as Node))) this.open.set(false);
+  }
+
+  handleEnter(event: Event) {
+    const keyboardEvent = event as KeyboardEvent;
+    if (keyboardEvent.shiftKey || keyboardEvent.isComposing) return;
+    keyboardEvent.preventDefault();
+    this.send();
   }
 
   start() {

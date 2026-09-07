@@ -442,16 +442,42 @@ describe('ProjectDetailPageComponent', () => {
 
 describe('ContactPageComponent', () => {
   beforeEach(() => TestBed.resetTestingModule());
-  it('renders API-provided email and published social links without a form', async () => {
+  it('copies the API-provided email and preserves published social links without mailto navigation', async () => {
+    const writeText = vi.fn(() => Promise.resolve());
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
     const data = { ...portfolio, profile: { ...portfolio.profile, email: 'owner@example.com' }, socialLinks: duplicatePlatformSocialLinks };
     await TestBed.configureTestingModule({ imports: [ContactPageComponent], providers: [{ provide: PortfolioStore, useValue: storeWith(data) }] }).compileComponents();
     const fixture = TestBed.createComponent(ContactPageComponent); fixture.detectChanges();
-    expect(fixture.nativeElement.querySelector('a[href="mailto:owner@example.com"]')).not.toBeNull();
+    const email = fixture.nativeElement.querySelector('.email-copy') as HTMLButtonElement;
+    expect(email.tagName).toBe('BUTTON');
+    expect(email.getAttribute('aria-label')).toBe('Copy email address owner@example.com');
+    email.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(writeText).toHaveBeenCalledOnce();
+    expect(writeText).toHaveBeenCalledWith('owner@example.com');
+    expect(fixture.nativeElement.textContent).toContain('Email copied');
+    expect(fixture.nativeElement.querySelector('a[href^="mailto:"]')).toBeNull();
     const links = [...fixture.nativeElement.querySelectorAll('.contact-links a[href^="https://github.com/"]')] as HTMLAnchorElement[];
     expect(links.map(link => link.querySelector('span')?.textContent?.trim())).toEqual(['GitHub', 'GitHub']);
     expect(links.map(link => link.querySelector('strong')?.textContent?.trim())).toEqual(['CoderPL1005', 'PhucND3009']);
     expect(links.map(link => link.href)).toEqual(['https://github.com/CoderPL1005', 'https://github.com/PhucND3009']);
     expect(fixture.nativeElement.querySelector('form')).toBeNull();
     expect(fixture.nativeElement.querySelector('button[type="submit"]')).toBeNull();
+  });
+
+  it('shows accessible feedback when clipboard copying fails without throwing', async () => {
+    const writeText = vi.fn(() => Promise.reject(new Error('Clipboard denied')));
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    const data = { ...portfolio, profile: { ...portfolio.profile, email: 'owner@example.com' } };
+    await TestBed.configureTestingModule({ imports: [ContactPageComponent], providers: [{ provide: PortfolioStore, useValue: storeWith(data) }] }).compileComponents();
+    const fixture = TestBed.createComponent(ContactPageComponent); fixture.detectChanges();
+
+    (fixture.nativeElement.querySelector('.email-copy') as HTMLButtonElement).click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(writeText).toHaveBeenCalledWith('owner@example.com');
+    expect(fixture.nativeElement.querySelector('[role="alert"]')?.textContent).toContain('Unable to copy email');
   });
 });

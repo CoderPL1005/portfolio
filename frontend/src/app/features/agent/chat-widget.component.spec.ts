@@ -71,6 +71,96 @@ describe('ChatWidgetComponent', () => {
     expect(fixture.nativeElement.textContent).toContain("I'm Nguyễn Đình Phúc's AI representative");
   });
 
+  it('keeps the chat open for inside/input clicks and closes it for an outside pointer', () => {
+    const fixture = TestBed.createComponent(ChatWidgetComponent);
+    const component = fixture.componentInstance;
+    component.toggle();
+    fixture.detectChanges();
+
+    fixture.nativeElement.querySelector('.chat').dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    expect(component.open()).toBe(true);
+
+    fixture.nativeElement.querySelector('textarea').dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    expect(component.open()).toBe(true);
+
+    document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    expect(component.open()).toBe(false);
+  });
+
+  it('preserves chat state on outside close and reopens without creating another session', () => {
+    const { fixture, component } = createAndSend();
+    component.feedback.set({ m: 'POSITIVE' });
+    const lines = component.lines();
+
+    document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    fixture.detectChanges();
+
+    expect(component.open()).toBe(false);
+    expect(component.session).toBe('s');
+    expect(component.lines()).toBe(lines);
+    expect(component.lines().at(-1)?.sources?.[0].title).toBe('Project');
+    expect(component.feedback()['m']).toBe('POSITIVE');
+
+    (fixture.nativeElement.querySelector('.launcher') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(component.open()).toBe(true);
+    expect(component.lines()).toBe(lines);
+    expect(api.createSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the explicit Close control functional without resetting the session', () => {
+    const fixture = TestBed.createComponent(ChatWidgetComponent);
+    const component = fixture.componentInstance;
+    component.toggle();
+    fixture.detectChanges();
+
+    (fixture.nativeElement.querySelector('header button') as HTMLButtonElement).click();
+
+    expect(component.open()).toBe(false);
+    expect(component.session).toBe('s');
+  });
+
+  it('sends valid textarea content exactly once on Enter through the existing send path', () => {
+    const fixture = TestBed.createComponent(ChatWidgetComponent);
+    const component = fixture.componentInstance;
+    component.toggle();
+    component.draft = 'Project?';
+    fixture.detectChanges();
+
+    const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    fixture.nativeElement.querySelector('textarea').dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(api.send).toHaveBeenCalledTimes(1);
+    expect(api.send).toHaveBeenCalledWith('s', 'Project?');
+  });
+
+  it('does not send whitespace, Shift+Enter, composing Enter, or Enter while loading', () => {
+    const fixture = TestBed.createComponent(ChatWidgetComponent);
+    const component = fixture.componentInstance;
+    component.toggle();
+    fixture.detectChanges();
+    const textarea = fixture.nativeElement.querySelector('textarea') as HTMLTextAreaElement;
+
+    component.draft = '   ';
+    textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+
+    component.draft = 'New line';
+    const shifted = new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true, cancelable: true });
+    textarea.dispatchEvent(shifted);
+    expect(shifted.defaultPrevented).toBe(false);
+
+    const composing = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    Object.defineProperty(composing, 'isComposing', { value: true });
+    textarea.dispatchEvent(composing);
+    expect(composing.defaultPrevented).toBe(false);
+
+    component.loading.set(true);
+    textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+
+    expect(api.send).not.toHaveBeenCalled();
+  });
+
   it('renders assistant Markdown as structured, safe content', () => {
     const { fixture } = createAndSend();
     const answer = fixture.nativeElement.querySelector('.assistant-message:last-of-type .answer');
