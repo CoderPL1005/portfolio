@@ -1,5 +1,5 @@
 import { Component } from '@angular/core';
-import { TestBed } from '@angular/core/testing';
+import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { provideRouter, Router, RouterOutlet, Routes } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
@@ -63,6 +63,15 @@ describe('ChatWidgetComponent', () => {
     return { fixture, component };
   }
 
+  async function enterComposerText(fixture: ComponentFixture<ChatWidgetComponent>, value: string) {
+    fixture.debugElement.query(By.css('textarea')).triggerEventHandler('ngModelChange', value);
+    const textarea = fixture.nativeElement.querySelector('textarea') as HTMLTextAreaElement;
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    return textarea;
+  }
+
   it('opens and initializes one session', () => {
     const fixture = TestBed.createComponent(ChatWidgetComponent);
     fixture.componentInstance.toggle();
@@ -120,19 +129,42 @@ describe('ChatWidgetComponent', () => {
     expect(component.session).toBe('s');
   });
 
-  it('sends valid textarea content exactly once on Enter through the existing send path', () => {
+  it('sends valid textarea content exactly once on Enter and clears both draft and textarea', async () => {
     const fixture = TestBed.createComponent(ChatWidgetComponent);
     const component = fixture.componentInstance;
     component.toggle();
-    component.draft = 'Project?';
     fixture.detectChanges();
+    const textarea = await enterComposerText(fixture, 'hello');
+    expect(textarea.value).toBe('hello');
 
     const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
-    fixture.nativeElement.querySelector('textarea').dispatchEvent(event);
+    textarea.dispatchEvent(event);
+    fixture.detectChanges();
 
     expect(event.defaultPrevented).toBe(true);
     expect(api.send).toHaveBeenCalledTimes(1);
-    expect(api.send).toHaveBeenCalledWith('s', 'Project?');
+    expect(api.send).toHaveBeenCalledWith('s', 'hello');
+    expect(component.draft).toBe('');
+    expect(textarea.value).toBe('');
+    expect(api.createSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses equivalent submission semantics for the Send button and clears the composer', async () => {
+    const fixture = TestBed.createComponent(ChatWidgetComponent);
+    const component = fixture.componentInstance;
+    component.toggle();
+    fixture.detectChanges();
+    const textarea = await enterComposerText(fixture, 'hello');
+    expect(textarea.value).toBe('hello');
+
+    (fixture.nativeElement.querySelector('form button') as HTMLButtonElement).click();
+    fixture.detectChanges();
+
+    expect(api.send).toHaveBeenCalledTimes(1);
+    expect(api.send).toHaveBeenCalledWith('s', 'hello');
+    expect(component.draft).toBe('');
+    expect(textarea.value).toBe('');
+    expect(api.createSession).toHaveBeenCalledTimes(1);
   });
 
   it('does not send whitespace, Shift+Enter, composing Enter, or Enter while loading', () => {
@@ -144,21 +176,26 @@ describe('ChatWidgetComponent', () => {
 
     component.draft = '   ';
     textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    expect(component.draft).toBe('   ');
 
     component.draft = 'New line';
     const shifted = new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true, cancelable: true });
     textarea.dispatchEvent(shifted);
     expect(shifted.defaultPrevented).toBe(false);
+    expect(component.draft).toBe('New line');
 
     const composing = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
     Object.defineProperty(composing, 'isComposing', { value: true });
     textarea.dispatchEvent(composing);
     expect(composing.defaultPrevented).toBe(false);
+    expect(component.draft).toBe('New line');
 
     component.loading.set(true);
     textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
 
     expect(api.send).not.toHaveBeenCalled();
+    expect(component.draft).toBe('New line');
+    expect(api.createSession).toHaveBeenCalledTimes(1);
   });
 
   it('renders assistant Markdown as structured, safe content', () => {
@@ -320,6 +357,7 @@ describe('ChatWidgetComponent', () => {
     const textarea = fixture.nativeElement.querySelector('textarea') as HTMLTextAreaElement;
 
     expect(component.loading()).toBe(false);
+    expect(component.draft).toBe('');
     expect(api.send).toHaveBeenCalledTimes(1);
     expect(component.lines().filter(line => line.role === 'USER').map(line => line.content)).toEqual(['Keep this message']);
     expect(component.lines().filter(line => line.role === 'ASSISTANT')).toHaveLength(1);

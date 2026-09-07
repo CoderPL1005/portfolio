@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, ElementRef, HostListener, inject, signal, viewChild } from '@angular/core';
-import { FormsModule } from '@angular/forms';
+import { FormsModule, NgModel } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { finalize, take } from 'rxjs';
 import { ApiHttpError } from '../../core/api/api-error.model';
@@ -86,7 +86,7 @@ export function chatErrorMessage(error: unknown): string {
         </div>
         <form (ngSubmit)="send()">
           <label class="sr-only" for="chat-message">Message</label>
-          <textarea id="chat-message" [(ngModel)]="draft" name="message" maxlength="2000" rows="2" placeholder="Ask about experience, projects, or skills" (keydown.enter)="handleEnter($event)"></textarea>
+          <textarea #messageControl="ngModel" id="chat-message" [(ngModel)]="draft" name="message" maxlength="2000" rows="2" placeholder="Ask about experience, projects, or skills" (keydown.enter)="handleEnter($event)"></textarea>
           <button type="submit" [disabled]="loading() || !draft.trim()">Send</button>
         </form>
       </section>
@@ -117,6 +117,7 @@ export class ChatWidgetComponent {
   private readonly api = inject(AgentService);
   private readonly hostElement = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly messagesElement = viewChild<ElementRef<HTMLDivElement>>('messages');
+  private readonly messageControl = viewChild<NgModel>('messageControl');
   readonly open = signal(false);
   readonly loading = signal(false);
   readonly error = signal<string | null>(null);
@@ -160,6 +161,7 @@ export class ChatWidgetComponent {
     if (!message || !this.session || this.loading()) return;
     this.lines.update(lines => [...lines, { role: 'USER', content: message }]);
     this.draft = '';
+    this.messageControl()?.reset('');
     this.loading.set(true);
     this.error.set(null);
     this.scrollConversation();
