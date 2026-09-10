@@ -17,6 +17,10 @@ public sealed class CollectionIntentClassifierTests
     [InlineData("List Ph\u00fac's projects.", "PROJECT")]
     [InlineData("What work experience does Ph\u00fac have?", "EXPERIENCE")]
     [InlineData("Ph\u00fac c\u00f3 nh\u1eefng kinh nghi\u1ec7m l\u00e0m vi\u1ec7c n\u00e0o?", "EXPERIENCE")]
+    [InlineData("Tell me about your work experience", "EXPERIENCE")]
+    [InlineData("Where have you worked?", "EXPERIENCE")]
+    [InlineData("B\u1ea1n \u0111\u00e3 l\u00e0m \u1edf \u0111\u00e2u?", "EXPERIENCE")]
+    [InlineData("Kinh nghi\u1ec7m c\u1ee7a b\u1ea1n l\u00e0 g\u00ec?", "EXPERIENCE")]
     [InlineData("List all education history.", "EDUCATION")]
     [InlineData("Li\u1ec7t k\u00ea c\u00e1c kh\u00f3a \u0111\u00e0o t\u1ea1o.", "TRAINING")]
     [InlineData("Which certificates has Ph\u00fac earned?", "CERTIFICATE")]
@@ -38,6 +42,12 @@ public sealed class CollectionIntentClassifierTests
     [InlineData("projects")]
     [InlineData("What projectiles has Ph\u00fac built?")]
     [InlineData("What technologies does Ph\u00fac use?")]
+    [InlineData("Tell me about your work experience at RTC Technology Vietnam.")]
+    [InlineData("What work experience does Ph\u00fac have at RTC Technology Vietnam?")]
+    [InlineData("What work experience did Ph\u00fac have in 2025?")]
+    [InlineData("Ph\u00fac c\u00f3 kinh nghi\u1ec7m l\u00e0m vi\u1ec7c t\u1ea1i VinSmart Future n\u00e0o?")]
+    [InlineData("What did you do at RTC Technology Vietnam?")]
+    [InlineData("What did you do at VinSmart Future?")]
     public void Uncertain_singular_negative_and_substring_inputs_fail_closed(string message)
     {
         Assert.Null(CollectionIntentClassifier.Classify(message));

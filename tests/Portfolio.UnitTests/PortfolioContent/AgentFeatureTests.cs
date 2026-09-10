@@ -478,6 +478,124 @@ public sealed class AgentFeatureTests
         Assert.Equal(originalMessage, (await db.ChatMessages.SingleAsync(item => item.Role == "USER")).Content);
     }
 
+    [Theory]
+    [InlineData("B\u1ea1n \u0111\u00e3 l\u00e0m \u1edf \u0111\u00e2u?")]
+    [InlineData("Tell me about your work experience")]
+    public async Task Structured_experience_collection_includes_every_public_member_in_canonical_order_below_threshold(
+        string originalMessage)
+    {
+        await using var db = PublicPortfolioTests.CreateContext();
+        var session = Session();
+        var rtc = Experience(
+            Guid.Parse("00000000-0000-0000-0000-000000000002"),
+            "RTC Technology Vietnam", 1, true);
+        var vinSmart = Experience(
+            Guid.Parse("00000000-0000-0000-0000-000000000001"),
+            "VinSmart Future", 2, true);
+        var hidden = Experience(Guid.NewGuid(), "Private employer", 0, false);
+        db.AddRange(Setting(), session, rtc, vinSmart, hidden);
+        await db.SaveChangesAsync();
+
+        var members = await new PortfolioKnowledgeBuilder(db).BuildCollectionAsync("EXPERIENCE");
+        var experiences = new[] { rtc, vinSmart };
+        var contexts = members.Select(member =>
+        {
+            var experience = experiences.Single(item => item.Id == member.SourceRefId);
+            return new RetrievedKnowledge(
+                Guid.NewGuid(), Guid.NewGuid(), experience.CompanyName, "EXPERIENCE",
+                experience.Id, null, $"Experience at {experience.CompanyName}", member.Ordinal, .2m);
+        }).ToList();
+        var embedding = new TrackingEmbedding();
+        var retriever = new SequenceRetriever(contexts);
+        var rewriter = new CountingRewriter(RetrievalQueryRewriteResult.Unusable);
+        var completion = new FakeChat();
+
+        var result = await new SendChatMessageCommandHandler(
+            db, new CountingQuota(), embedding, retriever, rewriter, completion,
+            new PortfolioKnowledgeBuilder(db), new FixedTimeProvider(Now))
+            .HandleAsync(new(session.PublicSessionId, originalMessage, "ip:test"));
+
+        Assert.Equal([originalMessage], embedding.Inputs);
+        Assert.Empty(retriever.Calls);
+        var collectionCall = Assert.Single(retriever.CollectionCalls);
+        Assert.Equal([rtc.Id, vinSmart.Id], collectionCall.Select(item => item.SourceRefId));
+        Assert.DoesNotContain(collectionCall, item => item.SourceRefId == hidden.Id);
+        Assert.Equal([1, 2], collectionCall.Select(item => item.Ordinal));
+        Assert.Equal(0, rewriter.Calls);
+        Assert.Equal([rtc.Id, vinSmart.Id], completion.Request!.Context.Select(item => item.SourceRefId));
+        Assert.All(completion.Request.Context, item => Assert.True(item.SimilarityScore < .6m));
+        Assert.Equal(["RTC Technology Vietnam", "VinSmart Future"], result.Sources.Select(item => item.Title));
+    }
+
+    [Theory]
+    [InlineData("What did you do at RTC Technology Vietnam?")]
+    [InlineData("What did you do at VinSmart Future?")]
+    public async Task Employer_specific_experience_questions_remain_on_semantic_retrieval(string originalMessage)
+    {
+        await using var db = PublicPortfolioTests.CreateContext();
+        var session = Session();
+        db.AddRange(Setting(), session);
+        await db.SaveChangesAsync();
+        var semanticContext = new RetrievedKnowledge(
+            Guid.NewGuid(), Guid.NewGuid(), "Matching employer", "EXPERIENCE", Guid.NewGuid(),
+            null, "Specific experience context", 1, .8m);
+        var embedding = new TrackingEmbedding();
+        var retriever = new SequenceRetriever(new[] { semanticContext });
+        var rewriter = new CountingRewriter(RetrievalQueryRewriteResult.Unusable);
+
+        await new SendChatMessageCommandHandler(
+            db, new CountingQuota(), embedding, retriever, rewriter, new FakeChat(),
+            new PortfolioKnowledgeBuilder(db), new FixedTimeProvider(Now))
+            .HandleAsync(new(session.PublicSessionId, originalMessage, "ip:test"));
+
+        Assert.Equal([originalMessage], embedding.Inputs);
+        var call = Assert.Single(retriever.Calls);
+        Assert.Equal(6, call.TopK);
+        Assert.Equal(.6m, call.MinimumSimilarity);
+        Assert.Empty(retriever.CollectionCalls);
+        Assert.Equal(0, rewriter.Calls);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Missing_or_stale_indexed_experience_fails_closed_instead_of_returning_a_partial_catalogue(
+        bool includeStaleSecondDocument)
+    {
+        await using var db = PublicPortfolioTests.CreateContext();
+        var session = Session();
+        var rtc = Experience(Guid.NewGuid(), "RTC Technology Vietnam", 1, true);
+        var vinSmart = Experience(Guid.NewGuid(), "VinSmart Future", 2, true);
+        db.AddRange(Setting(), session, rtc, vinSmart);
+        await db.SaveChangesAsync();
+        var members = await new PortfolioKnowledgeBuilder(db).BuildCollectionAsync("EXPERIENCE");
+        var firstMember = members[0];
+        var secondMember = members[1];
+        var indexedDocuments = new List<KnowledgeDocument>
+        {
+            IndexedCollectionDocument(firstMember, rtc.CompanyName, firstMember.ContentHash)
+        };
+        if (includeStaleSecondDocument)
+        {
+            indexedDocuments.Add(IndexedCollectionDocument(secondMember, vinSmart.CompanyName, "stale-content-hash"));
+        }
+        var retriever = new ExactIdentityCollectionRetriever(indexedDocuments);
+        var rewriter = new CountingRewriter(RetrievalQueryRewriteResult.Unusable);
+        var completion = new CountingChat();
+
+        var error = await Assert.ThrowsAsync<ServiceUnavailableException>(() => new SendChatMessageCommandHandler(
+            db, new CountingQuota(), new TrackingEmbedding(), retriever, rewriter, completion,
+            new PortfolioKnowledgeBuilder(db), new FixedTimeProvider(Now))
+            .HandleAsync(new(session.PublicSessionId, "Where have you worked?", "ip:test")));
+
+        Assert.Equal("AGENT_UNAVAILABLE", error.Code);
+        Assert.Equal(1, retriever.CollectionCalls);
+        Assert.Equal(0, retriever.SemanticCalls);
+        Assert.Equal(0, rewriter.Calls);
+        Assert.Equal(0, completion.Calls);
+        Assert.Empty(await db.ChatMessages.ToListAsync());
+    }
+
     [Fact]
     public async Task Incomplete_structured_mapping_fails_closed_without_rewrite_or_persistence()
     {
@@ -563,6 +681,8 @@ public sealed class AgentFeatureTests
     [Fact]public async Task Feedback_is_assistant_only_and_unique(){await using var db=PublicPortfolioTests.CreateContext();var s=Session();var m=new ChatMessage{Id=Guid.NewGuid(),ChatSessionId=s.Id,Role="ASSISTANT",Content="a",CreatedAt=Now};db.AddRange(s,m);await db.SaveChangesAsync();var handler=new SubmitChatFeedbackCommandHandler(db,new FixedTimeProvider(Now));await handler.HandleAsync(new(m.Id,"positive",null));var conflict=await Assert.ThrowsAsync<ConflictException>(()=>handler.HandleAsync(new(m.Id,"NEGATIVE",null)));Assert.Equal("FEEDBACK_ALREADY_EXISTS",conflict.Code);}
     [Fact]public async Task Settings_validation_and_update_never_include_api_key(){var failures=await new UpdateAgentSettingsCommandValidator().ValidateAsync(new(true,null,null,null,null,"",null,null,0,2,3));Assert.True(failures.Count>=4);Assert.DoesNotContain(typeof(AgentSettingsResult).GetProperties(),x=>x.Name.Contains("Key"));}
     private static Project Project(Guid id,string slug,int order,bool published)=>new(){Id=id,Slug=slug,Title=slug,Status="DRAFT",DisplayOrder=order,IsPublished=published,UpdatedAt=Now};
+    private static Experience Experience(Guid id,string company,int order,bool published)=>new(){Id=id,CompanyName=company,RoleTitle="Engineer",StartDate=new(2025,1,1),DisplayOrder=order,IsPublished=published,UpdatedAt=Now};
+    private static KnowledgeDocument IndexedCollectionDocument(KnowledgeCollectionMember member,string title,string contentHash)=>new(){Id=Guid.NewGuid(),SourceType=member.SourceType,SourceRefId=member.SourceRefId,SourceKey=member.SourceKey,Title=title,Content="Indexed context",ContentHash=contentHash,Version=1,Metadata=JsonDocument.Parse("{}"),IsActive=true,IndexingStatus="INDEXED",CreatedAt=Now,UpdatedAt=Now};
     private static KnowledgeDocument CollectionDocument(Guid sourceRefId,string sourceKey,string contentHash)=>new(){Id=Guid.NewGuid(),SourceType="PROJECT",SourceRefId=sourceRefId,SourceKey=sourceKey,Title="Test",Content="context",ContentHash=contentHash,Version=1,Metadata=JsonDocument.Parse("{\"projectSlug\":\"test\"}"),IsActive=true,IndexingStatus="INDEXED",CreatedAt=Now,UpdatedAt=Now};
     private static AgentSetting Setting()=>new(){Id=Guid.NewGuid(),Name="portfolio-agent",Enabled=true,EmbeddingDimensions=1536,SystemPrompt="Ground answers.",FallbackMessage="Not available",MaxContextChunks=6,MinimumSimilarity=.6m,Temperature=.2m,CreatedAt=Now,UpdatedAt=Now};private static ChatSession Session()=>new(){Id=Guid.NewGuid(),PublicSessionId=Guid.NewGuid(),Status="ACTIVE",StartedAt=Now,MessageCount=10,Metadata=JsonDocument.Parse("{}")};private static KnowledgeDocument Document()=>new(){Id=Guid.NewGuid(),SourceType="PROJECT",SourceRefId=Guid.NewGuid(),SourceKey="project:test",Title="Test",Content="context",ContentHash="h",Version=1,Metadata=JsonDocument.Parse("{\"projectSlug\":\"test\"}"),IsActive=true,IndexingStatus="INDEXED",CreatedAt=Now,UpdatedAt=Now};private static KnowledgeChunk Chunk(Guid doc)=>new(){Id=Guid.NewGuid(),KnowledgeDocumentId=doc,ChunkIndex=0,Content="context",EmbeddingModel="fake",Metadata=JsonDocument.Parse("{}"),CreatedAt=Now};
     private sealed class AllowQuota:IChatQuotaService{public Task ReserveAsync(Guid sessionId,string visitorKey,CancellationToken c=default)=>Task.CompletedTask;}
@@ -575,6 +695,7 @@ public sealed class AgentFeatureTests
     private sealed class OrderedEmbedding(List<string> calls):IEmbeddingService{public Task<float[]> GenerateEmbeddingAsync(string t,CancellationToken c=default){calls.Add("embedding");return Task.FromResult(new float[1536]);}}
     private sealed class WrongDimensionEmbedding:IEmbeddingService{public Task<float[]> GenerateEmbeddingAsync(string t,CancellationToken c=default)=>Task.FromResult(new float[3]);}private sealed class ThrowingEmbedding:IEmbeddingService{public Task<float[]> GenerateEmbeddingAsync(string t,CancellationToken c=default)=>throw new InvalidOperationException("provider credential detail");}private sealed class EmptyRetriever:IKnowledgeRetriever{public Task<IReadOnlyCollection<RetrievedKnowledge>> RetrieveAsync(float[] e,int k,decimal? m,CancellationToken c=default)=>Task.FromResult<IReadOnlyCollection<RetrievedKnowledge>>([]);public Task<IReadOnlyCollection<RetrievedKnowledge>> RetrieveCollectionAsync(float[] e,IReadOnlyList<KnowledgeCollectionMember> members,CancellationToken c=default)=>Task.FromResult<IReadOnlyCollection<RetrievedKnowledge>>([]);}private sealed class FakeRetriever(Guid chunk,Guid doc):IKnowledgeRetriever{private IReadOnlyCollection<RetrievedKnowledge> Result=>[new(chunk,doc,"Test","PROJECT",Guid.NewGuid(),"test","context",1,.9m)];public Task<IReadOnlyCollection<RetrievedKnowledge>> RetrieveAsync(float[] e,int k,decimal? m,CancellationToken c=default)=>Task.FromResult(Result);public Task<IReadOnlyCollection<RetrievedKnowledge>> RetrieveCollectionAsync(float[] e,IReadOnlyList<KnowledgeCollectionMember> members,CancellationToken c=default)=>Task.FromResult(Result);}private sealed class FakeChat:IChatCompletionService{public ChatCompletionRequest? Request{get;private set;}public Task<ChatCompletionResult> CompleteAsync(ChatCompletionRequest r,CancellationToken c=default){Request=r;return Task.FromResult(new ChatCompletionResult("Grounded answer","fake",10,5,1));}}
     private sealed class SequenceRetriever(params IReadOnlyCollection<RetrievedKnowledge>[] results):IKnowledgeRetriever{private readonly Queue<IReadOnlyCollection<RetrievedKnowledge>> results=new(results);public List<(int TopK,decimal? MinimumSimilarity)> Calls{get;}=[];public List<IReadOnlyList<KnowledgeCollectionMember>> CollectionCalls{get;}=[];public Task<IReadOnlyCollection<RetrievedKnowledge>> RetrieveAsync(float[] e,int k,decimal? m,CancellationToken c=default){Calls.Add((k,m));return Task.FromResult(results.Dequeue());}public Task<IReadOnlyCollection<RetrievedKnowledge>> RetrieveCollectionAsync(float[] e,IReadOnlyList<KnowledgeCollectionMember> members,CancellationToken c=default){CollectionCalls.Add(members);return Task.FromResult(results.Dequeue());}}
+    private sealed class ExactIdentityCollectionRetriever(IReadOnlyCollection<KnowledgeDocument> documents):IKnowledgeRetriever{public int SemanticCalls{get;private set;}public int CollectionCalls{get;private set;}public Task<IReadOnlyCollection<RetrievedKnowledge>> RetrieveAsync(float[] e,int k,decimal? m,CancellationToken c=default){SemanticCalls++;return Task.FromResult<IReadOnlyCollection<RetrievedKnowledge>>([]);}public Task<IReadOnlyCollection<RetrievedKnowledge>> RetrieveCollectionAsync(float[] e,IReadOnlyList<KnowledgeCollectionMember> members,CancellationToken c=default){CollectionCalls++;var results=members.Select(member=>(Member:member,Document:documents.SingleOrDefault(document=>document.SourceType==member.SourceType&&document.SourceRefId==member.SourceRefId&&document.SourceKey==member.SourceKey&&document.ContentHash==member.ContentHash&&document.IsActive&&document.IndexingStatus=="INDEXED"))).Where(pair=>pair.Document is not null).Select(pair=>new RetrievedKnowledge(Guid.NewGuid(),pair.Document!.Id,pair.Document.Title,pair.Document.SourceType,pair.Document.SourceRefId,null,pair.Document.Content,pair.Member.Ordinal,.2m)).ToList();return Task.FromResult<IReadOnlyCollection<RetrievedKnowledge>>(results);}}
     private sealed class UnusableRewriter:IRetrievalQueryRewriter{public Task<RetrievalQueryRewriteResult> RewriteAsync(string m,CancellationToken c=default)=>Task.FromResult(RetrievalQueryRewriteResult.Unusable);}
     private sealed class CountingRewriter(RetrievalQueryRewriteResult result):IRetrievalQueryRewriter{public int Calls{get;private set;}public List<string> Messages{get;}=[];public Task<RetrievalQueryRewriteResult> RewriteAsync(string m,CancellationToken c=default){Calls++;Messages.Add(m);return Task.FromResult(result);}}
     private sealed class ThrowingRewriter:IRetrievalQueryRewriter{public int Calls{get;private set;}public Task<RetrievalQueryRewriteResult> RewriteAsync(string m,CancellationToken c=default){Calls++;throw new InvalidOperationException("provider failure");}}

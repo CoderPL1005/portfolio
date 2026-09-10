@@ -31,6 +31,20 @@ public static class CollectionIntentClassifier
         "translate", "translation", "phrase", "sentence", "word", "dich", "cum tu", "cau nay", "tu nay"
     ];
 
+    private static readonly HashSet<string> StandaloneExperienceCollectionFrames =
+    [
+        "tell me about your work experience",
+        "where have you worked",
+        "ban da lam o dau",
+        "kinh nghiem cua ban la gi"
+    ];
+
+    private static readonly string[] ExperienceDetailMarkers =
+    [
+        "at", "for", "with", "during", "in", "as",
+        "tai", "o", "voi", "trong", "nam"
+    ];
+
     public static string? Classify(string message)
     {
         if (string.IsNullOrWhiteSpace(message)
@@ -52,10 +66,23 @@ public static class CollectionIntentClassifier
             return null;
         }
 
+        if (StandaloneExperienceCollectionFrames.Contains(normalized))
+        {
+            return "EXPERIENCE";
+        }
+
         var matches = Categories
             .Where(category => ContainsAnyPhrase(normalized, category.Aliases))
             .ToArray();
         if (matches.Length != 1)
+        {
+            return null;
+        }
+
+        if (matches[0].SourceType == "EXPERIENCE"
+            && (normalized.Any(char.IsDigit)
+                || normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                    .Any(token => ExperienceDetailMarkers.Contains(token, StringComparer.Ordinal))))
         {
             return null;
         }
