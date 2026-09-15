@@ -28,6 +28,7 @@ using Portfolio.Application.Features.SocialLinks;
 using Portfolio.Application.Features.Media;
 using Portfolio.Application.Features.Agent;
 using Portfolio.Application.Features.Chat;
+using Portfolio.Application.Features.JobHunting;
 
 namespace Portfolio.Application;
 
@@ -185,6 +186,32 @@ public static class DependencyInjection
         services.AddScoped<IRequestHandler<GetConversationQuery,ConversationDetail>,GetConversationQueryHandler>();
         services.AddScoped<IRequestHandler<CloseConversationCommand,bool>,CloseConversationCommandHandler>();
         services.AddScoped<IRequestValidator<GetConversationsQuery>,GetConversationsQueryValidator>();
+
+        services.AddScoped<IRequestHandler<GetJobPostingsQuery, Common.Models.PagedResult<JobPostingListItem>>, GetJobPostingsQueryHandler>();
+        services.AddScoped<IRequestHandler<GetJobPostingQuery, JobPostingResult>, GetJobPostingQueryHandler>();
+        services.AddScoped<IRequestHandler<CreateJobPostingCommand, JobPostingResult>, CreateJobPostingCommandHandler>();
+        services.AddScoped<IRequestHandler<UpdateJobPostingCommand, JobPostingResult>, UpdateJobPostingCommandHandler>();
+        services.AddScoped<IRequestHandler<UpdateJobVerificationCommand, JobPostingResult>, UpdateJobVerificationCommandHandler>();
+        services.AddScoped<IRequestHandler<UpdateJobSelectionCommand, JobPostingResult>, UpdateJobSelectionCommandHandler>();
+        services.AddScoped<IRequestHandler<ArchiveJobPostingCommand, JobPostingResult>, ArchiveJobPostingCommandHandler>();
+        services.AddScoped<IRequestValidator<GetJobPostingsQuery>, GetJobPostingsQueryValidator>();
+        services.AddScoped<IRequestValidator<CreateJobPostingCommand>, CreateJobPostingCommandValidator>();
+        services.AddScoped<IRequestValidator<UpdateJobPostingCommand>, UpdateJobPostingCommandValidator>();
+        services.AddScoped<IRequestValidator<UpdateJobVerificationCommand>, UpdateJobVerificationCommandValidator>();
+        services.AddScoped<IRequestValidator<UpdateJobSelectionCommand>, UpdateJobSelectionCommandValidator>();
+        services.AddScoped<IRequestValidator<ArchiveJobPostingCommand>, ArchiveJobPostingCommandValidator>();
+        services.AddScoped<IRequestHandler<GetJobApplicationsQuery, Common.Models.PagedResult<JobApplicationListItem>>, GetJobApplicationsQueryHandler>();
+        services.AddScoped<IRequestHandler<GetJobApplicationQuery, JobApplicationResult>, GetJobApplicationQueryHandler>();
+        services.AddScoped<IRequestHandler<CreateJobApplicationCommand, JobApplicationResult>, CreateJobApplicationCommandHandler>();
+        services.AddScoped<IRequestHandler<UpdateJobApplicationCommand, JobApplicationResult>, UpdateJobApplicationCommandHandler>();
+        services.AddScoped<IRequestHandler<TransitionJobApplicationCommand, JobApplicationResult>, TransitionJobApplicationCommandHandler>();
+        services.AddScoped<IRequestHandler<AttachJobApplicationDocumentCommand, JobApplicationDocumentResult>, AttachJobApplicationDocumentCommandHandler>();
+        services.AddScoped<IRequestHandler<RemoveJobApplicationDocumentCommand, bool>, RemoveJobApplicationDocumentCommandHandler>();
+        services.AddScoped<IRequestValidator<GetJobApplicationsQuery>, GetJobApplicationsQueryValidator>();
+        services.AddScoped<IRequestValidator<CreateJobApplicationCommand>, CreateJobApplicationCommandValidator>();
+        services.AddScoped<IRequestValidator<UpdateJobApplicationCommand>, UpdateJobApplicationCommandValidator>();
+        services.AddScoped<IRequestValidator<TransitionJobApplicationCommand>, TransitionJobApplicationCommandValidator>();
+        services.AddScoped<IRequestValidator<AttachJobApplicationDocumentCommand>, AttachJobApplicationDocumentCommandValidator>();
 
         return services;
     }
