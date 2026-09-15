@@ -22,6 +22,11 @@ public sealed class JobHuntingPersistenceModelTests
         Assert.Equal("job_application_documents", model.FindEntityType(typeof(JobApplicationDocument))!.GetTableName());
 
         Assert.Equal("jsonb", Property<RawJobPosting>(model, nameof(RawJobPosting.Metadata)).GetColumnType());
+        var ingestionKey = Property<RawJobPosting>(model, nameof(RawJobPosting.IngestionKey));
+        Assert.Equal("ingestion_key", ingestionKey.GetColumnName());
+        Assert.Equal("character varying(500)", ingestionKey.GetColumnType());
+        Assert.Equal(500, ingestionKey.GetMaxLength());
+        Assert.True(ingestionKey.IsNullable);
         Assert.Equal("jsonb", Property<JobPosting>(model, nameof(JobPosting.TechnologyStack)).GetColumnType());
         Assert.Equal("jsonb", Property<JobApplicationEvent>(model, nameof(JobApplicationEvent.Metadata)).GetColumnType());
         Assert.Equal("jsonb", Property<JobApplicationDocument>(model, nameof(JobApplicationDocument.Metadata)).GetColumnType());
@@ -76,6 +81,7 @@ public sealed class JobHuntingPersistenceModelTests
         var application = model.FindEntityType(typeof(JobApplication))!;
 
         AssertIndex(raw, "uq_raw_job_postings_source_external_id", true, "source_external_id IS NOT NULL");
+        AssertIndex(raw, "uq_raw_job_postings_ingestion_key", true, "ingestion_key IS NOT NULL");
         AssertIndex(raw, "uq_raw_job_postings_source_url_hash", true, "source_url_hash IS NOT NULL");
         AssertIndex(raw, "ix_raw_job_postings_content_hash", false);
         AssertIndex(raw, "ix_raw_job_postings_company_title_fingerprint", false);
@@ -94,6 +100,9 @@ public sealed class JobHuntingPersistenceModelTests
 
         Assert.DoesNotContain(raw.GetIndexes(), index =>
             index.IsUnique && index.Properties.Any(property => property.Name is nameof(RawJobPosting.ContentHash) or nameof(RawJobPosting.CompanyTitleFingerprint)));
+        Assert.Equal(
+            [nameof(RawJobPosting.Source), nameof(RawJobPosting.SourceExternalId)],
+            raw.GetIndexes().Single(index => index.GetDatabaseName() == "uq_raw_job_postings_source_external_id").Properties.Select(property => property.Name));
         Assert.DoesNotContain(application.GetIndexes(), index =>
             index.IsUnique && index.Properties.Any(property => property.Name == nameof(JobApplication.JobPostingId)));
     }

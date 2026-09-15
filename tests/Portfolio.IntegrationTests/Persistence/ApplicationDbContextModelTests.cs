@@ -60,7 +60,7 @@ public sealed class ApplicationDbContextModelTests
 
         Assert.Equal(25, model.GetEntityTypes().SelectMany(entity => entity.GetForeignKeys()).Count());
         Assert.Equal(55, model.GetEntityTypes().SelectMany(entity => entity.GetCheckConstraints()).Count());
-        Assert.Equal(37, model.GetEntityTypes().SelectMany(entity => entity.GetIndexes()).Count());
+        Assert.Equal(38, model.GetEntityTypes().SelectMany(entity => entity.GetIndexes()).Count());
 
         var experienceTechnology = model.FindEntityType(typeof(ExperienceTechnology))!;
         Assert.Equal(2, experienceTechnology.FindPrimaryKey()!.Properties.Count);
@@ -110,13 +110,14 @@ public sealed class ApplicationDbContextModelTests
         using var context = CreateContext();
         var migrations = context.Database.GetMigrations().ToArray();
 
-        Assert.Equal(6, migrations.Length);
+        Assert.Equal(7, migrations.Length);
         Assert.EndsWith("_InitialPortfolioSchema", migrations[0], StringComparison.Ordinal);
         Assert.EndsWith("_RemoveContactMessages", migrations[1], StringComparison.Ordinal);
         Assert.EndsWith("_AllowDuplicateSocialLinkPlatforms", migrations[2], StringComparison.Ordinal);
         Assert.EndsWith("_AllowProjectSlugUpdates", migrations[3], StringComparison.Ordinal);
         Assert.EndsWith("_AddDurableChatProtection", migrations[4], StringComparison.Ordinal);
         Assert.EndsWith("_AddJobHuntingFoundation", migrations[5], StringComparison.Ordinal);
+        Assert.EndsWith("_AddRawJobPostingIngestionKey", migrations[6], StringComparison.Ordinal);
     }
 
     [Fact]

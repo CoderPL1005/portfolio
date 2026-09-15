@@ -19,6 +19,31 @@ public sealed class JobHuntingDomainTests
         Assert.Equal(JobApplicationStatuses.Draft, application.Status);
         Assert.Equal(JobApplicationEventTypes.Created, applicationEvent.EventType);
         Assert.Equal(JobApplicationEventActorTypes.System, applicationEvent.ActorType);
+        Assert.Null(raw.IngestionKey);
+    }
+
+    [Fact]
+    public void Ingestion_identity_is_independent_from_source_identity_and_content()
+    {
+        var first = new RawJobPosting
+        {
+            Source = RawJobPostingSources.Facebook,
+            SourceExternalId = "facebook-post-42",
+            IngestionKey = "telegram:100:1",
+            ContentHash = "same-content",
+        };
+        var second = new RawJobPosting
+        {
+            Source = RawJobPostingSources.Facebook,
+            SourceExternalId = "facebook-post-43",
+            IngestionKey = "telegram:100:2",
+            ContentHash = "same-content",
+        };
+
+        Assert.Equal("facebook-post-42", first.SourceExternalId);
+        Assert.Equal("telegram:100:1", first.IngestionKey);
+        Assert.Equal(first.ContentHash, second.ContentHash);
+        Assert.NotEqual(first.IngestionKey, second.IngestionKey);
     }
 
     [Fact]

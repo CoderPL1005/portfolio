@@ -9,6 +9,7 @@ public sealed class RawJobPosting
     public Guid? JobPostingId { get; set; }
     public string Source { get; set; } = RawJobPostingSources.Other;
     public string? SourceExternalId { get; set; }
+    public string? IngestionKey { get; set; }
     public string? SourceUrl { get; set; }
     public string? SourceUrlHash { get; set; }
     public string RawContent { get; set; } = null!;

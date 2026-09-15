@@ -22,6 +22,7 @@ public sealed class RawJobPostingConfiguration : IEntityTypeConfiguration<RawJob
         builder.Property(entity => entity.JobPostingId).HasColumnName("job_posting_id").HasColumnType("uuid");
         builder.Property(entity => entity.Source).HasColumnName("source").HasColumnType("character varying(30)").HasMaxLength(30);
         builder.Property(entity => entity.SourceExternalId).HasColumnName("source_external_id").HasColumnType("character varying(500)").HasMaxLength(500);
+        builder.Property(entity => entity.IngestionKey).HasColumnName("ingestion_key").HasColumnType("character varying(500)").HasMaxLength(500);
         builder.Property(entity => entity.SourceUrl).HasColumnName("source_url").HasColumnType("text");
         builder.Property(entity => entity.SourceUrlHash).HasColumnName("source_url_hash").HasColumnType("character varying(64)").HasMaxLength(64);
         builder.Property(entity => entity.RawContent).HasColumnName("raw_content").HasColumnType("text");
@@ -46,6 +47,10 @@ public sealed class RawJobPostingConfiguration : IEntityTypeConfiguration<RawJob
         builder.HasIndex(entity => new { entity.Source, entity.SourceExternalId })
             .HasDatabaseName("uq_raw_job_postings_source_external_id")
             .HasFilter("source_external_id IS NOT NULL")
+            .IsUnique();
+        builder.HasIndex(entity => entity.IngestionKey)
+            .HasDatabaseName("uq_raw_job_postings_ingestion_key")
+            .HasFilter("ingestion_key IS NOT NULL")
             .IsUnique();
         builder.HasIndex(entity => new { entity.Source, entity.SourceUrlHash })
             .HasDatabaseName("uq_raw_job_postings_source_url_hash")
