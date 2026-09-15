@@ -18,4 +18,11 @@ describe('AdminSidebarComponent', () => {
     expect(link).not.toBeNull();
     expect(link.textContent?.trim()).toBe('Technologies');
   });
+
+  it('links the private Job Hunting jobs and applications pages', async () => {
+    await TestBed.configureTestingModule({ imports: [AdminSidebarComponent], providers: [provideRouter([])] }).compileComponents();
+    const fixture = TestBed.createComponent(AdminSidebarComponent); fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('a[href="/admin/job-hunting/jobs"]')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('a[href="/admin/job-hunting/applications"]')).not.toBeNull();
+  });
 });

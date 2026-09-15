@@ -49,5 +49,8 @@ export class AdminSidebarComponent {
       { label: 'Knowledge', path: '/admin/agent/knowledge' }, { label: 'Agent Settings', path: '/admin/agent' },
       { label: 'Conversations', path: '/admin/agent/conversations' },
     ] },
+    { label: 'Job Hunting', links: [
+      { label: 'Jobs', path: '/admin/job-hunting/jobs' }, { label: 'Applications', path: '/admin/job-hunting/applications' },
+    ] },
   ];
 }
