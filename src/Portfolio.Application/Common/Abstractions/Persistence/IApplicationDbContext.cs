@@ -31,6 +31,11 @@ public interface IApplicationDbContext
     DbSet<ChatMessageSource> ChatMessageSources { get; }
     DbSet<ChatMessageFeedback> ChatMessageFeedback { get; }
     DbSet<ChatUsageDaily> ChatUsageDaily { get; }
+    DbSet<RawJobPosting> RawJobPostings { get; }
+    DbSet<JobPosting> JobPostings { get; }
+    DbSet<JobApplication> JobApplications { get; }
+    DbSet<JobApplicationEvent> JobApplicationEvents { get; }
+    DbSet<JobApplicationDocument> JobApplicationDocuments { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

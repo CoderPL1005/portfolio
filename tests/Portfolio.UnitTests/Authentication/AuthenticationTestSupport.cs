@@ -100,6 +100,11 @@ internal sealed class AuthTestDbContext(DbContextOptions<AuthTestDbContext> opti
     DbSet<ChatMessageSource> IApplicationDbContext.ChatMessageSources => throw new NotSupportedException();
     DbSet<ChatMessageFeedback> IApplicationDbContext.ChatMessageFeedback => throw new NotSupportedException();
     DbSet<ChatUsageDaily> IApplicationDbContext.ChatUsageDaily => throw new NotSupportedException();
+    DbSet<RawJobPosting> IApplicationDbContext.RawJobPostings => throw new NotSupportedException();
+    DbSet<JobPosting> IApplicationDbContext.JobPostings => throw new NotSupportedException();
+    DbSet<JobApplication> IApplicationDbContext.JobApplications => throw new NotSupportedException();
+    DbSet<JobApplicationEvent> IApplicationDbContext.JobApplicationEvents => throw new NotSupportedException();
+    DbSet<JobApplicationDocument> IApplicationDbContext.JobApplicationDocuments => throw new NotSupportedException();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -127,6 +132,11 @@ internal sealed class AuthTestDbContext(DbContextOptions<AuthTestDbContext> opti
         modelBuilder.Ignore<ChatMessageSource>();
         modelBuilder.Ignore<ChatMessageFeedback>();
         modelBuilder.Ignore<ChatUsageDaily>();
+        modelBuilder.Ignore<RawJobPosting>();
+        modelBuilder.Ignore<JobPosting>();
+        modelBuilder.Ignore<JobApplication>();
+        modelBuilder.Ignore<JobApplicationEvent>();
+        modelBuilder.Ignore<JobApplicationDocument>();
         modelBuilder.Entity<AdminUser>().HasKey(admin => admin.Id);
         modelBuilder.Entity<AdminRefreshToken>().HasKey(token => token.Id);
         modelBuilder.Entity<AdminRefreshToken>()

@@ -31,6 +31,11 @@ internal sealed class ContentTestDbContext(DbContextOptions<ContentTestDbContext
     public DbSet<ChatMessageSource> ChatMessageSources => Set<ChatMessageSource>();
     public DbSet<ChatMessageFeedback> ChatMessageFeedback => Set<ChatMessageFeedback>();
     public DbSet<ChatUsageDaily> ChatUsageDaily => Set<ChatUsageDaily>();
+    public DbSet<RawJobPosting> RawJobPostings => Set<RawJobPosting>();
+    public DbSet<JobPosting> JobPostings => Set<JobPosting>();
+    public DbSet<JobApplication> JobApplications => Set<JobApplication>();
+    public DbSet<JobApplicationEvent> JobApplicationEvents => Set<JobApplicationEvent>();
+    public DbSet<JobApplicationDocument> JobApplicationDocuments => Set<JobApplicationDocument>();
 
     DbSet<AdminUser> IApplicationDbContext.AdminUsers => throw new NotSupportedException();
     DbSet<AdminRefreshToken> IApplicationDbContext.AdminRefreshTokens => throw new NotSupportedException();
@@ -90,6 +95,21 @@ internal sealed class ContentTestDbContext(DbContextOptions<ContentTestDbContext
         modelBuilder.Entity<ChatMessageSource>().HasKey(item=>item.Id);modelBuilder.Entity<ChatMessageSource>().HasOne(item=>item.ChatMessage).WithMany().HasForeignKey(item=>item.ChatMessageId);modelBuilder.Entity<ChatMessageSource>().HasOne(item=>item.KnowledgeChunk).WithMany().HasForeignKey(item=>item.KnowledgeChunkId);
         modelBuilder.Entity<ChatMessageFeedback>().HasKey(item=>item.Id);modelBuilder.Entity<ChatMessageFeedback>().HasOne(item=>item.ChatMessage).WithMany().HasForeignKey(item=>item.ChatMessageId);
         modelBuilder.Entity<ChatUsageDaily>().HasKey(item => new { item.UsageDate, item.VisitorKey });
+        modelBuilder.Entity<RawJobPosting>().HasKey(item => item.Id);
+        modelBuilder.Entity<RawJobPosting>().HasOne(item => item.JobPosting).WithMany(item => item.RawJobPostings).HasForeignKey(item => item.JobPostingId);
+        modelBuilder.Entity<RawJobPosting>().HasOne(item => item.DuplicateOfRawJobPosting).WithMany(item => item.DuplicateRawJobPostings).HasForeignKey(item => item.DuplicateOfRawJobPostingId);
+        modelBuilder.Entity<RawJobPosting>().Property(item => item.Metadata).HasConversion(value => value.RootElement.GetRawText(), value => System.Text.Json.JsonDocument.Parse(value, default(System.Text.Json.JsonDocumentOptions)));
+        modelBuilder.Entity<JobPosting>().HasKey(item => item.Id);
+        modelBuilder.Entity<JobPosting>().Property(item => item.TechnologyStack).HasConversion(value => value.RootElement.GetRawText(), value => System.Text.Json.JsonDocument.Parse(value, default(System.Text.Json.JsonDocumentOptions)));
+        modelBuilder.Entity<JobApplication>().HasKey(item => item.Id);
+        modelBuilder.Entity<JobApplication>().HasOne(item => item.JobPosting).WithMany(item => item.JobApplications).HasForeignKey(item => item.JobPostingId);
+        modelBuilder.Entity<JobApplicationEvent>().HasKey(item => item.Id);
+        modelBuilder.Entity<JobApplicationEvent>().HasOne(item => item.JobApplication).WithMany(item => item.Events).HasForeignKey(item => item.JobApplicationId);
+        modelBuilder.Entity<JobApplicationEvent>().HasOne(item => item.ActorAdminUser).WithMany().HasForeignKey(item => item.ActorAdminUserId);
+        modelBuilder.Entity<JobApplicationEvent>().Property(item => item.Metadata).HasConversion(value => value.RootElement.GetRawText(), value => System.Text.Json.JsonDocument.Parse(value, default(System.Text.Json.JsonDocumentOptions)));
+        modelBuilder.Entity<JobApplicationDocument>().HasKey(item => item.Id);
+        modelBuilder.Entity<JobApplicationDocument>().HasOne(item => item.JobApplication).WithMany(item => item.Documents).HasForeignKey(item => item.JobApplicationId);
+        modelBuilder.Entity<JobApplicationDocument>().Property(item => item.Metadata).HasConversion(value => value.RootElement.GetRawText(), value => System.Text.Json.JsonDocument.Parse(value, default(System.Text.Json.JsonDocumentOptions)));
         modelBuilder.Entity<ChatSession>().Property(item => item.Metadata).HasConversion(
             value => value.RootElement.GetRawText(), value => System.Text.Json.JsonDocument.Parse(
                 value, default(System.Text.Json.JsonDocumentOptions)));
