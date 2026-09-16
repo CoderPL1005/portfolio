@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Microsoft.EntityFrameworkCore;
 using Pgvector.EntityFrameworkCore;
 using Portfolio.Application.Common.Abstractions.Persistence;
@@ -13,6 +14,9 @@ using Portfolio.Application.Common.Abstractions.AI;
 using Portfolio.Application.Common.Abstractions.Chat;
 using Portfolio.Infrastructure.AI;
 using Portfolio.Infrastructure.ChatProtection;
+using Portfolio.Application.Common.Abstractions.Integrations;
+using Portfolio.Application.Common.Configuration;
+using Portfolio.Infrastructure.Integrations.Telegram;
 
 namespace Portfolio.Infrastructure;
 
@@ -56,6 +60,14 @@ public static class DependencyInjection
             .Validate(settings => settings.IpHashSecret?.Length >= 32, "ChatProtection:IpHashSecret must contain at least 32 characters.")
             .ValidateOnStart();
         services.AddScoped<IChatQuotaService, PostgresChatQuotaService>();
+        services.AddSingleton<IValidateOptions<TelegramOptions>, TelegramOptionsValidator>();
+        services.AddOptions<TelegramOptions>()
+            .Bind(configuration.GetSection(TelegramOptions.SectionName))
+            .ValidateOnStart();
+        services.AddHttpClient<ITelegramBotClient, TelegramBotClient>(client =>
+            client.Timeout = TimeSpan.FromSeconds(10))
+            .RemoveAllLoggers();
+        services.AddSingleton<IIngestionKeyConflictDetector, NpgsqlIngestionKeyConflictDetector>();
         services.AddOptions<JwtSettings>()
             .Bind(configuration.GetSection(JwtSettings.SectionName))
             .Validate(settings => !string.IsNullOrWhiteSpace(settings.Issuer), "Jwt:Issuer is required.")

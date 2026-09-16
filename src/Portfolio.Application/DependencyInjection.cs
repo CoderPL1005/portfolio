@@ -212,6 +212,7 @@ public static class DependencyInjection
         services.AddScoped<IRequestValidator<UpdateJobApplicationCommand>, UpdateJobApplicationCommandValidator>();
         services.AddScoped<IRequestValidator<TransitionJobApplicationCommand>, TransitionJobApplicationCommandValidator>();
         services.AddScoped<IRequestValidator<AttachJobApplicationDocumentCommand>, AttachJobApplicationDocumentCommandValidator>();
+        services.AddScoped<IRequestHandler<ProcessTelegramWebhookCommand, TelegramWebhookResult>, ProcessTelegramWebhookCommandHandler>();
 
         return services;
     }
