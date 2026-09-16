@@ -24,4 +24,5 @@ public sealed class RawJobPosting
     public JobPosting? JobPosting { get; set; }
     public RawJobPosting? DuplicateOfRawJobPosting { get; set; }
     public ICollection<RawJobPosting> DuplicateRawJobPostings { get; set; } = [];
+    public ICollection<RawJobPostingAttachment> Attachments { get; set; } = [];
 }

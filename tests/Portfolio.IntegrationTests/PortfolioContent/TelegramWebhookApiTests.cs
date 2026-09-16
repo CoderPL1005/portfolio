@@ -115,6 +115,16 @@ public sealed class TelegramWebhookApiTests(AuthApiFactory root) : IClassFixture
         using var response=await client.GetAsync("/api/v1/admin/job-postings");Assert.Equal(HttpStatusCode.Unauthorized,response.StatusCode);
     }
 
+    [Fact]
+    public async Task Photo_payload_is_deserialized_but_invalid_secret_cannot_dispatch_or_download()
+    {
+        var setup=CreateFactory();using var factory=setup.Factory;using var client=factory.CreateClient();var update=PhotoUpdate();
+        using var rejected=await PostAsync(client,update,"wrong-secret");Assert.Equal(HttpStatusCode.Unauthorized,rejected.StatusCode);Assert.Equal(0,setup.Telegram.DownloadAttempts);
+        using var accepted=await PostAsync(client,update,Secret);Assert.Equal(HttpStatusCode.OK,accepted.StatusCode);Assert.Equal(1,setup.Telegram.DownloadAttempts);
+        var handler=factory.Services.GetRequiredService<TelegramHandlerProbe>();Assert.Equal("album-1",handler.LastRequest!.MediaGroupId);Assert.Equal(2,handler.LastRequest.Photo!.Count);Assert.Equal("large",Assert.Single(setup.Telegram.DownloadedFileIds));
+        var disabled=CreateFactory(enabled:false);using var disabledFactory=disabled.Factory;using var disabledClient=disabledFactory.CreateClient();using var unavailable=await PostAsync(disabledClient,update,Secret);Assert.Equal(HttpStatusCode.NotFound,unavailable.StatusCode);Assert.Equal(0,disabled.Telegram.DownloadAttempts);
+    }
+
     private Setup CreateFactory(bool enabled=true,bool failAcknowledgement=false)
     {
         var telegram=new FakeTelegramClient(failAcknowledgement);var handler=new TelegramHandlerProbe(telegram);
@@ -138,21 +148,29 @@ public sealed class TelegramWebhookApiTests(AuthApiFactory root) : IClassFixture
         var request=new HttpRequestMessage(HttpMethod.Post,"/api/v1/integrations/telegram/webhook"){Content=JsonContent.Create(update)};if(secret is not null)request.Headers.Add("X-Telegram-Bot-Api-Secret-Token",secret);return await client.SendAsync(request);
     }
     private static object Update(long messageId=10,string? text="Copied JD",string? caption=null,long userId=300,long chatId=200,string chatType="private")=>new{update_id=100,message=new{message_id=messageId,date=1_789_531_200L,text,caption,from=new{id=userId,username="ignored"},chat=new{id=chatId,type=chatType}}};
+    private static object PhotoUpdate()=>new{update_id=101,message=new{message_id=12,date=1_789_531_200L,caption="Screenshot",media_group_id="album-1",photo=new[]{new{file_id="small",file_unique_id="u1",width=320,height=240,file_size=100L},new{file_id="large",file_unique_id="u2",width=1280,height=960,file_size=200L}},from=new{id=300},chat=new{id=200,type="private"}}};
     private static Task<List<RawJobPosting>> RawRows(WebApplicationFactory<Program> factory){var handler=factory.Services.GetRequiredService<TelegramHandlerProbe>();return Task.FromResult(handler.Rows.OrderBy(x=>x.IngestionKey).ToList());}
     private sealed record Setup(WebApplicationFactory<Program> Factory,FakeTelegramClient Telegram);
     private sealed class FakeTelegramClient(bool fail):ITelegramBotClient
     {
-        public List<(long ChatId,string Text)> Messages{get;}=[];public int Attempts{get;private set;}
+        public List<(long ChatId,string Text)> Messages{get;}=[];public int Attempts{get;private set;}public int DownloadAttempts{get;private set;}public List<string> DownloadedFileIds{get;}=[];
         public Task SendMessageAsync(long chatId,string text,CancellationToken cancellationToken=default){Attempts++;if(fail)throw new HttpRequestException("simulated");Messages.Add((chatId,text));return Task.CompletedTask;}
+        public Task<TelegramDownloadedFile> DownloadFileAsync(string fileId,long maximumBytes,CancellationToken cancellationToken=default){DownloadAttempts++;DownloadedFileIds.Add(fileId);return Task.FromResult(new TelegramDownloadedFile([0xff,0xd8,0xff,0],"image/jpeg"));}
     }
 
     private sealed class TelegramHandlerProbe(FakeTelegramClient telegram):IRequestHandler<ProcessTelegramWebhookCommand,TelegramWebhookResult>
     {
         private readonly object gate=new();private readonly List<RawJobPosting> rows=[];
+        public ProcessTelegramWebhookCommand? LastRequest{get;private set;}
         public IReadOnlyCollection<RawJobPosting> Rows{get{lock(gate)return rows.ToArray();}}
         public async Task<TelegramWebhookResult> HandleAsync(ProcessTelegramWebhookCommand request,CancellationToken cancellationToken=default)
         {
+            LastRequest=request;
             if(request.SenderId!=300||request.ChatId!=200||!string.Equals(request.ChatType,"private",StringComparison.OrdinalIgnoreCase))return new(TelegramIngestionStatuses.Unauthorized);
+            if(request.Photo is {Count:>0})
+            {
+                var photo=TelegramInboxMapping.SelectPhoto(request.Photo)!;await telegram.DownloadFileAsync(photo.FileId,1024,cancellationToken);return new(TelegramIngestionStatuses.Created,Guid.NewGuid(),"MANUAL");
+            }
             var content=TelegramInboxMapping.ExtractContent(request.Text,request.Caption);
             if(request.MessageId is null or <=0||content is null){await Acknowledge(TelegramAcknowledgements.Unsupported,cancellationToken);return new(TelegramIngestionStatuses.Unsupported);}
             var key=TelegramInboxMapping.BuildIngestionKey(200,request.MessageId.Value);RawJobPosting? existing;

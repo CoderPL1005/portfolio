@@ -21,6 +21,8 @@ public sealed partial class TelegramOptionsValidator : IValidateOptions<Telegram
         }
         if (options.AllowedUserId == 0) failures.Add("Telegram:AllowedUserId must be a non-zero Int64 value.");
         if (options.AllowedChatId == 0) failures.Add("Telegram:AllowedChatId must be a non-zero Int64 value.");
+        if (options.MaxImageBytes is < 1 or > 20 * 1024 * 1024) failures.Add("Telegram:MaxImageBytes must be between 1 and 20971520 bytes.");
+        if (options.MaxAlbumImages is < 1 or > 20) failures.Add("Telegram:MaxAlbumImages must be between 1 and 20.");
 
         return failures.Count == 0 ? ValidateOptionsResult.Success : ValidateOptionsResult.Fail(failures);
     }

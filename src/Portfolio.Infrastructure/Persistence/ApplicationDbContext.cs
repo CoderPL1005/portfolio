@@ -35,6 +35,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<ChatMessageFeedback> ChatMessageFeedback => Set<ChatMessageFeedback>();
     public DbSet<ChatUsageDaily> ChatUsageDaily => Set<ChatUsageDaily>();
     public DbSet<RawJobPosting> RawJobPostings => Set<RawJobPosting>();
+    public DbSet<RawJobPostingAttachment> RawJobPostingAttachments => Set<RawJobPostingAttachment>();
     public DbSet<JobPosting> JobPostings => Set<JobPosting>();
     public DbSet<JobApplication> JobApplications => Set<JobApplication>();
     public DbSet<JobApplicationEvent> JobApplicationEvents => Set<JobApplicationEvent>();

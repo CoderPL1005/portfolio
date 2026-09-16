@@ -92,6 +92,7 @@ internal static class JobHashing
     public static string Fingerprint(string company,string title)=>Sha256($"{NormalizeIdentity(company)}\n{NormalizeIdentity(title)}");
     private static string NormalizeIdentity(string value)=>Regex.Replace(value.Normalize(NormalizationForm.FormKC).Trim(),"\\s+"," ").ToLowerInvariant();
     public static string Sha256(string value)=>Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
+    public static string Sha256Bytes(ReadOnlySpan<byte> value)=>Convert.ToHexString(SHA256.HashData(value)).ToLowerInvariant();
 }
 internal static class JobText{public static string? TrimOrNull(string? value)=>string.IsNullOrWhiteSpace(value)?null:value.Trim();}
 internal static class JobValidation

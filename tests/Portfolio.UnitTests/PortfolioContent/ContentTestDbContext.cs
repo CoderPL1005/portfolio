@@ -7,6 +7,7 @@ namespace Portfolio.UnitTests.PortfolioContent;
 internal sealed class ContentTestDbContext(DbContextOptions<ContentTestDbContext> options)
     : DbContext(options), IApplicationDbContext
 {
+    public bool FailSaveChanges { get; set; }
     public DbSet<MediaAsset> MediaAssets => Set<MediaAsset>();
     public DbSet<Profile> Profiles => Set<Profile>();
     public DbSet<Experience> Experiences => Set<Experience>();
@@ -32,6 +33,7 @@ internal sealed class ContentTestDbContext(DbContextOptions<ContentTestDbContext
     public DbSet<ChatMessageFeedback> ChatMessageFeedback => Set<ChatMessageFeedback>();
     public DbSet<ChatUsageDaily> ChatUsageDaily => Set<ChatUsageDaily>();
     public DbSet<RawJobPosting> RawJobPostings => Set<RawJobPosting>();
+    public DbSet<RawJobPostingAttachment> RawJobPostingAttachments => Set<RawJobPostingAttachment>();
     public DbSet<JobPosting> JobPostings => Set<JobPosting>();
     public DbSet<JobApplication> JobApplications => Set<JobApplication>();
     public DbSet<JobApplicationEvent> JobApplicationEvents => Set<JobApplicationEvent>();
@@ -39,6 +41,11 @@ internal sealed class ContentTestDbContext(DbContextOptions<ContentTestDbContext
 
     DbSet<AdminUser> IApplicationDbContext.AdminUsers => throw new NotSupportedException();
     DbSet<AdminRefreshToken> IApplicationDbContext.AdminRefreshTokens => throw new NotSupportedException();
+
+    public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default) =>
+        FailSaveChanges
+            ? throw new DbUpdateException("Simulated failure")
+            : base.SaveChangesAsync(cancellationToken);
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -99,6 +106,9 @@ internal sealed class ContentTestDbContext(DbContextOptions<ContentTestDbContext
         modelBuilder.Entity<RawJobPosting>().HasOne(item => item.JobPosting).WithMany(item => item.RawJobPostings).HasForeignKey(item => item.JobPostingId);
         modelBuilder.Entity<RawJobPosting>().HasOne(item => item.DuplicateOfRawJobPosting).WithMany(item => item.DuplicateRawJobPostings).HasForeignKey(item => item.DuplicateOfRawJobPostingId);
         modelBuilder.Entity<RawJobPosting>().Property(item => item.Metadata).HasConversion(value => value.RootElement.GetRawText(), value => System.Text.Json.JsonDocument.Parse(value, default(System.Text.Json.JsonDocumentOptions)));
+        modelBuilder.Entity<RawJobPostingAttachment>().HasKey(item => item.Id);
+        modelBuilder.Entity<RawJobPostingAttachment>().HasOne(item => item.RawJobPosting).WithMany(item => item.Attachments).HasForeignKey(item => item.RawJobPostingId);
+        modelBuilder.Entity<RawJobPostingAttachment>().HasIndex(item => new { item.RawJobPostingId, item.TelegramMessageId }).IsUnique();
         modelBuilder.Entity<JobPosting>().HasKey(item => item.Id);
         modelBuilder.Entity<JobPosting>().Property(item => item.TechnologyStack).HasConversion(value => value.RootElement.GetRawText(), value => System.Text.Json.JsonDocument.Parse(value, default(System.Text.Json.JsonDocumentOptions)));
         modelBuilder.Entity<JobApplication>().HasKey(item => item.Id);

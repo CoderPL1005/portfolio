@@ -101,6 +101,7 @@ internal sealed class AuthTestDbContext(DbContextOptions<AuthTestDbContext> opti
     DbSet<ChatMessageFeedback> IApplicationDbContext.ChatMessageFeedback => throw new NotSupportedException();
     DbSet<ChatUsageDaily> IApplicationDbContext.ChatUsageDaily => throw new NotSupportedException();
     DbSet<RawJobPosting> IApplicationDbContext.RawJobPostings => throw new NotSupportedException();
+    DbSet<RawJobPostingAttachment> IApplicationDbContext.RawJobPostingAttachments => throw new NotSupportedException();
     DbSet<JobPosting> IApplicationDbContext.JobPostings => throw new NotSupportedException();
     DbSet<JobApplication> IApplicationDbContext.JobApplications => throw new NotSupportedException();
     DbSet<JobApplicationEvent> IApplicationDbContext.JobApplicationEvents => throw new NotSupportedException();
@@ -133,6 +134,7 @@ internal sealed class AuthTestDbContext(DbContextOptions<AuthTestDbContext> opti
         modelBuilder.Ignore<ChatMessageFeedback>();
         modelBuilder.Ignore<ChatUsageDaily>();
         modelBuilder.Ignore<RawJobPosting>();
+        modelBuilder.Ignore<RawJobPostingAttachment>();
         modelBuilder.Ignore<JobPosting>();
         modelBuilder.Ignore<JobApplication>();
         modelBuilder.Ignore<JobApplicationEvent>();

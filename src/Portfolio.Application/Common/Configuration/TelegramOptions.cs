@@ -9,4 +9,6 @@ public sealed class TelegramOptions
     public string WebhookSecret { get; set; } = string.Empty;
     public long AllowedUserId { get; set; }
     public long AllowedChatId { get; set; }
+    public long MaxImageBytes { get; set; } = 10 * 1024 * 1024;
+    public int MaxAlbumImages { get; set; } = 10;
 }

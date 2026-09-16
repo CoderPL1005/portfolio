@@ -74,7 +74,14 @@ public sealed class TelegramWebhookController(
             message?.Caption,
             message?.From?.Id,
             message?.Chat?.Id,
-            message?.Chat?.Type), cancellationToken);
+            message?.Chat?.Type,
+            message?.MediaGroupId,
+            message?.Photo?.Select(item => new TelegramPhotoSize(
+                item.FileId,
+                item.FileUniqueId,
+                item.Width,
+                item.Height,
+                item.FileSize)).ToArray() ?? []), cancellationToken);
         return Ok(ApiResponse.Ok());
     }
 }
@@ -89,12 +96,20 @@ public sealed record TelegramMessageRequest(
     [property: JsonPropertyName("text")] string? Text,
     [property: JsonPropertyName("caption")] string? Caption,
     [property: JsonPropertyName("from")] TelegramUserRequest? From,
-    [property: JsonPropertyName("chat")] TelegramChatRequest? Chat);
+    [property: JsonPropertyName("chat")] TelegramChatRequest? Chat,
+    [property: JsonPropertyName("media_group_id")] string? MediaGroupId,
+    [property: JsonPropertyName("photo")] IReadOnlyCollection<TelegramPhotoSizeRequest>? Photo);
 
 public sealed record TelegramUserRequest([property: JsonPropertyName("id")] long Id);
 public sealed record TelegramChatRequest(
     [property: JsonPropertyName("id")] long Id,
     [property: JsonPropertyName("type")] string? Type);
+public sealed record TelegramPhotoSizeRequest(
+    [property: JsonPropertyName("file_id")] string FileId,
+    [property: JsonPropertyName("file_unique_id")] string FileUniqueId,
+    [property: JsonPropertyName("width")] int Width,
+    [property: JsonPropertyName("height")] int Height,
+    [property: JsonPropertyName("file_size")] long? FileSize);
 
 public static class TelegramWebhookSecret
 {

@@ -20,6 +20,7 @@ public sealed class JobHuntingPersistenceModelTests
         Assert.Equal("job_applications", model.FindEntityType(typeof(JobApplication))!.GetTableName());
         Assert.Equal("job_application_events", model.FindEntityType(typeof(JobApplicationEvent))!.GetTableName());
         Assert.Equal("job_application_documents", model.FindEntityType(typeof(JobApplicationDocument))!.GetTableName());
+        Assert.Equal("raw_job_posting_attachments", model.FindEntityType(typeof(RawJobPostingAttachment))!.GetTableName());
 
         Assert.Equal("jsonb", Property<RawJobPosting>(model, nameof(RawJobPosting.Metadata)).GetColumnType());
         var ingestionKey = Property<RawJobPosting>(model, nameof(RawJobPosting.IngestionKey));
@@ -56,6 +57,9 @@ public sealed class JobHuntingPersistenceModelTests
         AssertConstraint<JobApplicationEvent>(model, "ck_job_application_events_from_status", "from_status IS NULL", "OFFER");
         AssertConstraint<JobApplicationEvent>(model, "ck_job_application_events_to_status", "to_status IS NULL", "REJECTED");
         AssertConstraint<JobApplicationDocument>(model, "ck_job_application_documents_content_hash", "^[0-9a-f]{64}$");
+        AssertConstraint<RawJobPostingAttachment>(model, "ck_raw_job_posting_attachments_type", "IMAGE");
+        AssertConstraint<RawJobPostingAttachment>(model, "ck_raw_job_posting_attachments_content_hash", "^[0-9a-f]{64}$");
+        AssertConstraint<RawJobPostingAttachment>(model, "ck_raw_job_posting_attachments_file_size", "file_size_bytes > 0");
     }
 
     [Fact]
@@ -70,6 +74,7 @@ public sealed class JobHuntingPersistenceModelTests
         AssertDeleteBehavior<JobApplicationEvent>(model, nameof(JobApplicationEvent.JobApplicationId), DeleteBehavior.Restrict);
         AssertDeleteBehavior<JobApplicationEvent>(model, nameof(JobApplicationEvent.ActorAdminUserId), DeleteBehavior.SetNull);
         AssertDeleteBehavior<JobApplicationDocument>(model, nameof(JobApplicationDocument.JobApplicationId), DeleteBehavior.Restrict);
+        AssertDeleteBehavior<RawJobPostingAttachment>(model, nameof(RawJobPostingAttachment.RawJobPostingId), DeleteBehavior.Restrict);
     }
 
     [Fact]
@@ -97,6 +102,10 @@ public sealed class JobHuntingPersistenceModelTests
         AssertIndex(application, "ix_job_applications_channel_applied_at", false);
         AssertIndex(model.FindEntityType(typeof(JobApplicationEvent))!, "ix_job_application_events_application_occurred_id", false);
         AssertIndex(model.FindEntityType(typeof(JobApplicationDocument))!, "ix_job_application_documents_application_type_created_id", false);
+        var attachment=model.FindEntityType(typeof(RawJobPostingAttachment))!;
+        AssertIndex(attachment,"uq_raw_job_posting_attachments_delivery",true);
+        AssertIndex(attachment,"ix_raw_job_posting_attachments_order",false);
+        AssertIndex(attachment,"ix_raw_job_posting_attachments_content_hash",false);
 
         Assert.DoesNotContain(raw.GetIndexes(), index =>
             index.IsUnique && index.Properties.Any(property => property.Name is nameof(RawJobPosting.ContentHash) or nameof(RawJobPosting.CompanyTitleFingerprint)));

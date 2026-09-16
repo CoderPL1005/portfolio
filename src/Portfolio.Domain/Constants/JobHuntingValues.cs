@@ -19,6 +19,11 @@ public static class RawJobPostingIngestionStatuses
     public const string Rejected = "REJECTED";
 }
 
+public static class RawJobPostingAttachmentTypes
+{
+    public const string Image = "IMAGE";
+}
+
 public static class JobPostingVerificationStatuses
 {
     public const string Pending = "PENDING";

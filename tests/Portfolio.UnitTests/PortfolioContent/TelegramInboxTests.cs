@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Portfolio.Application.Common.Abstractions.Integrations;
+using Portfolio.Application.Common.Abstractions.Storage;
 using Portfolio.Application.Common.Configuration;
 using Portfolio.Application.Features.JobHunting;
 using Portfolio.Domain.Constants;
@@ -87,6 +88,7 @@ public sealed class TelegramInboxTests
         Assert.Null(raw.CompanyTitleFingerprint); Assert.Equal(RawJobPostingIngestionStatuses.Received, raw.IngestionStatus);
         Assert.Null(raw.DuplicateOfRawJobPostingId); Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(unix), raw.DiscoveredAt);
         Assert.Equal(Now, raw.CreatedAt); Assert.Equal(Now, raw.UpdatedAt); Assert.Empty(db.JobPostings);
+        Assert.Empty(db.RawJobPostingAttachments);
         var metadata = raw.Metadata.RootElement;
         Assert.Equal("TELEGRAM", metadata.GetProperty("ingestionChannel").GetString());
         Assert.Equal(100, metadata.GetProperty("telegramUpdateId").GetInt64());
@@ -139,13 +141,15 @@ public sealed class TelegramInboxTests
         Assert.Equal(TelegramIngestionStatuses.Created,result.Status);Assert.Single(db.RawJobPostings);Assert.Empty(db.JobPostings);
     }
 
-    private static ProcessTelegramWebhookCommandHandler Handler(ContentTestDbContext db,FakeTelegramClient client)=>new(db,client,new NeverConflict(),Options(),new FixedTimeProvider(Now),NullLogger<ProcessTelegramWebhookCommandHandler>.Instance);
+    private static ProcessTelegramWebhookCommandHandler Handler(ContentTestDbContext db,FakeTelegramClient client)=>new(db,client,new FakeStorage(),new NeverConflict(),Options(),new FixedTimeProvider(Now),NullLogger<ProcessTelegramWebhookCommandHandler>.Instance);
     private static IOptions<TelegramOptions> Options(string secret="valid_webhook-secret_with_32_chars")=>Microsoft.Extensions.Options.Options.Create(new TelegramOptions{Enabled=true,BotToken="test-token",WebhookSecret=secret,AllowedUserId=300,AllowedChatId=200});
     private static ProcessTelegramWebhookCommand Command(long messageId=10,string? text="Copied JD",string? caption=null,long? senderId=300,long? chatId=200,string chatType="private",long? date=null)=>new(100,messageId,date,text,caption,senderId,chatId,chatType);
-    private sealed class NeverConflict:IIngestionKeyConflictDetector{public bool IsIngestionKeyConflict(Microsoft.EntityFrameworkCore.DbUpdateException exception)=>false;}
+    private sealed class NeverConflict:IIngestionKeyConflictDetector{public bool IsIngestionKeyConflict(Microsoft.EntityFrameworkCore.DbUpdateException exception)=>false;public bool IsAttachmentDeliveryConflict(Microsoft.EntityFrameworkCore.DbUpdateException exception)=>false;}
     private sealed class FakeTelegramClient(Action? beforeSend=null,bool throwOnSend=false):ITelegramBotClient
     {
         public List<(long ChatId,string Text)> Messages{get;}=[];
         public Task SendMessageAsync(long chatId,string text,CancellationToken cancellationToken=default){beforeSend?.Invoke();if(throwOnSend)throw new HttpRequestException("simulated");Messages.Add((chatId,text));return Task.CompletedTask;}
+        public Task<TelegramDownloadedFile> DownloadFileAsync(string fileId,long maximumBytes,CancellationToken cancellationToken=default)=>Task.FromResult(new TelegramDownloadedFile([0xff,0xd8,0xff,0],"image/jpeg"));
     }
+    private sealed class FakeStorage:IFileStorage{public Task<string> UploadAsync(string key,Stream content,string contentType,CancellationToken ct=default)=>Task.FromResult(key);public Task UploadPrivateAsync(string key,Stream content,string contentType,CancellationToken ct=default)=>Task.CompletedTask;public Task<Stream> OpenReadAsync(string key,long maximumBytes,CancellationToken ct=default)=>Task.FromResult<Stream>(new MemoryStream());public Task DeleteAsync(string key,CancellationToken ct=default)=>Task.CompletedTask;}
 }
