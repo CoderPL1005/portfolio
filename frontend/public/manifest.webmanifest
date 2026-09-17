@@ -3,7 +3,7 @@
   "short_name": "Portfolio",
   "description": "Nguyen Dinh Phuc's personal portfolio.",
   "id": "/",
-  "start_url": "/",
+  "start_url": "/admin/job-hunting/jobs",
   "scope": "/",
   "display": "standalone",
   "orientation": "any",
