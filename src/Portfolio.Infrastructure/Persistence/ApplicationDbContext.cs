@@ -40,6 +40,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<JobApplication> JobApplications => Set<JobApplication>();
     public DbSet<JobApplicationEvent> JobApplicationEvents => Set<JobApplicationEvent>();
     public DbSet<JobApplicationDocument> JobApplicationDocuments => Set<JobApplicationDocument>();
+    public DbSet<PushSubscription> PushSubscriptions => Set<PushSubscription>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {

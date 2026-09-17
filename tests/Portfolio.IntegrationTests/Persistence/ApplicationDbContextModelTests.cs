@@ -19,11 +19,12 @@ public sealed class ApplicationDbContextModelTests
         "journey_items", "social_links", "site_settings", "agent_settings",
         "knowledge_documents", "knowledge_chunks", "chat_sessions", "chat_messages",
         "chat_message_sources", "chat_message_feedback", "chat_usage_daily", "raw_job_postings",
-        "raw_job_posting_attachments", "job_postings", "job_applications", "job_application_events", "job_application_documents"
+        "raw_job_posting_attachments", "job_postings", "job_applications", "job_application_events", "job_application_documents",
+        "push_subscriptions"
     ];
 
     [Fact]
-    public void Model_contains_all_32_expected_tables_and_excludes_contact_messages()
+    public void Model_contains_all_33_expected_tables_and_excludes_contact_messages()
     {
         using var context = CreateContext();
         var tables = context.Model.GetEntityTypes().Select(entity => entity.GetTableName()).Order().ToArray();
@@ -34,13 +35,13 @@ public sealed class ApplicationDbContextModelTests
     }
 
     [Fact]
-    public void Application_context_contract_exposes_all_32_sets()
+    public void Application_context_contract_exposes_all_33_sets()
     {
         var dbSetCount = typeof(IApplicationDbContext).GetProperties()
             .Count(property => property.PropertyType.IsGenericType &&
                 property.PropertyType.GetGenericTypeDefinition() == typeof(DbSet<>));
 
-        Assert.Equal(32, dbSetCount);
+        Assert.Equal(33, dbSetCount);
     }
 
     [Fact]
@@ -59,8 +60,8 @@ public sealed class ApplicationDbContextModelTests
         var model = context.GetService<IDesignTimeModel>().Model;
 
         Assert.Equal(26, model.GetEntityTypes().SelectMany(entity => entity.GetForeignKeys()).Count());
-        Assert.Equal(61, model.GetEntityTypes().SelectMany(entity => entity.GetCheckConstraints()).Count());
-        Assert.Equal(41, model.GetEntityTypes().SelectMany(entity => entity.GetIndexes()).Count());
+        Assert.Equal(64, model.GetEntityTypes().SelectMany(entity => entity.GetCheckConstraints()).Count());
+        Assert.Equal(43, model.GetEntityTypes().SelectMany(entity => entity.GetIndexes()).Count());
 
         var experienceTechnology = model.FindEntityType(typeof(ExperienceTechnology))!;
         Assert.Equal(2, experienceTechnology.FindPrimaryKey()!.Properties.Count);
@@ -110,7 +111,7 @@ public sealed class ApplicationDbContextModelTests
         using var context = CreateContext();
         var migrations = context.Database.GetMigrations().ToArray();
 
-        Assert.Equal(8, migrations.Length);
+        Assert.Equal(9, migrations.Length);
         Assert.EndsWith("_InitialPortfolioSchema", migrations[0], StringComparison.Ordinal);
         Assert.EndsWith("_RemoveContactMessages", migrations[1], StringComparison.Ordinal);
         Assert.EndsWith("_AllowDuplicateSocialLinkPlatforms", migrations[2], StringComparison.Ordinal);
@@ -119,6 +120,28 @@ public sealed class ApplicationDbContextModelTests
         Assert.EndsWith("_AddJobHuntingFoundation", migrations[5], StringComparison.Ordinal);
         Assert.EndsWith("_AddRawJobPostingIngestionKey", migrations[6], StringComparison.Ordinal);
         Assert.EndsWith("_AddTelegramRawJobPostingAttachments", migrations[7], StringComparison.Ordinal);
+        Assert.EndsWith("_AddWebPushSubscriptions", migrations[8], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Web_push_migration_only_adds_and_removes_the_subscription_table()
+    {
+        using var context = CreateContext();
+        var migrations = context.Database.GetMigrations().ToArray();
+        var migrator = context.GetService<IMigrator>();
+        var up = migrator.GenerateScript(migrations[7], migrations[8]);
+        var down = migrator.GenerateScript(migrations[8], migrations[7]);
+
+        Assert.Contains("CREATE TABLE push_subscriptions", up, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("uq_push_subscriptions_endpoint", up, StringComparison.Ordinal);
+        Assert.Contains("ix_push_subscriptions_active", up, StringComparison.Ordinal);
+        Assert.Equal(1, CountOccurrences(up.ToUpperInvariant(), "CREATE TABLE"));
+        Assert.DoesNotContain("DROP TABLE", up, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("DELETE FROM", up, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("ALTER TABLE", up, StringComparison.OrdinalIgnoreCase);
+
+        Assert.Contains("DROP TABLE push_subscriptions", down, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(1, CountOccurrences(down.ToUpperInvariant(), "DROP TABLE"));
     }
 
     [Fact]

@@ -29,6 +29,7 @@ using Portfolio.Application.Features.Media;
 using Portfolio.Application.Features.Agent;
 using Portfolio.Application.Features.Chat;
 using Portfolio.Application.Features.JobHunting;
+using Portfolio.Application.Features.PushNotifications;
 
 namespace Portfolio.Application;
 
@@ -213,6 +214,11 @@ public static class DependencyInjection
         services.AddScoped<IRequestValidator<TransitionJobApplicationCommand>, TransitionJobApplicationCommandValidator>();
         services.AddScoped<IRequestValidator<AttachJobApplicationDocumentCommand>, AttachJobApplicationDocumentCommandValidator>();
         services.AddScoped<IRequestHandler<ProcessTelegramWebhookCommand, TelegramWebhookResult>, ProcessTelegramWebhookCommandHandler>();
+        services.AddScoped<IRequestHandler<RegisterPushSubscriptionCommand, bool>, RegisterPushSubscriptionCommandHandler>();
+        services.AddScoped<IRequestHandler<DisablePushSubscriptionCommand, bool>, DisablePushSubscriptionCommandHandler>();
+        services.AddScoped<IRequestHandler<SendTestPushNotificationCommand, PushTestSummary>, SendTestPushNotificationCommandHandler>();
+        services.AddScoped<IRequestValidator<RegisterPushSubscriptionCommand>, RegisterPushSubscriptionCommandValidator>();
+        services.AddScoped<IRequestValidator<DisablePushSubscriptionCommand>, DisablePushSubscriptionCommandValidator>();
 
         return services;
     }

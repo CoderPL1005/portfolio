@@ -17,6 +17,9 @@ using Portfolio.Infrastructure.ChatProtection;
 using Portfolio.Application.Common.Abstractions.Integrations;
 using Portfolio.Application.Common.Configuration;
 using Portfolio.Infrastructure.Integrations.Telegram;
+using Portfolio.Application.Common.Abstractions.Notifications;
+using Portfolio.Infrastructure.Notifications;
+using System.Net.Mail;
 
 namespace Portfolio.Infrastructure;
 
@@ -67,6 +70,15 @@ public static class DependencyInjection
         services.AddHttpClient<ITelegramBotClient, TelegramBotClient>(client =>
             client.Timeout = TimeSpan.FromSeconds(10))
             .RemoveAllLoggers();
+        services.AddOptions<WebPushSettings>()
+            .Bind(configuration.GetSection(WebPushSettings.SectionName))
+            .Validate(settings => IsValidWebPushSubject(settings.Subject),
+                "WebPush:Subject must be a valid mailto: or HTTPS URI.")
+            .Validate(settings => IsValidWebPushKey(settings.PublicKey),
+                "WebPush:PublicKey must be a valid base64url value no longer than 512 characters.")
+            .Validate(settings => IsValidWebPushKey(settings.PrivateKey),
+                "WebPush:PrivateKey must be a valid base64url value no longer than 512 characters.");
+        services.AddSingleton<IWebPushSender, WebPushSender>();
         services.AddSingleton<IIngestionKeyConflictDetector, NpgsqlIngestionKeyConflictDetector>();
         services.AddOptions<JwtSettings>()
             .Bind(configuration.GetSection(JwtSettings.SectionName))
@@ -82,4 +94,25 @@ public static class DependencyInjection
 
         return services;
     }
+
+    private static bool IsValidWebPushSubject(string? subject)
+    {
+        if (!Uri.TryCreate(subject, UriKind.Absolute, out var uri))
+        {
+            return false;
+        }
+
+        if (uri.Scheme == Uri.UriSchemeHttps)
+        {
+            return !string.IsNullOrWhiteSpace(uri.Host);
+        }
+
+        return uri.Scheme == Uri.UriSchemeMailto &&
+            MailAddress.TryCreate(subject!["mailto:".Length..], out _);
+    }
+
+    private static bool IsValidWebPushKey(string? value) =>
+        !string.IsNullOrWhiteSpace(value) &&
+        value.Length <= 512 &&
+        value.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or '=');
 }

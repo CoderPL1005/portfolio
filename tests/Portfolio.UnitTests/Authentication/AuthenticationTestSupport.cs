@@ -106,6 +106,7 @@ internal sealed class AuthTestDbContext(DbContextOptions<AuthTestDbContext> opti
     DbSet<JobApplication> IApplicationDbContext.JobApplications => throw new NotSupportedException();
     DbSet<JobApplicationEvent> IApplicationDbContext.JobApplicationEvents => throw new NotSupportedException();
     DbSet<JobApplicationDocument> IApplicationDbContext.JobApplicationDocuments => throw new NotSupportedException();
+    DbSet<PushSubscription> IApplicationDbContext.PushSubscriptions => throw new NotSupportedException();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

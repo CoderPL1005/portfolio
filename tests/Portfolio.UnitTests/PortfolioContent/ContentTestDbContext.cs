@@ -38,6 +38,7 @@ internal sealed class ContentTestDbContext(DbContextOptions<ContentTestDbContext
     public DbSet<JobApplication> JobApplications => Set<JobApplication>();
     public DbSet<JobApplicationEvent> JobApplicationEvents => Set<JobApplicationEvent>();
     public DbSet<JobApplicationDocument> JobApplicationDocuments => Set<JobApplicationDocument>();
+    public DbSet<PushSubscription> PushSubscriptions => Set<PushSubscription>();
 
     DbSet<AdminUser> IApplicationDbContext.AdminUsers => throw new NotSupportedException();
     DbSet<AdminRefreshToken> IApplicationDbContext.AdminRefreshTokens => throw new NotSupportedException();
@@ -120,6 +121,8 @@ internal sealed class ContentTestDbContext(DbContextOptions<ContentTestDbContext
         modelBuilder.Entity<JobApplicationDocument>().HasKey(item => item.Id);
         modelBuilder.Entity<JobApplicationDocument>().HasOne(item => item.JobApplication).WithMany(item => item.Documents).HasForeignKey(item => item.JobApplicationId);
         modelBuilder.Entity<JobApplicationDocument>().Property(item => item.Metadata).HasConversion(value => value.RootElement.GetRawText(), value => System.Text.Json.JsonDocument.Parse(value, default(System.Text.Json.JsonDocumentOptions)));
+        modelBuilder.Entity<PushSubscription>().HasKey(item => item.Id);
+        modelBuilder.Entity<PushSubscription>().HasIndex(item => item.Endpoint).IsUnique();
         modelBuilder.Entity<ChatSession>().Property(item => item.Metadata).HasConversion(
             value => value.RootElement.GetRawText(), value => System.Text.Json.JsonDocument.Parse(
                 value, default(System.Text.Json.JsonDocumentOptions)));

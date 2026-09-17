@@ -43,7 +43,7 @@ export class AdminSidebarComponent {
     ] },
     { label: 'Website', links: [
       { label: 'Social Links', path: '/admin/social-links' }, { label: 'Site Settings', path: '/admin/site-settings' },
-      { label: 'Media Library', path: '/admin/media' },
+      { label: 'Notifications', path: '/admin/notifications' }, { label: 'Media Library', path: '/admin/media' },
     ] },
     { label: 'AI Agent', links: [
       { label: 'Knowledge', path: '/admin/agent/knowledge' }, { label: 'Agent Settings', path: '/admin/agent' },

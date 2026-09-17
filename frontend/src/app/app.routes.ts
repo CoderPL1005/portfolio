@@ -33,6 +33,7 @@ export const routes: Routes = [
       { path: 'journey', canDeactivate: [unsavedChangesGuard], loadComponent: () => import('./features/admin/journey/journey-page.component').then(m => m.JourneyAdminPageComponent) },
       { path: 'social-links', canDeactivate: [unsavedChangesGuard], loadComponent: () => import('./features/admin/social-links/social-links-page.component').then(m => m.SocialLinksPageComponent) },
       { path: 'site-settings', canDeactivate: [unsavedChangesGuard], loadComponent: () => import('./features/admin/site-settings/site-settings-page.component').then(m => m.SiteSettingsPageComponent) },
+      { path: 'notifications', loadComponent: () => import('./features/admin/notifications/notification-settings-page.component').then(m => m.NotificationSettingsPageComponent) },
       { path: 'media', loadComponent: () => import('./features/admin/media/media-library-page.component').then(m => m.MediaLibraryPageComponent) },
       { path: 'agent', canDeactivate:[unsavedChangesGuard], loadComponent:()=>import('./features/admin/agent/agent-settings-page.component').then(m=>m.AgentSettingsPageComponent) },
       { path: 'agent/knowledge', loadComponent:()=>import('./features/admin/agent/knowledge-page.component').then(m=>m.KnowledgePageComponent) },

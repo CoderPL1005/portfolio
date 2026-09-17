@@ -25,4 +25,12 @@ describe('AdminSidebarComponent', () => {
     expect(fixture.nativeElement.querySelector('a[href="/admin/job-hunting/jobs"]')).not.toBeNull();
     expect(fixture.nativeElement.querySelector('a[href="/admin/job-hunting/applications"]')).not.toBeNull();
   });
+
+  it('links authenticated notification settings from the Website group', async () => {
+    await TestBed.configureTestingModule({ imports: [AdminSidebarComponent], providers: [provideRouter([])] }).compileComponents();
+    const fixture = TestBed.createComponent(AdminSidebarComponent); fixture.detectChanges();
+    const link = fixture.nativeElement.querySelector('a[href="/admin/notifications"]') as HTMLAnchorElement;
+    expect(link).not.toBeNull();
+    expect(link.textContent?.trim()).toBe('Notifications');
+  });
 });

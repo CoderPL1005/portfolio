@@ -8,6 +8,7 @@ export interface ApiRequestOptions {
   headers?: HttpHeaders | Record<string, string | string[]>;
   context?: HttpContext;
   withCredentials?: boolean;
+  body?: unknown;
 }
 
 @Injectable({ providedIn: 'root' })

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { routes } from './app.routes';
 import { ProjectEditorShellComponent } from './features/admin/projects/project-editor-shell.component';
 import { TechnologyPageComponent } from './features/admin/technologies/technology-page.component';
+import { NotificationSettingsPageComponent } from './features/admin/notifications/notification-settings-page.component';
 
 describe('application routes', () => {
   it('defines the public shell and required public routes', () => {
@@ -49,6 +50,14 @@ describe('application routes', () => {
     expect(technologyRoute).toBeDefined();
     expect(technologyRoute.canDeactivate).toHaveLength(1);
     expect(await technologyRoute.loadComponent!()).toBe(TechnologyPageComponent);
+  });
+
+  it('defines notification settings inside the authenticated admin tree', async () => {
+    const admin = routes.find((route) => route.path === 'admin')!;
+    const notificationRoute = admin.children!.find((route) => route.path === 'notifications')!;
+
+    expect(notificationRoute).toBeDefined();
+    expect(await notificationRoute.loadComponent!()).toBe(NotificationSettingsPageComponent);
   });
 
   it('ends with a lazy wildcard not-found route', () => {
