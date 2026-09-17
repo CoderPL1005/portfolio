@@ -75,10 +75,11 @@ public sealed class WebPushSender(IOptions<WebPushSettings> options) : IWebPushS
         if (string.IsNullOrWhiteSpace(url) ||
             !url.StartsWith("/", StringComparison.Ordinal) ||
             url.StartsWith("//", StringComparison.Ordinal) ||
-            url.Contains('\\') ||
-            Uri.TryCreate(url, UriKind.Absolute, out _))
+            url.Contains('\\'))
         {
-            throw new ArgumentException("Web Push navigation must use a same-app relative path.", nameof(url));
+            throw new ArgumentException(
+                "Web Push navigation must use a same-app relative path.",
+                nameof(url));
         }
     }
 }
