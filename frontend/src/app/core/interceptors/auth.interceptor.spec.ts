@@ -8,7 +8,7 @@ import { authInterceptor } from './auth.interceptor';
 import { HttpClient } from '@angular/common/http';
 
 describe('authInterceptor', () => {
-  const baseUrl = 'http://localhost:5000/api/v1';
+  const baseUrl = '/api/v1';
   let http: HttpClient;
   let controller: HttpTestingController;
   let store: AuthStore;
