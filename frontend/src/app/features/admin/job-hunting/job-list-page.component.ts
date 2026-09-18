@@ -10,7 +10,7 @@ import { JobHuntingService } from './job-hunting.service';
   selector: 'app-job-list',
   imports: [FormsModule, RouterLink],
   template: `<div class="admin-page">
-    <header><p>JOB HUNTING</p><h1>Jobs</h1><a class="admin-button primary" routerLink="new">New manual job</a></header>
+    <header><p>JOB HUNTING</p><h1>Jobs</h1><div class="admin-actions"><a class="admin-button primary" routerLink="new/screenshots">New from screenshots</a><a class="admin-button" routerLink="new">New manual job</a></div></header>
     <div class="admin-actions">
       <input class="admin-input" aria-label="Search" [(ngModel)]="search">
       <select class="admin-input" aria-label="Source" [(ngModel)]="source"><option value="">All sources</option>@for(x of sources;track x){<option>{{x}}</option>}</select>

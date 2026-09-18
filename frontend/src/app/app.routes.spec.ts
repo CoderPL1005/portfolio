@@ -3,6 +3,7 @@ import { routes } from './app.routes';
 import { ProjectEditorShellComponent } from './features/admin/projects/project-editor-shell.component';
 import { TechnologyPageComponent } from './features/admin/technologies/technology-page.component';
 import { NotificationSettingsPageComponent } from './features/admin/notifications/notification-settings-page.component';
+import { ScreenshotInboxPageComponent } from './features/admin/job-hunting/screenshot-inbox-page.component';
 
 describe('application routes', () => {
   it('defines the public shell and required public routes', () => {
@@ -58,6 +59,15 @@ describe('application routes', () => {
 
     expect(notificationRoute).toBeDefined();
     expect(await notificationRoute.loadComponent!()).toBe(NotificationSettingsPageComponent);
+  });
+
+  it('defines the guarded screenshot inbox before the dynamic job route', async () => {
+    const admin = routes.find((route) => route.path === 'admin')!;
+    const screenshotIndex = admin.children!.findIndex((route) => route.path === 'job-hunting/jobs/new/screenshots');
+    const dynamicIndex = admin.children!.findIndex((route) => route.path === 'job-hunting/jobs/:id');
+    const route = admin.children![screenshotIndex];
+    expect(screenshotIndex).toBeGreaterThanOrEqual(0);expect(screenshotIndex).toBeLessThan(dynamicIndex);
+    expect(route.canDeactivate).toHaveLength(1);expect(await route.loadComponent!()).toBe(ScreenshotInboxPageComponent);
   });
 
   it('ends with a lazy wildcard not-found route', () => {

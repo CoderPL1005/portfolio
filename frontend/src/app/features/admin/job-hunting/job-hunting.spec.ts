@@ -15,12 +15,22 @@ describe('Job Hunting admin feature', () => {
   });
   afterEach(() => http.verify());
 
-  it('registers five lazy private routes under the guarded admin shell', () => {
+  it('registers the lazy private routes under the guarded admin shell', () => {
     const admin = routes.find(x => x.path === 'admin')!;
     const feature = admin.children!.filter(x => x.path?.startsWith('job-hunting/'));
-    expect(feature.map(x => x.path)).toEqual(['job-hunting/jobs','job-hunting/jobs/new','job-hunting/jobs/:id','job-hunting/applications','job-hunting/applications/:id']);
+    expect(feature.map(x => x.path)).toEqual(['job-hunting/jobs','job-hunting/jobs/new/screenshots','job-hunting/jobs/new','job-hunting/jobs/:id','job-hunting/applications','job-hunting/applications/:id']);
     expect(feature.every(x => !!x.loadComponent)).toBe(true);
     expect(admin.canActivateChild).toHaveLength(1);
+  });
+
+  it('submits one multipart request with a stable id and all selected files', () => {
+    const files=[new File(['one'],'one.png',{type:'image/png'}),new File(['two'],'two.jpg',{type:'image/jpeg'})];
+    service.submitScreenshots('submission-1',files).subscribe();
+    const request=http.expectOne('https://api.example/api/v1/admin/raw-job-postings/screenshots');
+    expect(request.request.method).toBe('POST');expect(request.request.body).toBeInstanceOf(FormData);
+    const body=request.request.body as FormData;expect(body.get('submissionId')).toBe('submission-1');expect(body.getAll('files')).toEqual(files);
+    expect(request.request.headers.has('Content-Type')).toBe(false);
+    request.flush({success:true,data:{rawJobPostingId:'raw-1',ingestionStatus:'RECEIVED',attachmentCount:2,created:true}});
   });
 
   it('uses server filters and exact posting mutation bodies', () => {

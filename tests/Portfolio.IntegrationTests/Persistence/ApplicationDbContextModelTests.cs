@@ -111,7 +111,7 @@ public sealed class ApplicationDbContextModelTests
         using var context = CreateContext();
         var migrations = context.Database.GetMigrations().ToArray();
 
-        Assert.Equal(9, migrations.Length);
+        Assert.Equal(10, migrations.Length);
         Assert.EndsWith("_InitialPortfolioSchema", migrations[0], StringComparison.Ordinal);
         Assert.EndsWith("_RemoveContactMessages", migrations[1], StringComparison.Ordinal);
         Assert.EndsWith("_AllowDuplicateSocialLinkPlatforms", migrations[2], StringComparison.Ordinal);
@@ -121,6 +121,7 @@ public sealed class ApplicationDbContextModelTests
         Assert.EndsWith("_AddRawJobPostingIngestionKey", migrations[6], StringComparison.Ordinal);
         Assert.EndsWith("_AddTelegramRawJobPostingAttachments", migrations[7], StringComparison.Ordinal);
         Assert.EndsWith("_AddWebPushSubscriptions", migrations[8], StringComparison.Ordinal);
+        Assert.EndsWith("_GeneralizeRawJobPostingAttachmentsForPwa", migrations[9], StringComparison.Ordinal);
     }
 
     [Fact]
@@ -152,6 +153,17 @@ public sealed class ApplicationDbContextModelTests
         Assert.Contains("CREATE TABLE raw_job_posting_attachments",up,StringComparison.OrdinalIgnoreCase);Assert.Equal(1,CountOccurrences(up.ToUpperInvariant(),"CREATE TABLE"));
         Assert.Contains("uq_raw_job_posting_attachments_delivery",up,StringComparison.Ordinal);Assert.Contains("ON DELETE RESTRICT",up,StringComparison.OrdinalIgnoreCase);Assert.DoesNotContain("DROP TABLE",up,StringComparison.OrdinalIgnoreCase);Assert.DoesNotContain("DELETE FROM",up,StringComparison.OrdinalIgnoreCase);Assert.DoesNotContain("ALTER TABLE raw_job_postings",up,StringComparison.OrdinalIgnoreCase);
         Assert.Contains("DROP TABLE raw_job_posting_attachments",down,StringComparison.OrdinalIgnoreCase);Assert.Equal(1,CountOccurrences(down.ToUpperInvariant(),"DROP TABLE"));
+    }
+
+    [Fact]
+    public void Pwa_attachment_migration_only_generalizes_telegram_delivery_fields()
+    {
+        using var context=CreateContext();var migrations=context.Database.GetMigrations().ToArray();var migrator=context.GetService<IMigrator>();
+        var up=migrator.GenerateScript(migrations[8],migrations[9]);var down=migrator.GenerateScript(migrations[9],migrations[8]);
+        Assert.Contains("telegram_message_id",up,StringComparison.Ordinal);Assert.Contains("telegram_file_id",up,StringComparison.Ordinal);Assert.Contains("telegram_file_unique_id",up,StringComparison.Ordinal);
+        Assert.Contains("telegram_message_id IS NOT NULL",up,StringComparison.Ordinal);Assert.Contains("telegram_message_id IS NULL OR telegram_message_id > 0",up,StringComparison.Ordinal);
+        Assert.DoesNotContain("CREATE TABLE",up,StringComparison.OrdinalIgnoreCase);Assert.DoesNotContain("DROP TABLE",up,StringComparison.OrdinalIgnoreCase);Assert.DoesNotContain("DELETE FROM",up,StringComparison.OrdinalIgnoreCase);Assert.DoesNotContain("UPDATE ",up,StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("SET NOT NULL",down,StringComparison.OrdinalIgnoreCase);Assert.DoesNotContain("UPDATE ",down,StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

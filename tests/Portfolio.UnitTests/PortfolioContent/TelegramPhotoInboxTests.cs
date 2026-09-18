@@ -51,7 +51,7 @@ public sealed class TelegramPhotoInboxTests
         await handler.HandleAsync(PhotoCommand(messageId:20,mediaGroupId:"album-A",fileId:"second"));
 
         var raw=Assert.Single(await db.RawJobPostings.ToListAsync());var attachments=await db.RawJobPostingAttachments.OrderBy(x=>x.SortOrder).ToListAsync();
-        Assert.Equal("telegram-album:200:album-A",raw.IngestionKey);Assert.Equal("Album caption",raw.RawContent);Assert.Equal(new long[]{10,20},attachments.Select(x=>x.TelegramMessageId));Assert.Equal(2,attachments.Count);Assert.Equal(2,telegram.DownloadedFileIds.Count);Assert.Empty(telegram.Messages);
+        Assert.Equal("telegram-album:200:album-A",raw.IngestionKey);Assert.Equal("Album caption",raw.RawContent);Assert.Equal(new long?[]{10,20},attachments.Select(x=>x.TelegramMessageId));Assert.Equal(2,attachments.Count);Assert.Equal(2,telegram.DownloadedFileIds.Count);Assert.Empty(telegram.Messages);
         var expected=Hash("telegram-image-album:v1\n"+string.Join('\n',attachments.Select(x=>x.ContentHash)));Assert.Equal(expected,raw.ContentHash);
     }
 

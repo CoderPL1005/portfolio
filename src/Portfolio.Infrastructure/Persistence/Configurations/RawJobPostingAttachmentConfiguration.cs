@@ -15,7 +15,7 @@ public sealed class RawJobPostingAttachmentConfiguration : IEntityTypeConfigurat
             table.HasCheckConstraint("ck_raw_job_posting_attachments_file_size", "file_size_bytes > 0");
             table.HasCheckConstraint("ck_raw_job_posting_attachments_dimensions", "width > 0 AND height > 0");
             table.HasCheckConstraint("ck_raw_job_posting_attachments_sort_order", "sort_order > 0");
-            table.HasCheckConstraint("ck_raw_job_posting_attachments_message_id", "telegram_message_id > 0");
+            table.HasCheckConstraint("ck_raw_job_posting_attachments_message_id", "telegram_message_id IS NULL OR telegram_message_id > 0");
         });
 
         builder.HasKey(entity => entity.Id).HasName("raw_job_posting_attachments_pkey");
@@ -42,6 +42,7 @@ public sealed class RawJobPostingAttachmentConfiguration : IEntityTypeConfigurat
 
         builder.HasIndex(entity => new { entity.RawJobPostingId, entity.TelegramMessageId })
             .HasDatabaseName("uq_raw_job_posting_attachments_delivery")
+            .HasFilter("telegram_message_id IS NOT NULL")
             .IsUnique();
         builder.HasIndex(entity => new { entity.RawJobPostingId, entity.SortOrder, entity.Id })
             .HasDatabaseName("ix_raw_job_posting_attachments_order");

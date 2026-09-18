@@ -42,7 +42,7 @@ describe('Job Hunting list pages',()=>{
   });
   it('exposes create and detail navigation links',async()=>{
     TestBed.configureTestingModule({providers:[provideRouter([{path:'jobs',component:JobListPageComponent}]),{provide:JobHuntingService,useValue:{jobs:()=>of(paged([jobSummary()]))}}]});const harness=await RouterTestingHarness.create('/jobs');const links=[...harness.routeNativeElement!.querySelectorAll('a')] as HTMLAnchorElement[];
-    expect(links.find(x=>x.textContent?.includes('New manual job'))?.getAttribute('href')).toContain('new');expect(links.find(x=>x.textContent?.includes('Open'))?.getAttribute('href')).toContain('job-1');
+    expect(links.find(x=>x.textContent?.includes('New manual job'))?.getAttribute('href')).toContain('new');expect(links.find(x=>x.textContent?.includes('New from screenshots'))?.getAttribute('href')).toContain('new/screenshots');expect(links.find(x=>x.textContent?.includes('Open'))?.getAttribute('href')).toContain('job-1');
   });
   it('renders application loading, populated, empty, and error states',()=>{
     const pending=new Subject<ReturnType<typeof paged<ApplicationItem>>>();const fixture=mount(ApplicationListPageComponent,{applications:()=>pending});expect(fixture.nativeElement.textContent).toContain('Loading applications');

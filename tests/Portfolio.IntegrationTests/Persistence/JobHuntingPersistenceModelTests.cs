@@ -23,6 +23,9 @@ public sealed class JobHuntingPersistenceModelTests
         Assert.Equal("raw_job_posting_attachments", model.FindEntityType(typeof(RawJobPostingAttachment))!.GetTableName());
 
         Assert.Equal("jsonb", Property<RawJobPosting>(model, nameof(RawJobPosting.Metadata)).GetColumnType());
+        Assert.True(Property<RawJobPostingAttachment>(model, nameof(RawJobPostingAttachment.TelegramMessageId)).IsNullable);
+        Assert.True(Property<RawJobPostingAttachment>(model, nameof(RawJobPostingAttachment.TelegramFileId)).IsNullable);
+        Assert.True(Property<RawJobPostingAttachment>(model, nameof(RawJobPostingAttachment.TelegramFileUniqueId)).IsNullable);
         var ingestionKey = Property<RawJobPosting>(model, nameof(RawJobPosting.IngestionKey));
         Assert.Equal("ingestion_key", ingestionKey.GetColumnName());
         Assert.Equal("character varying(500)", ingestionKey.GetColumnType());
@@ -103,7 +106,7 @@ public sealed class JobHuntingPersistenceModelTests
         AssertIndex(model.FindEntityType(typeof(JobApplicationEvent))!, "ix_job_application_events_application_occurred_id", false);
         AssertIndex(model.FindEntityType(typeof(JobApplicationDocument))!, "ix_job_application_documents_application_type_created_id", false);
         var attachment=model.FindEntityType(typeof(RawJobPostingAttachment))!;
-        AssertIndex(attachment,"uq_raw_job_posting_attachments_delivery",true);
+        AssertIndex(attachment,"uq_raw_job_posting_attachments_delivery",true,"telegram_message_id IS NOT NULL");
         AssertIndex(attachment,"ix_raw_job_posting_attachments_order",false);
         AssertIndex(attachment,"ix_raw_job_posting_attachments_content_hash",false);
 

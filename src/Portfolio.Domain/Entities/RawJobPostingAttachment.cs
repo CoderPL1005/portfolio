@@ -12,9 +12,9 @@ public sealed class RawJobPostingAttachment
     public string ContentHash { get; set; } = null!;
     public long FileSizeBytes { get; set; }
     public long SortOrder { get; set; }
-    public long TelegramMessageId { get; set; }
-    public string TelegramFileId { get; set; } = null!;
-    public string TelegramFileUniqueId { get; set; } = null!;
+    public long? TelegramMessageId { get; set; }
+    public string? TelegramFileId { get; set; }
+    public string? TelegramFileUniqueId { get; set; }
     public int Width { get; set; }
     public int Height { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
