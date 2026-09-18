@@ -58,8 +58,27 @@ public sealed class R2FileStorage(IOptions<R2Settings> options) : IFileStorage
     private static async Task PutAsync(R2Settings settings, string storageKey, Stream content, string contentType, CancellationToken cancellationToken)
     {
         using var client = CreateClient(settings);
-        await client.PutObjectAsync(new PutObjectRequest { BucketName = settings.BucketName, Key = storageKey, InputStream = content, ContentType = contentType, AutoCloseStream = false }, cancellationToken);
+        await client.PutObjectAsync(CreatePutObjectRequest(settings, storageKey, content, contentType), cancellationToken);
     }
 
-    private static AmazonS3Client CreateClient(R2Settings s) => new(new BasicAWSCredentials(s.AccessKeyId, s.SecretAccessKey), new AmazonS3Config { ServiceURL = $"https://{s.AccountId}.r2.cloudflarestorage.com", ForcePathStyle = true, AuthenticationRegion = "auto" });
+    internal static PutObjectRequest CreatePutObjectRequest(R2Settings settings, string storageKey, Stream content, string contentType) => new()
+    {
+        BucketName = settings.BucketName,
+        Key = storageKey,
+        InputStream = content,
+        ContentType = contentType,
+        AutoCloseStream = false,
+        UseChunkEncoding = false,
+    };
+
+    internal static AmazonS3Config CreateClientConfiguration(R2Settings settings) => new()
+    {
+        ServiceURL = $"https://{settings.AccountId}.r2.cloudflarestorage.com",
+        ForcePathStyle = true,
+        AuthenticationRegion = "auto",
+        RequestChecksumCalculation = RequestChecksumCalculation.WHEN_REQUIRED,
+    };
+
+    private static AmazonS3Client CreateClient(R2Settings settings) =>
+        new(new BasicAWSCredentials(settings.AccessKeyId, settings.SecretAccessKey), CreateClientConfiguration(settings));
 }
