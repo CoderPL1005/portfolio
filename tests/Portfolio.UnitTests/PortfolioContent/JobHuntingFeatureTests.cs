@@ -31,6 +31,38 @@ public sealed class JobHuntingFeatureTests
         var verified=await new UpdateJobVerificationCommandHandler(db,new FixedTimeProvider(Now.AddHours(2))).HandleAsync(new(job.Id,"VERIFIED",2));Assert.Equal(Now.AddHours(2),verified.VerifiedAt);await Assert.ThrowsAsync<ConflictException>(()=>new UpdateJobVerificationCommandHandler(db,new FixedTimeProvider(Now)).HandleAsync(new(job.Id,"PENDING",2)));var unverified=await new UpdateJobVerificationCommandHandler(db,new FixedTimeProvider(Now.AddHours(3))).HandleAsync(new(job.Id,"UNVERIFIED",3));Assert.Null(unverified.VerifiedAt);var selected=await new UpdateJobSelectionCommandHandler(db,new FixedTimeProvider(Now.AddHours(4))).HandleAsync(new(job.Id,"APPROVED",4));Assert.Equal("APPROVED",selected.SelectionStatus);await Assert.ThrowsAsync<ConflictException>(()=>new UpdateJobSelectionCommandHandler(db,new FixedTimeProvider(Now)).HandleAsync(new(job.Id,"SKIPPED",4)));var archived=await new ArchiveJobPostingCommandHandler(db,new FixedTimeProvider(Now.AddHours(5))).HandleAsync(new(job.Id,5));Assert.NotNull(archived.ArchivedAt);await Assert.ThrowsAsync<ConflictException>(()=>new ArchiveJobPostingCommandHandler(db,new FixedTimeProvider(Now)).HandleAsync(new(job.Id,6)));
     }
 
+    [Theory]
+    [InlineData("APPROVED")]
+    [InlineData("SKIPPED")]
+    public async Task Pending_job_accepts_explicit_human_decision_and_rejects_stale_or_terminal_changes(string target)
+    {
+        await using var db=PublicPortfolioTests.CreateContext();var job=Posting("Company","Role",Now);db.JobPostings.Add(job);await db.SaveChangesAsync();
+        var handler=new UpdateJobSelectionCommandHandler(db,new FixedTimeProvider(Now));var result=await handler.HandleAsync(new(job.Id,target,1));
+        Assert.Equal(target,result.SelectionStatus);Assert.Equal(2,result.Version);
+        await Assert.ThrowsAsync<ConflictException>(()=>handler.HandleAsync(new(job.Id,target=="APPROVED"?"SKIPPED":"APPROVED",1)));
+        await Assert.ThrowsAsync<ConflictException>(()=>handler.HandleAsync(new(job.Id,target,2)));
+        Assert.Equal(target,(await db.JobPostings.SingleAsync()).SelectionStatus);
+    }
+
+    [Fact]
+    public async Task Selection_validator_accepts_only_human_approve_or_skip_targets()
+    {
+        var validator=new UpdateJobSelectionCommandValidator();
+        Assert.Empty(await validator.ValidateAsync(new(Guid.NewGuid(),"APPROVED",1)));
+        Assert.Empty(await validator.ValidateAsync(new(Guid.NewGuid(),"SKIPPED",1)));
+        Assert.NotEmpty(await validator.ValidateAsync(new(Guid.NewGuid(),"RECOMMENDED",1)));
+        Assert.NotEmpty(await validator.ValidateAsync(new(Guid.NewGuid(),"PENDING_ANALYSIS",1)));
+    }
+
+    [Fact]
+    public async Task Selection_maps_ef_concurrency_failure_to_conflict_without_persisting_decision()
+    {
+        await using var db=PublicPortfolioTests.CreateContext();var job=Posting("Company","Role",Now);db.JobPostings.Add(job);await db.SaveChangesAsync();db.ConcurrencyFailuresRemaining=1;
+        var handler=new UpdateJobSelectionCommandHandler(db,new FixedTimeProvider(Now));
+        await Assert.ThrowsAsync<ConflictException>(()=>handler.HandleAsync(new(job.Id,"APPROVED",1)));
+        db.ChangeTracker.Clear();var persisted=await db.JobPostings.SingleAsync();Assert.Equal("PENDING_ANALYSIS",persisted.SelectionStatus);Assert.Equal(1,persisted.Version);
+    }
+
     [Fact]public async Task Application_create_and_edit_persist_immutable_created_event_and_versioning()
     {
         await using var db=PublicPortfolioTests.CreateContext();var job=Posting("Company","Role",Now);db.JobPostings.Add(job);await db.SaveChangesAsync();var created=await new CreateJobApplicationCommandHandler(db,new FixedTimeProvider(Now),new FakeCurrentUser(AdminId)).HandleAsync(new(job.Id,"EMAIL","jobs@example.com",null,null,"note"));Assert.Equal("DRAFT",created.Status);var e=Assert.Single(created.Events);Assert.Equal("CREATED",e.EventType);Assert.Null(e.FromStatus);Assert.Equal("DRAFT",e.ToStatus);Assert.Equal(AdminId,e.ActorAdminUserId);var updated=await new UpdateJobApplicationCommandHandler(db,new FixedTimeProvider(Now.AddHours(1))).HandleAsync(new(created.Id,1,"PLATFORM",null,"https://example.com/apply","external","edited"));Assert.Equal(2,updated.Version);Assert.Equal("DRAFT",updated.Status);await Assert.ThrowsAsync<ConflictException>(()=>new UpdateJobApplicationCommandHandler(db,new FixedTimeProvider(Now)).HandleAsync(new(created.Id,1,null,null,null,null,null)));

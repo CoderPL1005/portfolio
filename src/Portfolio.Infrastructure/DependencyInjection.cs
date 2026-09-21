@@ -48,6 +48,10 @@ public static class DependencyInjection
         services.AddOptions<JobFitScoringOptions>()
             .Bind(configuration.GetSection(JobFitScoringOptions.SectionName))
             .ValidateOnStart();
+        services.AddSingleton<IValidateOptions<JobRecommendationOptions>, JobRecommendationOptionsValidator>();
+        services.AddOptions<JobRecommendationOptions>()
+            .Bind(configuration.GetSection(JobRecommendationOptions.SectionName))
+            .ValidateOnStart();
         services.AddHttpClient<IEmbeddingService, GeminiEmbeddingService>(client =>
             client.Timeout = TimeSpan.FromSeconds(30));
         services.AddHttpClient<IRetrievalQueryRewriter, GeminiRetrievalQueryRewriter>(client =>

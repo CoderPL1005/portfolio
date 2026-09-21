@@ -14,7 +14,8 @@ export interface CandidateJobPreferences{id:string|null;targetRoles:string[];pre
 export interface CandidateJobPreferencesWrite{expectedVersion:number;targetRoles:string[];preferredTechnologies:string[];acceptableLocations:string[];workplaceTypes:string[];employmentTypes:string[];minimumSalary:number|null;salaryCurrency:string|null;salaryPeriod:string|null}
 export type JobFitStatus='MATCH'|'PARTIAL'|'MISMATCH'|'UNKNOWN';
 export interface JobFitComponent{key:string;label:string;score:number|null;configuredWeight:number;status:JobFitStatus;explanation:string;evidence:string[]}
-export interface JobFitAnalysis{jobPostingId:string;jobVersion:number;preferenceVersion:number;overallScore:number|null;availableWeight:number;totalConfiguredWeight:number;coveragePercent:number;jobVerificationStatus:string;components:JobFitComponent[];matchedTechnologies:string[];developingTechnologies:string[];missingTechnologies:string[];unknownFactors:string[]}
+export type JobRecommendation='RECOMMENDED'|'NEEDS_REVIEW'|'NOT_RECOMMENDED';
+export interface JobFitAnalysis{jobPostingId:string;jobVersion:number;preferenceVersion:number;overallScore:number|null;availableWeight:number;totalConfiguredWeight:number;coveragePercent:number;jobVerificationStatus:string;components:JobFitComponent[];matchedTechnologies:string[];developingTechnologies:string[];missingTechnologies:string[];unknownFactors:string[];recommendation:JobRecommendation;reasons:string[];concerns:string[]}
 export interface ScreenshotSubmissionResult{rawJobPostingId:string;ingestionStatus:string;attachmentCount:number;created:boolean}
 export interface RawJobPostingSummary{id:string;source:JobSource;ingestionStatus:string;discoveredAt:string;createdAt:string;attachmentCount:number;version:number}
 export interface EventItem{id:string;eventType:string;fromStatus:string|null;toStatus:string|null;actorType:string;actorAdminUserId:string|null;note:string|null;metadata:unknown;occurredAt:string;createdAt:string}

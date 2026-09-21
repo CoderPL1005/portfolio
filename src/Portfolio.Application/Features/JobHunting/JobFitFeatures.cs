@@ -33,7 +33,12 @@ public sealed record JobFitAnalysisResult(
     int AvailableWeight, int TotalConfiguredWeight, int CoveragePercent,
     string JobVerificationStatus, IReadOnlyCollection<JobFitComponentResult> Components,
     IReadOnlyCollection<string> MatchedTechnologies, IReadOnlyCollection<string> DevelopingTechnologies,
-    IReadOnlyCollection<string> MissingTechnologies, IReadOnlyCollection<string> UnknownFactors);
+    IReadOnlyCollection<string> MissingTechnologies, IReadOnlyCollection<string> UnknownFactors)
+{
+    public string? Recommendation { get; init; }
+    public IReadOnlyCollection<string> Reasons { get; init; } = [];
+    public IReadOnlyCollection<string> Concerns { get; init; } = [];
+}
 public sealed record JobFitComponentResult(
     string Key, string Label, int? Score, int ConfiguredWeight, string Status,
     string Explanation, IReadOnlyCollection<string> Evidence);
@@ -178,7 +183,8 @@ public sealed class UpdateCandidateJobPreferencesCommandValidator : IRequestVali
 }
 
 public sealed class GetJobFitAnalysisQueryHandler(
-    IApplicationDbContext db, ICandidateFactualSnapshotAssembler assembler, JobFitScorer scorer)
+    IApplicationDbContext db, ICandidateFactualSnapshotAssembler assembler, JobFitScorer scorer,
+    JobRecommendationPolicy recommendationPolicy)
     : IRequestHandler<GetJobFitAnalysisQuery, JobFitAnalysisResult>
 {
     public async Task<JobFitAnalysisResult> HandleAsync(GetJobFitAnalysisQuery request, CancellationToken ct = default)
@@ -187,7 +193,8 @@ public sealed class GetJobFitAnalysisQueryHandler(
             ?? throw new NotFoundException("JOB_POSTING_NOT_FOUND", "The job posting was not found.");
         var entity = await db.CandidateJobPreferences.AsNoTracking().SingleOrDefaultAsync(x => x.SingletonKey == "CURRENT", ct);
         var preferences = entity is null ? PreferenceMapping.Empty : PreferenceMapping.Map(entity);
-        return scorer.Score(job, preferences, await assembler.AssembleAsync(ct));
+        var fit = scorer.Score(job, preferences, await assembler.AssembleAsync(ct));
+        return recommendationPolicy.Apply(fit);
     }
 }
 

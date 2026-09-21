@@ -232,12 +232,16 @@ public sealed class JobFitFeatureTests
     [Fact]
     public async Task Fit_handler_is_read_only_and_preserves_job_workflow_state_and_version()
     {
-        await using var db = PublicPortfolioTests.CreateContext(); var job = Job("Backend Developer", "Hanoi", null, null, ["C#"]); db.JobPostings.Add(job); await db.SaveChangesAsync();
+        await using var db = PublicPortfolioTests.CreateContext(); var job = Job("Backend Developer", "Hanoi", null, null, ["C#"]); db.JobPostings.Add(job); db.JobApplications.Add(new JobApplication { Id=Guid.NewGuid(), JobPostingId=job.Id, Status="DRAFT", Version=1, CreatedAt=Now, UpdatedAt=Now }); await db.SaveChangesAsync();
         var saves = db.ChangeTracker.Entries().Count();
-        var result = await new GetJobFitAnalysisQueryHandler(db, new StubAssembler(new(["C#"], [], [])), Scorer()).HandleAsync(new(job.Id));
+        db.FailSaveChanges = true;
+        var handler = new GetJobFitAnalysisQueryHandler(db, new StubAssembler(new(["C#"], [], [])), Scorer(), RecommendationPolicy());
+        var result = await handler.HandleAsync(new(job.Id));
+        var repeated = await handler.HandleAsync(new(job.Id));
         Assert.Equal(job.Version, result.JobVersion); Assert.Equal("PENDING_ANALYSIS", job.SelectionStatus); Assert.Equal("PENDING", job.VerificationStatus);
-        Assert.Equal(saves, db.ChangeTracker.Entries().Count()); Assert.False(db.ChangeTracker.HasChanges());
-        await Assert.ThrowsAsync<NotFoundException>(() => new GetJobFitAnalysisQueryHandler(db, new StubAssembler(new([], [], [])), Scorer()).HandleAsync(new(Guid.NewGuid())));
+        Assert.Equal(JsonSerializer.Serialize(result), JsonSerializer.Serialize(repeated)); Assert.Equal("NEEDS_REVIEW", result.Recommendation);
+        Assert.Equal(saves, db.ChangeTracker.Entries().Count()); Assert.False(db.ChangeTracker.HasChanges()); Assert.Single(await db.JobApplications.ToListAsync());
+        await Assert.ThrowsAsync<NotFoundException>(() => new GetJobFitAnalysisQueryHandler(db, new StubAssembler(new([], [], [])), Scorer(), RecommendationPolicy()).HandleAsync(new(Guid.NewGuid())));
     }
 
     [Fact]
@@ -295,6 +299,7 @@ public sealed class JobFitFeatureTests
         WorkplaceAliases = new(StringComparer.OrdinalIgnoreCase) { ["work from home"] = "remote", ["on-site"] = "onsite" },
         EmploymentAliases = new(StringComparer.OrdinalIgnoreCase) { ["full-time"] = "full time" }
     }));
+    private static JobRecommendationPolicy RecommendationPolicy() => new(Options.Create(new JobRecommendationOptions()));
     private static CandidateJobPreferencesResult Preferences(string[]? targets = null, string[]? preferred = null, string[]? locations = null, string[]? workplace = null, string[]? employment = null, decimal? salary = null) =>
         new(Guid.NewGuid(), targets ?? [], preferred ?? [], locations ?? [], workplace ?? [], employment ?? [], salary, salary.HasValue ? "USD" : null, salary.HasValue ? "MONTH" : null, 1, Now, Now);
     private static JobPosting Job(string role, string location, string? workplace, string? employment, string[] technologies) => new()
