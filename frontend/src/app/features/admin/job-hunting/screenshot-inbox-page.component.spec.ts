@@ -52,6 +52,14 @@ describe('ScreenshotInboxPageComponent',()=>{
     expect(api.rawJobPostings).toHaveBeenLastCalledWith({page:1,pageSize:100,ingestionStatus:'RECEIVED'});expect(api.analyzeRawJobPosting).not.toHaveBeenCalled();expect(fixture.nativeElement.textContent).toContain('3 screenshots');
   });
 
+  it('renders awaiting timestamps in a readable local format instead of raw ISO text',()=>{
+    const createdAt='2026-09-21T03:03:43.910313+00:00';
+    api.rawJobPostings.mockReturnValue(of({items:[{id:'raw-1',source:'MANUAL',ingestionStatus:'RECEIVED',discoveredAt:createdAt,createdAt,attachmentCount:1,version:1}],page:1,pageSize:100,total:1,totalPages:1}));
+    fixture.destroy();fixture=TestBed.createComponent(ScreenshotInboxPageComponent);fixture.detectChanges();
+    const text=fixture.nativeElement.textContent as string;expect(text).toContain('Submitted');expect(text).toContain(fixture.componentInstance.formatDate(createdAt));expect(text).not.toContain(createdAt);
+    expect(api.analyzeRawJobPosting).not.toHaveBeenCalled();
+  });
+
   it('disables duplicate analyze clicks, navigates on success, and keeps a failed submission retryable',async()=>{
     const pending=new Subject<{id:string}>();api.analyzeRawJobPosting.mockReturnValue(pending);const router=TestBed.inject(Router);const navigate=vi.spyOn(router,'navigate').mockResolvedValue(true);
     fixture.componentInstance.analyze('raw-1');fixture.componentInstance.analyze('raw-1');expect(api.analyzeRawJobPosting).toHaveBeenCalledTimes(1);expect(fixture.componentInstance.analyzingId()).toBe('raw-1');

@@ -17,8 +17,9 @@ interface ScreenshotPreview {
   template: `
     <div class="admin-page screenshot-inbox">
       <a routerLink="/admin/job-hunting/jobs">← Jobs</a>
-      <header><p>JOB HUNTING</p><h1>Screenshot inbox</h1><p>Select every screenshot belonging to one job post, then submit them together.</p></header>
-      <label class="picker">
+      <header class="inbox-header"><p class="eyebrow">JOB HUNTING</p><h1>Screenshot inbox</h1><p>Select every screenshot belonging to one job post, then submit them together.</p></header>
+      <label class="picker admin-panel">
+        <span class="picker-icon" aria-hidden="true">+</span>
         <strong>Select screenshots</strong>
         <span>JPEG or PNG · up to 10 files · 10 MiB each · 50 MiB total</span>
         <input type="file" accept="image/jpeg,image/png" multiple (change)="selectFiles($event)">
@@ -58,7 +59,7 @@ interface ScreenshotPreview {
           <div class="awaiting-list">
             @for (item of awaiting(); track item.id) {
               <article>
-                <div><strong>{{ item.attachmentCount }} screenshot{{ item.attachmentCount === 1 ? '' : 's' }}</strong><span>{{ item.createdAt }}</span></div>
+                <div><strong>{{ item.attachmentCount }} screenshot{{ item.attachmentCount === 1 ? '' : 's' }}</strong><span>Submitted {{ formatDate(item.createdAt) }}</span></div>
                 <button type="button" class="admin-button primary" (click)="analyze(item.id)" [disabled]="analyzingId() !== null">
                   {{ analyzingId() === item.id ? 'Analyzing...' : 'Analyze' }}
                 </button>
@@ -70,7 +71,7 @@ interface ScreenshotPreview {
     </div>
   `,
   styles: [`
-    .screenshot-inbox{max-width:64rem}.picker{display:grid;gap:.4rem;padding:1rem;margin:1rem 0;border:1px dashed var(--border-color,#64748b);border-radius:.75rem}.picker input{font:inherit}.preview-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(13rem,1fr));gap:1rem}.preview-grid article{position:relative;padding:.75rem;border:1px solid var(--border-color,#334155);border-radius:.75rem}.preview-grid img{display:block;width:100%;height:14rem;object-fit:contain;background:#0f172a;border-radius:.5rem}.preview-grid article>div,.success,.awaiting-list article{display:flex;align-items:center;justify-content:space-between;gap:.75rem}.preview-grid article>div{margin-top:.6rem}.preview-grid article>div span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.order{position:absolute;z-index:1;top:1rem;left:1rem;min-width:2rem;padding:.25rem;border-radius:999px;background:#0f172a;color:#fff;text-align:center}.submit{margin-top:1rem;width:100%;min-height:3rem}.success{border-color:#22c55e}.awaiting{margin-top:2rem}.awaiting-list{display:grid;gap:.75rem}.awaiting-list article{padding:1rem;border:1px solid var(--border-color,#334155);border-radius:.75rem}.awaiting-list article div{display:grid;gap:.25rem}.awaiting-list article span{font-size:.85rem;color:var(--muted-color,#94a3b8)}@media(max-width:40rem){.preview-grid{grid-template-columns:1fr}.preview-grid img{height:18rem}.success,.awaiting-list article{align-items:stretch;flex-direction:column}}
+    .screenshot-inbox{max-width:72rem}.inbox-header{margin:1.25rem 0 1.5rem}.inbox-header h1{margin:.35rem 0;font-size:clamp(2rem,4vw,3.5rem)}.inbox-header>p:last-child{max-width:42rem;color:var(--color-text-muted)}.picker{justify-items:center;gap:.5rem;padding:2rem;margin:1rem 0;border-style:dashed;text-align:center;cursor:pointer}.picker:hover{border-color:var(--color-primary)}.picker-icon{display:grid;width:2.5rem;height:2.5rem;place-items:center;border-radius:999px;color:var(--color-on-primary);background:var(--color-primary);font-size:1.5rem}.picker>span:not(.picker-icon){color:var(--color-text-muted);font-size:.84rem}.picker input{width:min(100%,24rem);margin-top:.5rem;font:inherit}.preview-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(13rem,1fr));gap:1rem}.preview-grid article{position:relative;padding:.75rem;border:1px solid var(--color-border);border-radius:var(--radius-lg);background:var(--color-surface)}.preview-grid img{display:block;width:100%;height:14rem;object-fit:contain;background:#0f172a;border-radius:.5rem}.preview-grid article>div,.success,.awaiting-list article{display:flex;align-items:center;justify-content:space-between;gap:.75rem}.preview-grid article>div{margin-top:.6rem}.preview-grid article>div span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.order{position:absolute;z-index:1;top:1rem;left:1rem;min-width:2rem;padding:.25rem;border-radius:999px;background:#0f172a;color:#fff;text-align:center}.submit{margin-top:1rem;width:100%;min-height:3rem}.success{min-height:auto;border:1px solid #22c55e;border-radius:var(--radius-lg);padding:1rem}.awaiting{margin-top:2.5rem}.awaiting h2{margin-bottom:1rem}.awaiting-list{display:grid;gap:.75rem}.awaiting-list article{min-height:5rem;padding:1rem 1.25rem;border:1px solid var(--color-border);border-radius:var(--radius-lg);background:var(--color-surface)}.awaiting-list article div{display:grid;gap:.3rem}.awaiting-list article span{font-size:.85rem;color:var(--color-text-muted)}@media(max-width:40rem){.screenshot-inbox{padding-inline:1rem}.picker{padding:1.5rem 1rem}.preview-grid{grid-template-columns:1fr}.preview-grid img{height:18rem}.success,.awaiting-list article{align-items:stretch;flex-direction:column}.awaiting-list .admin-button{min-height:2.75rem}}
   `],
 })
 export class ScreenshotInboxPageComponent implements DirtyAware, OnDestroy {
@@ -151,6 +152,10 @@ export class ScreenshotInboxPageComponent implements DirtyAware, OnDestroy {
   totalSizeLabel(): string {
     const bytes = this.previews().reduce((total, item) => total + item.file.size, 0);
     return `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
+  }
+
+  formatDate(value: string): string {
+    return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
   }
 
   ngOnDestroy(): void { this.clearPreviews(); }

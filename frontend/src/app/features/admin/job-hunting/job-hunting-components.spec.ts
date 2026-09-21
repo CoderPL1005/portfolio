@@ -60,6 +60,13 @@ describe('Job Hunting list pages',()=>{
 
 describe('Job editor workflows',()=>{
   afterEach(()=>{vi.restoreAllMocks();TestBed.resetTestingModule()});
+  it('renders extracted values, readable state labels, and technology chips',()=>{
+    const existing=jobDetail({companyName:'GAP GLOBAL',positionTitle:'Backend Java',location:'Ha Noi',employmentType:'FULL_TIME',workplaceType:'HYBRID',salaryMinimum:25000000,salaryMaximum:35000000,salaryCurrency:'VND',salaryPeriod:'MONTHLY',experienceRequirements:'Three years',description:'Build reliable APIs',technologyStack:['Java','Spring Boot','RESTful API']});
+    const fixture=mount(JobEditPageComponent,{job:()=>of(existing)},'job-1');const text=fixture.nativeElement.textContent as string;
+    expect(text).toContain('Backend Java');expect(text).toContain('GAP GLOBAL');expect(text).toContain('Pending analysis');expect(text).not.toContain('PENDING_ANALYSIS');
+    expect([...fixture.nativeElement.querySelectorAll('.technology-preview li')].map((x:Element)=>x.textContent?.trim())).toEqual(['Java','Spring Boot','RESTful API']);
+    expect(fixture.componentInstance.form.controls.salaryMinimum.value).toBe(25000000);expect(fixture.componentInstance.form.controls.description.value).toBe('Build reliable APIs');
+  });
   it('requires raw content in create mode and sends the exact manual-ingestion payload',()=>{
     const created=jobDetail();const api={createJob:vi.fn(()=>of(created))};const fixture=mount(JobEditPageComponent,api);const c=fixture.componentInstance;const router=TestBed.inject(Router);vi.spyOn(router,'navigate').mockResolvedValue(true);
     c.form.patchValue({companyName:'Acme',positionTitle:'Developer',location:'Remote',description:'Description',technologyStack:'Angular, .NET'});c.save();expect(api.createJob).not.toHaveBeenCalled();expect(c.sourceForm.controls.rawContent.hasError('required')).toBe(true);
@@ -67,6 +74,13 @@ describe('Job editor workflows',()=>{
     expect(api.createJob).toHaveBeenCalledWith(expect.objectContaining({source:'MANUAL',sourceUrl:'https://example.test/job',sourceExternalId:'42',rawContent:'raw vacancy',companyName:'Acme',technologyStack:['Angular','.NET']}));expect(router.navigate).toHaveBeenCalledWith(['/admin/job-hunting/jobs','job-1']);
   });
   it('keeps create input dirty and displays a safe API validation failure',()=>{const api={createJob:vi.fn(()=>throwError(()=>({status:400})))};const fixture=mount(JobEditPageComponent,api);const c=fixture.componentInstance;c.form.patchValue({companyName:'Acme',positionTitle:'Developer',location:'Remote',description:'Description'});c.sourceForm.patchValue({rawContent:'raw'});c.form.markAsDirty();c.save();expect(c.error()).toBe('The request could not be completed.');expect(c.hasUnsavedChanges()).toBe(true);expect(c.saving()).toBe(false)});
+  it('serializes technologies unchanged and blocks duplicate saves while pending',()=>{
+    const pending=new Subject<JobDetail>();const api={job:()=>of(jobDetail()),updateJob:vi.fn(()=>pending)};const fixture=mount(JobEditPageComponent,api,'job-1');const c=fixture.componentInstance;
+    c.form.patchValue({technologyStack:'Java, Spring Boot\nRESTful API'});c.save();fixture.detectChanges();c.save();
+    expect(api.updateJob).toHaveBeenCalledTimes(1);expect(api.updateJob).toHaveBeenCalledWith('job-1',expect.objectContaining({expectedVersion:1,technologyStack:['Java','Spring Boot','RESTful API']}));
+    expect(c.saving()).toBe(true);expect((fixture.nativeElement.querySelector('.save-button') as HTMLButtonElement).disabled).toBe(true);
+    pending.next(jobDetail({version:2,technologyStack:['Java','Spring Boot','RESTful API']}));pending.complete();expect(c.saving()).toBe(false);
+  });
   it('loads normalized edit fields without source validation and omits all raw-source fields on update',()=>{
     const existing=jobDetail();const api={job:vi.fn(()=>of(existing)),updateJob:vi.fn((_id:string,_body:Record<string,unknown>)=>of(jobDetail({version:2})))};const fixture=mount(JobEditPageComponent,api,'job-1');const c=fixture.componentInstance;
     expect(c.form.controls.companyName.value).toBe('Acme');expect(c.form.valid).toBe(true);expect(fixture.nativeElement.querySelector('textarea[formControlName="rawContent"]')).toBeNull();expect(fixture.nativeElement.textContent).toContain('Original immutable source');
