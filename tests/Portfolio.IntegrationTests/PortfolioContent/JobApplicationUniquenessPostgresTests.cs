@@ -145,6 +145,39 @@ public sealed class JobApplicationUniquenessPostgresTests
               verification_status varchar(30) NOT NULL, selection_status varchar(30) NOT NULL, expires_at timestamptz NULL,
               verified_at timestamptz NULL, archived_at timestamptz NULL, notes text NULL, version integer NOT NULL DEFAULT 1,
               created_at timestamptz NOT NULL, updated_at timestamptz NOT NULL);
+            CREATE TABLE raw_job_postings (
+              id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+              job_posting_id uuid NULL REFERENCES job_postings(id) ON DELETE RESTRICT,
+              source varchar(30) NOT NULL,
+              source_external_id varchar(500) NULL,
+              ingestion_key varchar(500) NULL,
+              source_url text NULL,
+              source_url_hash varchar(64) NULL,
+              raw_content text NOT NULL,
+              content_hash varchar(64) NOT NULL,
+              company_title_fingerprint varchar(255) NULL,
+              ingestion_status varchar(30) NOT NULL DEFAULT 'RECEIVED',
+              duplicate_of_raw_job_posting_id uuid NULL REFERENCES raw_job_postings(id) ON DELETE RESTRICT,
+              metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+              discovered_at timestamptz NOT NULL,
+              version integer NOT NULL DEFAULT 1,
+              created_at timestamptz NOT NULL DEFAULT NOW(),
+              updated_at timestamptz NOT NULL DEFAULT NOW(),
+              CONSTRAINT ck_raw_job_postings_source CHECK (source IN ('FACEBOOK', 'INSTAGRAM', 'TOPCV', 'VIETNAMWORKS', 'COMPANY_SITE', 'MANUAL', 'OTHER')),
+              CONSTRAINT ck_raw_job_postings_ingestion_status CHECK (ingestion_status IN ('RECEIVED', 'NORMALIZED', 'DUPLICATE', 'REJECTED')),
+              CONSTRAINT ck_raw_job_postings_source_url_hash CHECK (source_url_hash IS NULL OR source_url_hash ~ '^[0-9a-f]{64}$'),
+              CONSTRAINT ck_raw_job_postings_content_hash CHECK (content_hash ~ '^[0-9a-f]{64}$'),
+              CONSTRAINT ck_raw_job_postings_version CHECK (version >= 1));
+            CREATE UNIQUE INDEX uq_raw_job_postings_source_external_id ON raw_job_postings(source, source_external_id)
+              WHERE source_external_id IS NOT NULL;
+            CREATE UNIQUE INDEX uq_raw_job_postings_ingestion_key ON raw_job_postings(ingestion_key)
+              WHERE ingestion_key IS NOT NULL;
+            CREATE UNIQUE INDEX uq_raw_job_postings_source_url_hash ON raw_job_postings(source, source_url_hash)
+              WHERE source_url_hash IS NOT NULL;
+            CREATE INDEX ix_raw_job_postings_content_hash ON raw_job_postings(content_hash);
+            CREATE INDEX ix_raw_job_postings_company_title_fingerprint ON raw_job_postings(company_title_fingerprint);
+            CREATE INDEX ix_raw_job_postings_ingestion_status_created_at ON raw_job_postings(ingestion_status, created_at DESC);
+            CREATE INDEX ix_raw_job_postings_job_posting_id ON raw_job_postings(job_posting_id);
             CREATE TABLE job_applications (
               id uuid PRIMARY KEY, job_posting_id uuid NOT NULL REFERENCES job_postings(id) ON DELETE RESTRICT,
               status varchar(30) NOT NULL, channel varchar(30) NULL, application_email varchar(255) NULL, application_url text NULL,
