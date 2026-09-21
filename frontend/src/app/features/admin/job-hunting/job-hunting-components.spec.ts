@@ -118,9 +118,27 @@ describe('Job editor workflows',()=>{
     expect(c.form.controls.companyName.value).toBe('Acme');expect(c.form.valid).toBe(true);expect(fixture.nativeElement.querySelector('textarea[formControlName="rawContent"]')).toBeNull();expect(fixture.nativeElement.textContent).toContain('Original immutable source');
     c.form.patchValue({companyName:'Acme Updated'});c.save();expect(api.updateJob).toHaveBeenCalledTimes(1);const body=api.updateJob.mock.calls[0][1];expect(body['expectedVersion']).toBe(1);expect(body['companyName']).toBe('Acme Updated');expect(body).not.toHaveProperty('source');expect(body).not.toHaveProperty('sourceUrl');expect(body).not.toHaveProperty('sourceExternalId');expect(body).not.toHaveProperty('rawContent');expect(c.job()?.version).toBe(2);
   });
-  it('uses current versions for state mutations, confirms archive, and creates an application for this job',()=>{
-    vi.spyOn(window,'confirm').mockReturnValue(true);const next=jobDetail({version:2,verificationStatus:'VERIFIED'});const api={job:()=>of(jobDetail()),verification:vi.fn(()=>of(next)),selection:vi.fn(()=>of(jobDetail({version:3,selectionStatus:'APPROVED'}))),archive:vi.fn(()=>of(jobDetail({version:4,archivedAt:'2026-02-01'}))),createApplication:vi.fn(()=>of(applicationDetail()))};const fixture=mount(JobEditPageComponent,api,'job-1');const c=fixture.componentInstance;const router=TestBed.inject(Router);vi.spyOn(router,'navigate').mockResolvedValue(true);
-    c.verify('VERIFIED');expect(api.verification).toHaveBeenCalledWith('job-1','VERIFIED',1);expect(c.job()?.version).toBe(2);c.select('APPROVED');expect(api.selection).toHaveBeenCalledWith('job-1','APPROVED',2);c.archive();expect(api.archive).toHaveBeenCalledWith('job-1',3);c.createApplication();expect(api.createApplication).toHaveBeenCalledWith({jobPostingId:'job-1',channel:'MANUAL'});expect(router.navigate).toHaveBeenCalledWith(['/admin/job-hunting/applications','app-1']);
+  it('uses current versions for state mutations and confirms archive',()=>{
+    vi.spyOn(window,'confirm').mockReturnValue(true);const next=jobDetail({version:2,verificationStatus:'VERIFIED'});const api={job:()=>of(jobDetail()),verification:vi.fn(()=>of(next)),selection:vi.fn(()=>of(jobDetail({version:3,selectionStatus:'APPROVED'}))),archive:vi.fn(()=>of(jobDetail({version:4,archivedAt:'2026-02-01'})))};const fixture=mount(JobEditPageComponent,api,'job-1');const c=fixture.componentInstance;
+    c.verify('VERIFIED');expect(api.verification).toHaveBeenCalledWith('job-1','VERIFIED',1);expect(c.job()?.version).toBe(2);c.select('APPROVED');expect(api.selection).toHaveBeenCalledWith('job-1','APPROVED',2);c.archive();expect(api.archive).toHaveBeenCalledWith('job-1',3);
+  });
+  it.each([
+    ['PENDING_ANALYSIS',null],['RECOMMENDED',null],['SKIPPED',null],['APPROVED','2026-02-01'],
+  ])('does not allow application creation for selection %s with archive %s',(selectionStatus,archivedAt)=>{
+    const api={job:()=>of(jobDetail({selectionStatus:selectionStatus as JobDetail['selectionStatus'],archivedAt})),createApplication:vi.fn(()=>of(applicationDetail()))};const fixture=mount(JobEditPageComponent,api,'job-1');const c=fixture.componentInstance;
+    expect(fixture.nativeElement.textContent).not.toContain('Create application');c.createApplication();expect(api.createApplication).not.toHaveBeenCalled();
+  });
+  it('creates one draft explicitly with the current job version and blocks duplicate clicks',()=>{
+    const pending=new Subject<ApplicationDetail>();const api={job:()=>of(jobDetail({selectionStatus:'APPROVED',version:4})),createApplication:vi.fn(()=>pending)};const fixture=mount(JobEditPageComponent,api,'job-1');const c=fixture.componentInstance;const router=TestBed.inject(Router);vi.spyOn(router,'navigate').mockResolvedValue(true);
+    expect(fixture.nativeElement.textContent).toContain('Create application');c.createApplication();c.createApplication();fixture.detectChanges();expect(api.createApplication).toHaveBeenCalledTimes(1);expect(api.createApplication).toHaveBeenCalledWith({jobPostingId:'job-1',expectedJobVersion:4});expect(c.applicationCreating()).toBe(true);const createButton=[...fixture.nativeElement.querySelectorAll('button')].find((button:HTMLButtonElement)=>button.textContent?.includes('Creating')) as HTMLButtonElement;expect(createButton.disabled).toBe(true);
+    pending.next(applicationDetail({status:'DRAFT',version:1}));pending.complete();expect(c.applicationCreating()).toBe(false);expect(router.navigate).toHaveBeenCalledWith(['/admin/job-hunting/applications','app-1']);
+  });
+  it('shows Open application instead of duplicate creation when one exists',()=>{
+    const current=jobDetail({selectionStatus:'APPROVED',applications:[{id:'app-existing',status:'DRAFT',channel:null,appliedAt:null,lastActivityAt:'2026-01-02',version:1}]});const fixture=mount(JobEditPageComponent,{job:()=>of(current)},'job-1');const link=fixture.nativeElement.querySelector('a.admin-button.primary') as HTMLAnchorElement;
+    expect(link.textContent).toContain('Open application');expect(link.getAttribute('href')).toContain('app-existing');expect(fixture.nativeElement.textContent).not.toContain('Create application');
+  });
+  it('recovers the Create application action after a backend failure',()=>{
+    const api={job:()=>of(jobDetail({selectionStatus:'APPROVED'})),createApplication:vi.fn(()=>throwError(()=>({status:409})))};const fixture=mount(JobEditPageComponent,api,'job-1');const c=fixture.componentInstance;c.createApplication();fixture.detectChanges();expect(c.applicationCreating()).toBe(false);expect(c.error()).toBeTruthy();expect(fixture.nativeElement.textContent).toContain('Create application');
   });
   it('submits an explicit human decision once, waits for the server, and rebinds status and version',()=>{
     const pending=new Subject<JobDetail>();const api={job:()=>of(jobDetail()),analyzeFit:()=>of(fitAnalysis()),selection:vi.fn(()=>pending)};const fixture=mount(JobEditPageComponent,api,'job-1');const c=fixture.componentInstance;c.fitAnalysis.set(fitAnalysis({reasons:[],concerns:[]}));fixture.detectChanges();

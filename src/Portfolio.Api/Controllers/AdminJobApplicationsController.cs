@@ -20,7 +20,7 @@ public sealed class AdminJobApplicationsController(IRequestDispatcher dispatcher
     [HttpDelete("{id:guid}/documents/{documentId:guid}")]public async Task<IActionResult> RemoveDocument(Guid id,Guid documentId,CancellationToken ct){await dispatcher.DispatchAsync(new RemoveJobApplicationDocumentCommand(id,documentId),ct);return NoContent();}
 }
 
-public sealed record JobApplicationCreateRequest(Guid JobPostingId,string? Channel,string? ApplicationEmail,string? ApplicationUrl,string? ExternalApplicationId,string? Notes){public CreateJobApplicationCommand Command()=>new(JobPostingId,Channel,ApplicationEmail,ApplicationUrl,ExternalApplicationId,Notes);}
+public sealed record JobApplicationCreateRequest(Guid JobPostingId,int ExpectedJobVersion){public CreateJobApplicationCommand Command()=>new(JobPostingId,ExpectedJobVersion);}
 public sealed record JobApplicationUpdateRequest(int ExpectedVersion,string? Channel,string? ApplicationEmail,string? ApplicationUrl,string? ExternalApplicationId,string? Notes){public UpdateJobApplicationCommand Command(Guid id)=>new(id,ExpectedVersion,Channel,ApplicationEmail,ApplicationUrl,ExternalApplicationId,Notes);}
 public sealed record JobApplicationStatusRequest(string Status,int ExpectedVersion,string? Note,DateTimeOffset? OccurredAt);
 public sealed record JobApplicationDocumentRequest(string DocumentType,string VersionLabel,string? FileName,string? StorageKey,string? ContentHash,JsonElement? Metadata){public AttachJobApplicationDocumentCommand Command(Guid id)=>new(id,DocumentType,VersionLabel,FileName,StorageKey,ContentHash,Metadata);}

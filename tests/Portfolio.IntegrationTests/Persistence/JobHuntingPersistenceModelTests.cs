@@ -90,7 +90,7 @@ public sealed class JobHuntingPersistenceModelTests
     }
 
     [Fact]
-    public void Model_configures_required_indexes_without_unwanted_uniqueness()
+    public void Model_configures_required_indexes_and_approved_uniqueness()
     {
         using var context = CreateContext();
         var model = context.GetService<IDesignTimeModel>().Model;
@@ -109,7 +109,7 @@ public sealed class JobHuntingPersistenceModelTests
         AssertIndex(model.FindEntityType(typeof(JobPosting))!, "ix_job_postings_company_position", false);
         AssertIndex(model.FindEntityType(typeof(JobPosting))!, "ix_job_postings_expires_at", false, "expires_at IS NOT NULL");
         AssertIndex(model.FindEntityType(typeof(JobPosting))!, "ix_job_postings_archived_at", false, "archived_at IS NOT NULL");
-        AssertIndex(application, "ix_job_applications_job_posting_id", false);
+        AssertIndex(application, "ix_job_applications_job_posting_id", true);
         AssertIndex(application, "ix_job_applications_status_updated_at", false);
         AssertIndex(application, "ix_job_applications_channel_applied_at", false);
         AssertIndex(model.FindEntityType(typeof(JobApplicationEvent))!, "ix_job_application_events_application_occurred_id", false);
@@ -125,8 +125,6 @@ public sealed class JobHuntingPersistenceModelTests
         Assert.Equal(
             [nameof(RawJobPosting.Source), nameof(RawJobPosting.SourceExternalId)],
             raw.GetIndexes().Single(index => index.GetDatabaseName() == "uq_raw_job_postings_source_external_id").Properties.Select(property => property.Name));
-        Assert.DoesNotContain(application.GetIndexes(), index =>
-            index.IsUnique && index.Properties.Any(property => property.Name == nameof(JobApplication.JobPostingId)));
     }
 
     private static ApplicationDbContext CreateContext()

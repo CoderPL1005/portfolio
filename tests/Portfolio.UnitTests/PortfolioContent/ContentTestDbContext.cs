@@ -124,6 +124,7 @@ internal sealed class ContentTestDbContext(DbContextOptions<ContentTestDbContext
         modelBuilder.Entity<JobPosting>().Property(item => item.TechnologyStack).HasConversion(value => value.RootElement.GetRawText(), value => System.Text.Json.JsonDocument.Parse(value, default(System.Text.Json.JsonDocumentOptions)));
         modelBuilder.Entity<JobApplication>().HasKey(item => item.Id);
         modelBuilder.Entity<JobApplication>().HasOne(item => item.JobPosting).WithMany(item => item.JobApplications).HasForeignKey(item => item.JobPostingId);
+        modelBuilder.Entity<JobApplication>().HasIndex(item => item.JobPostingId).IsUnique();
         modelBuilder.Entity<JobApplicationEvent>().HasKey(item => item.Id);
         modelBuilder.Entity<JobApplicationEvent>().HasOne(item => item.JobApplication).WithMany(item => item.Events).HasForeignKey(item => item.JobApplicationId);
         modelBuilder.Entity<JobApplicationEvent>().HasOne(item => item.ActorAdminUser).WithMany().HasForeignKey(item => item.ActorAdminUserId);

@@ -20,7 +20,7 @@ public sealed record JobApplicationResult(Guid Id,Guid JobPostingId,string Statu
 
 public sealed record GetJobApplicationsQuery(int Page,int PageSize,string? Search,string? Status,string? Channel):IRequest<PagedResult<JobApplicationListItem>>;
 public sealed record GetJobApplicationQuery(Guid Id):IRequest<JobApplicationResult>;
-public sealed record CreateJobApplicationCommand(Guid JobPostingId,string? Channel,string? ApplicationEmail,string? ApplicationUrl,string? ExternalApplicationId,string? Notes):IRequest<JobApplicationResult>;
+public sealed record CreateJobApplicationCommand(Guid JobPostingId,int ExpectedJobVersion):IRequest<JobApplicationResult>;
 public sealed record UpdateJobApplicationCommand(Guid Id,int ExpectedVersion,string? Channel,string? ApplicationEmail,string? ApplicationUrl,string? ExternalApplicationId,string? Notes):IRequest<JobApplicationResult>;
 public sealed record TransitionJobApplicationCommand(Guid Id,string Status,int ExpectedVersion,string? Note,DateTimeOffset? OccurredAt):IRequest<JobApplicationResult>;
 public sealed record AttachJobApplicationDocumentCommand(Guid JobApplicationId,string DocumentType,string VersionLabel,string? FileName,string? StorageKey,string? ContentHash,JsonElement? Metadata):IRequest<JobApplicationDocumentResult>;
@@ -32,9 +32,26 @@ public sealed class GetJobApplicationsQueryHandler(IApplicationDbContext db):IRe
 }
 public sealed class GetJobApplicationQueryHandler(IApplicationDbContext db):IRequestHandler<GetJobApplicationQuery,JobApplicationResult>{public Task<JobApplicationResult> HandleAsync(GetJobApplicationQuery r,CancellationToken ct=default)=>JobApplicationMapping.GetAsync(db,r.Id,ct);}
 
-public sealed class CreateJobApplicationCommandHandler(IApplicationDbContext db,TimeProvider clock,ICurrentUser currentUser):IRequestHandler<CreateJobApplicationCommand,JobApplicationResult>
+public sealed class CreateJobApplicationCommandHandler(IApplicationDbContext db,TimeProvider clock,ICurrentUser currentUser,IJobApplicationConflictDetector conflictDetector,IJobApplicationCreationTransactionFactory transactionFactory):IRequestHandler<CreateJobApplicationCommand,JobApplicationResult>
 {
-    public async Task<JobApplicationResult> HandleAsync(CreateJobApplicationCommand r,CancellationToken ct=default){if(!await db.JobPostings.AnyAsync(x=>x.Id==r.JobPostingId,ct))throw new NotFoundException("JOB_POSTING_NOT_FOUND","The job posting was not found.");var now=clock.GetUtcNow();var x=new JobApplication{Id=Guid.NewGuid(),JobPostingId=r.JobPostingId,Status=JobApplicationStatuses.Draft,Channel=JobText.TrimOrNull(r.Channel)?.ToUpperInvariant(),ApplicationEmail=JobText.TrimOrNull(r.ApplicationEmail),ApplicationUrl=JobText.TrimOrNull(r.ApplicationUrl),ExternalApplicationId=JobText.TrimOrNull(r.ExternalApplicationId),Notes=JobText.TrimOrNull(r.Notes),LastActivityAt=now,Version=1,CreatedAt=now,UpdatedAt=now};var e=JobApplicationMapping.Event(x.Id,JobApplicationEventTypes.Created,null,JobApplicationStatuses.Draft,currentUser.AdminUserId,null,now);db.JobApplications.Add(x);db.JobApplicationEvents.Add(e);await db.SaveChangesAsync(ct);return await JobApplicationMapping.GetAsync(db,x.Id,ct);}
+    public async Task<JobApplicationResult> HandleAsync(CreateJobApplicationCommand r,CancellationToken ct=default)
+    {
+        await using var transaction=await transactionFactory.BeginAsync(r.JobPostingId,ct);
+        var job=transaction.JobPosting??throw new NotFoundException("JOB_POSTING_NOT_FOUND","The job posting was not found.");
+        if(job.Version!=r.ExpectedJobVersion)throw new ConflictException("JOB_POSTING_VERSION_CONFLICT","The job posting has been modified.");
+        if(job.ArchivedAt is not null)throw new ConflictException("JOB_POSTING_ARCHIVED","An application cannot be created for an archived job posting.");
+        if(job.SelectionStatus!=JobPostingSelectionStatuses.Approved)throw new ConflictException("JOB_POSTING_NOT_APPROVED","The job posting must be approved before an application can be created.");
+        if(await db.JobApplications.AnyAsync(x=>x.JobPostingId==r.JobPostingId,ct))throw DuplicateApplication();
+        var now=clock.GetUtcNow();
+        var x=new JobApplication{Id=Guid.NewGuid(),JobPostingId=r.JobPostingId,Status=JobApplicationStatuses.Draft,Channel=null,ApplicationEmail=JobText.TrimOrNull(job.ApplicationEmail),ApplicationUrl=JobText.TrimOrNull(job.ApplicationUrl),AppliedAt=null,LastActivityAt=now,Version=1,CreatedAt=now,UpdatedAt=now};
+        var e=JobApplicationMapping.Event(x.Id,JobApplicationEventTypes.Created,null,JobApplicationStatuses.Draft,currentUser.AdminUserId,null,now);
+        db.JobApplications.Add(x);db.JobApplicationEvents.Add(e);
+        try{await db.SaveChangesAsync(ct);}catch(DbUpdateException exception)when(conflictDetector.IsDuplicateJobPosting(exception)){throw DuplicateApplication();}
+        await transaction.CommitAsync(ct);
+        return await JobApplicationMapping.GetAsync(db,x.Id,ct);
+    }
+
+    private static ConflictException DuplicateApplication()=>new("JOB_APPLICATION_ALREADY_EXISTS","An application already exists for this job posting.");
 }
 public sealed class UpdateJobApplicationCommandHandler(IApplicationDbContext db,TimeProvider clock):IRequestHandler<UpdateJobApplicationCommand,JobApplicationResult>
 {public async Task<JobApplicationResult> HandleAsync(UpdateJobApplicationCommand r,CancellationToken ct=default){var x=await JobApplicationMapping.RequireVersion(db,r.Id,r.ExpectedVersion,ct);x.Channel=JobText.TrimOrNull(r.Channel)?.ToUpperInvariant();x.ApplicationEmail=JobText.TrimOrNull(r.ApplicationEmail);x.ApplicationUrl=JobText.TrimOrNull(r.ApplicationUrl);x.ExternalApplicationId=JobText.TrimOrNull(r.ExternalApplicationId);x.Notes=JobText.TrimOrNull(r.Notes);x.Version++;x.UpdatedAt=clock.GetUtcNow();await JobApplicationMapping.SaveVersioned(db,ct);return await JobApplicationMapping.GetAsync(db,x.Id,ct);}}
@@ -52,7 +69,7 @@ public sealed class RemoveJobApplicationDocumentCommandHandler(IApplicationDbCon
 }
 
 public sealed class GetJobApplicationsQueryValidator:IRequestValidator<GetJobApplicationsQuery>{public Task<IReadOnlyCollection<ValidationFailure>> ValidateAsync(GetJobApplicationsQuery r,CancellationToken ct=default){var f=JobValidation.Paging(r.Page,r.PageSize);JobValidation.OptionalClosed(f,"status",r.Status,JobValidation.ApplicationStatuses);JobValidation.OptionalClosed(f,"channel",r.Channel,JobValidation.Channels);return Task.FromResult<IReadOnlyCollection<ValidationFailure>>(f);}}
-public sealed class CreateJobApplicationCommandValidator:IRequestValidator<CreateJobApplicationCommand>{public Task<IReadOnlyCollection<ValidationFailure>> ValidateAsync(CreateJobApplicationCommand r,CancellationToken ct=default)=>Task.FromResult<IReadOnlyCollection<ValidationFailure>>(ApplicationValidation.Metadata(r.Channel,r.ApplicationEmail,r.ApplicationUrl,r.ExternalApplicationId,r.Notes));}
+public sealed class CreateJobApplicationCommandValidator:IRequestValidator<CreateJobApplicationCommand>{public Task<IReadOnlyCollection<ValidationFailure>> ValidateAsync(CreateJobApplicationCommand r,CancellationToken ct=default){var f=new List<ValidationFailure>();JobValidation.Version(f,r.ExpectedJobVersion);return Task.FromResult<IReadOnlyCollection<ValidationFailure>>(f);}}
 public sealed class UpdateJobApplicationCommandValidator:IRequestValidator<UpdateJobApplicationCommand>{public Task<IReadOnlyCollection<ValidationFailure>> ValidateAsync(UpdateJobApplicationCommand r,CancellationToken ct=default){var f=ApplicationValidation.Metadata(r.Channel,r.ApplicationEmail,r.ApplicationUrl,r.ExternalApplicationId,r.Notes);JobValidation.Version(f,r.ExpectedVersion);return Task.FromResult<IReadOnlyCollection<ValidationFailure>>(f);}}
 public sealed class TransitionJobApplicationCommandValidator:IRequestValidator<TransitionJobApplicationCommand>{public Task<IReadOnlyCollection<ValidationFailure>> ValidateAsync(TransitionJobApplicationCommand r,CancellationToken ct=default){var f=new List<ValidationFailure>();JobValidation.RequiredClosed(f,"status",r.Status,JobValidation.ApplicationStatuses);JobValidation.Version(f,r.ExpectedVersion);JobValidation.Optional(f,"note",r.Note,200000);return Task.FromResult<IReadOnlyCollection<ValidationFailure>>(f);}}
 public sealed class AttachJobApplicationDocumentCommandValidator:IRequestValidator<AttachJobApplicationDocumentCommand>{public Task<IReadOnlyCollection<ValidationFailure>> ValidateAsync(AttachJobApplicationDocumentCommand r,CancellationToken ct=default){var f=new List<ValidationFailure>();JobValidation.Required(f,"documentType",r.DocumentType,50);JobValidation.Required(f,"versionLabel",r.VersionLabel,100);JobValidation.Optional(f,"fileName",r.FileName,500);JobValidation.Optional(f,"storageKey",r.StorageKey,1000);if(!string.IsNullOrWhiteSpace(r.ContentHash)&&!Regex.IsMatch(r.ContentHash,"^[0-9a-fA-F]{64}$"))f.Add(new("contentHash","Content hash must be 64 hexadecimal characters."));if(r.Metadata is { ValueKind:not JsonValueKind.Object })f.Add(new("metadata","Metadata must be a JSON object."));return Task.FromResult<IReadOnlyCollection<ValidationFailure>>(f);}}

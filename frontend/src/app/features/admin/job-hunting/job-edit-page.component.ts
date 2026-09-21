@@ -138,7 +138,10 @@ import { JobHuntingService } from './job-hunting.service';
           </section>
 
           <section class="admin-panel detail-card" aria-labelledby="applications-title">
-            <div class="section-heading"><div><p class="section-kicker">TRACKING</p><h2 id="applications-title">Applications</h2></div><button type="button" class="admin-button primary" (click)="createApplication()">Create application</button></div>
+            <div class="section-heading"><div><p class="section-kicker">TRACKING</p><h2 id="applications-title">Applications</h2></div>
+              @if (current.applications.length) { <a class="admin-button primary" [routerLink]="['/admin/job-hunting/applications', current.applications[0].id]">Open application</a> }
+              @else if (current.selectionStatus === 'APPROVED' && !current.archivedAt) { <button type="button" class="admin-button primary" (click)="createApplication()" [disabled]="applicationCreating()">{{ applicationCreating() ? 'Creating...' : 'Create application' }}</button> }
+            </div>
             <div class="application-list">
               @for (application of current.applications; track application.id) { <a class="application-row" [routerLink]="['/admin/job-hunting/applications', application.id]"><span><strong>{{ statusLabel(application.status) }}</strong><small>{{ application.channel ? statusLabel(application.channel) : 'No channel' }}</small></span><span aria-hidden="true">&rarr;</span></a> }
               @empty { <div class="empty-copy"><p>No applications yet.</p><p>Create one when you are ready to track an application for this role.</p></div> }
@@ -174,6 +177,7 @@ export class JobEditPageComponent implements DirtyAware {
   readonly saving = signal(false);
   readonly fitLoading = signal(false);
   readonly selectionAction = signal<string | null>(null);
+  readonly applicationCreating = signal(false);
   readonly fitAnalysis = signal<JobFitAnalysis | null>(null);
   readonly sources: JobSource[] = ['MANUAL', 'TOPCV', 'VIETNAMWORKS', 'COMPANY_SITE', 'FACEBOOK', 'INSTAGRAM', 'OTHER'];
   readonly verifications = ['PENDING', 'VERIFIED', 'UNVERIFIED', 'LIKELY_EXPIRED'];
@@ -226,7 +230,7 @@ export class JobEditPageComponent implements DirtyAware {
   canDecide(status: string): boolean { return status === 'PENDING_ANALYSIS' || status === 'RECOMMENDED'; }
   select(status: 'APPROVED' | 'SKIPPED'): void { const current=this.job();if(!current||this.selectionAction()!==null||!this.canDecide(current.selectionStatus))return;this.selectionAction.set(status);this.error.set(null);this.api.selection(this.id!,status,current.version).pipe(take(1)).subscribe({next:value=>{this.selectionAction.set(null);this.replace(value)},error:value=>{this.selectionAction.set(null);this.failed(value)}}); }
   archive(): void { if (confirm('Archive this job?')) this.api.archive(this.id!, this.job()!.version).pipe(take(1)).subscribe({ next: value => this.replace(value), error: value => this.failed(value) }); }
-  createApplication(): void { this.api.createApplication({ jobPostingId: this.id, channel: 'MANUAL' }).pipe(take(1)).subscribe({ next: value => void this.router.navigate(['/admin/job-hunting/applications', value.id]), error: value => this.error.set(safeAdminError(value)) }); }
+  createApplication(): void { const current=this.job();if(!current||this.applicationCreating()||current.selectionStatus!=='APPROVED'||current.archivedAt!==null||current.applications.length)return;this.applicationCreating.set(true);this.error.set(null);this.api.createApplication({jobPostingId:current.id,expectedJobVersion:current.version}).pipe(take(1)).subscribe({next:value=>{this.applicationCreating.set(false);void this.router.navigate(['/admin/job-hunting/applications',value.id])},error:value=>{this.applicationCreating.set(false);this.error.set(safeAdminError(value))}}); }
   analyzeFit(): void { if(this.fitLoading()||!this.id)return;this.fitLoading.set(true);this.error.set(null);this.api.analyzeFit(this.id).pipe(take(1)).subscribe({next:value=>{this.fitAnalysis.set(value);this.fitLoading.set(false)},error:value=>{this.error.set(safeAdminError(value));this.fitLoading.set(false)}}); }
 
   private jobWrite(): JobWrite {

@@ -54,6 +54,7 @@ describe('Job Hunting admin feature', () => {
 
   it('uses exact application transition and soft-remove endpoints', () => {
     service.applications({page:3,pageSize:20,search:'Acme',status:'APPLIED',channel:'EMAIL'}).subscribe();const list=http.expectOne(r=>r.url.endsWith('/admin/job-applications')&&r.params.get('page')==='3'&&r.params.get('pageSize')==='20'&&r.params.get('search')==='Acme'&&r.params.get('status')==='APPLIED'&&r.params.get('channel')==='EMAIL');expect(list.request.method).toBe('GET');list.flush({success:true,data:{items:[],page:3,pageSize:20,total:0,totalPages:0}});
+    service.createApplication({jobPostingId:'job-1',expectedJobVersion:4}).subscribe();const create=http.expectOne('https://api.example/api/v1/admin/job-applications');expect(create.request.method).toBe('POST');expect(create.request.body).toEqual({jobPostingId:'job-1',expectedJobVersion:4});create.flush({success:true,data:{id:'app'}});
     service.transition('app',{status:'APPLIED',expectedVersion:2,note:'sent'}).subscribe();const transition=http.expectOne('https://api.example/api/v1/admin/job-applications/app/status');expect(transition.request.method).toBe('PUT');expect(transition.request.body).toEqual({status:'APPLIED',expectedVersion:2,note:'sent'});transition.flush({success:true,data:{}});
     service.remove('app','doc').subscribe();const remove=http.expectOne('https://api.example/api/v1/admin/job-applications/app/documents/doc');expect(remove.request.method).toBe('DELETE');remove.flush(null);
   });

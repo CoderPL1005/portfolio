@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Portfolio.Application.Common.Abstractions.Persistence;
 using Portfolio.Application.Common.Exceptions;
 using Portfolio.Application.Features.JobHunting;
 using Portfolio.Domain.Entities;
@@ -39,6 +40,7 @@ public sealed class JobHuntingFeatureTests
         await using var db=PublicPortfolioTests.CreateContext();var job=Posting("Company","Role",Now);db.JobPostings.Add(job);await db.SaveChangesAsync();
         var handler=new UpdateJobSelectionCommandHandler(db,new FixedTimeProvider(Now));var result=await handler.HandleAsync(new(job.Id,target,1));
         Assert.Equal(target,result.SelectionStatus);Assert.Equal(2,result.Version);
+        Assert.Empty(await db.JobApplications.ToListAsync());
         await Assert.ThrowsAsync<ConflictException>(()=>handler.HandleAsync(new(job.Id,target=="APPROVED"?"SKIPPED":"APPROVED",1)));
         await Assert.ThrowsAsync<ConflictException>(()=>handler.HandleAsync(new(job.Id,target,2)));
         Assert.Equal(target,(await db.JobPostings.SingleAsync()).SelectionStatus);
@@ -65,7 +67,38 @@ public sealed class JobHuntingFeatureTests
 
     [Fact]public async Task Application_create_and_edit_persist_immutable_created_event_and_versioning()
     {
-        await using var db=PublicPortfolioTests.CreateContext();var job=Posting("Company","Role",Now);db.JobPostings.Add(job);await db.SaveChangesAsync();var created=await new CreateJobApplicationCommandHandler(db,new FixedTimeProvider(Now),new FakeCurrentUser(AdminId)).HandleAsync(new(job.Id,"EMAIL","jobs@example.com",null,null,"note"));Assert.Equal("DRAFT",created.Status);var e=Assert.Single(created.Events);Assert.Equal("CREATED",e.EventType);Assert.Null(e.FromStatus);Assert.Equal("DRAFT",e.ToStatus);Assert.Equal(AdminId,e.ActorAdminUserId);var updated=await new UpdateJobApplicationCommandHandler(db,new FixedTimeProvider(Now.AddHours(1))).HandleAsync(new(created.Id,1,"PLATFORM",null,"https://example.com/apply","external","edited"));Assert.Equal(2,updated.Version);Assert.Equal("DRAFT",updated.Status);await Assert.ThrowsAsync<ConflictException>(()=>new UpdateJobApplicationCommandHandler(db,new FixedTimeProvider(Now)).HandleAsync(new(created.Id,1,null,null,null,null,null)));
+        await using var db=PublicPortfolioTests.CreateContext();var job=Posting("Company","Role",Now);job.SelectionStatus="APPROVED";job.ApplicationEmail="jobs@example.com";job.ApplicationUrl="https://example.com/apply";db.JobPostings.Add(job);await db.SaveChangesAsync();var created=await CreateHandler(db).HandleAsync(new(job.Id,1));Assert.Equal("DRAFT",created.Status);Assert.Equal(1,created.Version);Assert.Null(created.Channel);Assert.Null(created.AppliedAt);Assert.Equal(Now,created.LastActivityAt);Assert.Equal("jobs@example.com",created.ApplicationEmail);Assert.Equal("https://example.com/apply",created.ApplicationUrl);var e=Assert.Single(created.Events);Assert.Equal("CREATED",e.EventType);Assert.Null(e.FromStatus);Assert.Equal("DRAFT",e.ToStatus);Assert.Equal(AdminId,e.ActorAdminUserId);Assert.Equal("APPROVED",job.SelectionStatus);Assert.Equal(1,job.Version);var updated=await new UpdateJobApplicationCommandHandler(db,new FixedTimeProvider(Now.AddHours(1))).HandleAsync(new(created.Id,1,"PLATFORM",null,"https://example.com/apply","external","edited"));Assert.Equal(2,updated.Version);Assert.Equal("DRAFT",updated.Status);await Assert.ThrowsAsync<ConflictException>(()=>new UpdateJobApplicationCommandHandler(db,new FixedTimeProvider(Now)).HandleAsync(new(created.Id,1,null,null,null,null,null)));
+    }
+
+    [Theory]
+    [InlineData("PENDING_ANALYSIS")][InlineData("RECOMMENDED")][InlineData("SKIPPED")]
+    public async Task Application_create_requires_an_approved_job(string selectionStatus)
+    {
+        await using var db=PublicPortfolioTests.CreateContext();var job=Posting("Company","Role",Now);job.SelectionStatus=selectionStatus;db.JobPostings.Add(job);await db.SaveChangesAsync();var error=await Assert.ThrowsAsync<ConflictException>(()=>CreateHandler(db).HandleAsync(new(job.Id,1)));Assert.Equal("JOB_POSTING_NOT_APPROVED",error.Code);Assert.Empty(await db.JobApplications.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Application_create_rejects_archived_stale_and_duplicate_jobs()
+    {
+        await using var db=PublicPortfolioTests.CreateContext();var archived=Posting("Archived","Role",Now);archived.SelectionStatus="APPROVED";archived.ArchivedAt=Now;var active=Posting("Active","Role",Now);active.SelectionStatus="APPROVED";db.JobPostings.AddRange(archived,active);await db.SaveChangesAsync();
+        var archivedError=await Assert.ThrowsAsync<ConflictException>(()=>CreateHandler(db).HandleAsync(new(archived.Id,1)));Assert.Equal("JOB_POSTING_ARCHIVED",archivedError.Code);
+        var staleError=await Assert.ThrowsAsync<ConflictException>(()=>CreateHandler(db).HandleAsync(new(active.Id,2)));Assert.Equal("JOB_POSTING_VERSION_CONFLICT",staleError.Code);
+        await CreateHandler(db).HandleAsync(new(active.Id,1));var duplicate=await Assert.ThrowsAsync<ConflictException>(()=>CreateHandler(db).HandleAsync(new(active.Id,1)));Assert.Equal("JOB_APPLICATION_ALREADY_EXISTS",duplicate.Code);Assert.Single(await db.JobApplications.Where(x=>x.JobPostingId==active.Id).ToListAsync());Assert.Single(await db.JobApplicationEvents.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Application_create_translates_the_authoritative_unique_constraint_failure()
+    {
+        await using var db=PublicPortfolioTests.CreateContext();var job=Posting("Company","Role",Now);job.SelectionStatus="APPROVED";db.JobPostings.Add(job);await db.SaveChangesAsync();db.FailSaveChanges=true;
+        var handler=new CreateJobApplicationCommandHandler(db,new FixedTimeProvider(Now),new FakeCurrentUser(AdminId),new AlwaysJobApplicationConflictDetector(),new TestCreationTransactionFactory(db));
+        var error=await Assert.ThrowsAsync<ConflictException>(()=>handler.HandleAsync(new(job.Id,1)));Assert.Equal("JOB_APPLICATION_ALREADY_EXISTS",error.Code);Assert.Empty(await db.JobApplications.ToListAsync());Assert.Empty(await db.JobApplicationEvents.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Application_create_does_not_translate_unrelated_database_failures()
+    {
+        await using var db=PublicPortfolioTests.CreateContext();var job=Posting("Company","Role",Now);job.SelectionStatus="APPROVED";db.JobPostings.Add(job);await db.SaveChangesAsync();db.FailSaveChanges=true;
+        await Assert.ThrowsAsync<DbUpdateException>(()=>CreateHandler(db).HandleAsync(new(job.Id,1)));Assert.Empty(await db.JobApplications.ToListAsync());Assert.Empty(await db.JobApplicationEvents.ToListAsync());
     }
 
     [Theory]
@@ -81,6 +114,12 @@ public sealed class JobHuntingFeatureTests
         await using var db=PublicPortfolioTests.CreateContext();var job=Posting("Company","Role",Now);var app=Application(job.Id,from);db.AddRange(job,app);await db.SaveChangesAsync();await Assert.ThrowsAsync<ConflictException>(()=>new TransitionJobApplicationCommandHandler(db,new FixedTimeProvider(Now),new FakeCurrentUser(AdminId)).HandleAsync(new(app.Id,to,1,null,null)));Assert.Empty(await db.JobApplicationEvents.ToListAsync());Assert.Equal(from,app.Status);
     }
 
+    [Fact]
+    public async Task Stale_application_status_transition_conflicts_without_a_second_event()
+    {
+        await using var db=PublicPortfolioTests.CreateContext();var job=Posting("Company","Role",Now);var app=Application(job.Id,"DRAFT");db.AddRange(job,app);await db.SaveChangesAsync();var handler=new TransitionJobApplicationCommandHandler(db,new FixedTimeProvider(Now),new FakeCurrentUser(AdminId));await handler.HandleAsync(new(app.Id,"APPLIED",1,null,null));var error=await Assert.ThrowsAsync<ConflictException>(()=>handler.HandleAsync(new(app.Id,"WITHDRAWN",1,null,null)));Assert.Equal("JOB_APPLICATION_VERSION_CONFLICT",error.Code);Assert.Single(await db.JobApplicationEvents.ToListAsync());Assert.Equal("APPLIED",app.Status);
+    }
+
     [Fact]public async Task Documents_attach_and_soft_remove_with_events_and_repeat_conflict()
     {
         await using var db=PublicPortfolioTests.CreateContext();var job=Posting("Company","Role",Now);var app=Application(job.Id,"DRAFT");db.AddRange(job,app);await db.SaveChangesAsync();using var metadata=JsonDocument.Parse("{\"kind\":\"cv\"}");var attached=await new AttachJobApplicationDocumentCommandHandler(db,new FixedTimeProvider(Now),new FakeCurrentUser(AdminId)).HandleAsync(new(app.Id,"CV","v1","cv.pdf","private/cv.pdf",new string('a',64),metadata.RootElement));Assert.Equal("CV",attached.DocumentType);Assert.Equal("DOCUMENT_ATTACHED",(await db.JobApplicationEvents.SingleAsync()).EventType);await new RemoveJobApplicationDocumentCommandHandler(db,new FixedTimeProvider(Now.AddMinutes(1)),new FakeCurrentUser(AdminId)).HandleAsync(new(app.Id,attached.Id));Assert.NotNull((await db.JobApplicationDocuments.SingleAsync()).RemovedAt);Assert.Equal(2,await db.JobApplicationEvents.CountAsync());Assert.True(await db.JobApplicationDocuments.AnyAsync(x=>x.Id==attached.Id));await Assert.ThrowsAsync<ConflictException>(()=>new RemoveJobApplicationDocumentCommandHandler(db,new FixedTimeProvider(Now),new FakeCurrentUser(AdminId)).HandleAsync(new(app.Id,attached.Id)));
@@ -94,7 +133,20 @@ public sealed class JobHuntingFeatureTests
 
     private static CreateJobPostingCommand Create(string external,string url,string raw){using var json=JsonDocument.Parse("[\"C#\"]");return new("MANUAL",external,url,raw,"Acme","Developer","Hanoi",null,null,null,null,"USD",null,null,"Description",json.RootElement.Clone(),"jobs@example.com","https://example.com/apply",null,null);}
     private static UpdateJobPostingCommand Update(Guid id,int version,string company){using var json=JsonDocument.Parse("[\"C#\"]");return new(id,version,company,"Role","Hanoi",null,null,null,null,null,null,null,"Description",json.RootElement.Clone(),null,null,null,null);}
+    private static CreateJobApplicationCommandHandler CreateHandler(IApplicationDbContext db)=>new(db,new FixedTimeProvider(Now),new FakeCurrentUser(AdminId),new NeverJobApplicationConflictDetector(),new TestCreationTransactionFactory(db));
     private static JobPosting Posting(string company,string title,DateTimeOffset at,Guid? id=null){return new(){Id=id??Guid.NewGuid(),CompanyName=company,PositionTitle=title,Location="Hanoi",Description="Description",TechnologyStack=JsonDocument.Parse("[]"),VerificationStatus="PENDING",SelectionStatus="PENDING_ANALYSIS",Version=1,CreatedAt=at,UpdatedAt=at};}
     private static RawJobPosting Raw(Guid jobId,string source)=>new(){Id=Guid.NewGuid(),JobPostingId=jobId,Source=source,RawContent="raw",ContentHash="hash",IngestionStatus="NORMALIZED",Metadata=JsonDocument.Parse("{}"),DiscoveredAt=Now,CreatedAt=Now,UpdatedAt=Now};
     private static JobApplication Application(Guid jobId,string status)=>new(){Id=Guid.NewGuid(),JobPostingId=jobId,Status=status,Version=1,CreatedAt=Now,UpdatedAt=Now};
+    private sealed class NeverJobApplicationConflictDetector:IJobApplicationConflictDetector{public bool IsDuplicateJobPosting(DbUpdateException exception)=>false;}
+    private sealed class AlwaysJobApplicationConflictDetector:IJobApplicationConflictDetector{public bool IsDuplicateJobPosting(DbUpdateException exception)=>true;}
+    private sealed class TestCreationTransactionFactory(IApplicationDbContext db):IJobApplicationCreationTransactionFactory
+    {
+        public async Task<IJobApplicationCreationTransaction> BeginAsync(Guid jobPostingId,CancellationToken cancellationToken=default)=>new TestCreationTransaction(await db.JobPostings.SingleOrDefaultAsync(x=>x.Id==jobPostingId,cancellationToken));
+        private sealed class TestCreationTransaction(JobPosting? jobPosting):IJobApplicationCreationTransaction
+        {
+            public JobPosting? JobPosting { get; }=jobPosting;
+            public Task CommitAsync(CancellationToken cancellationToken=default)=>Task.CompletedTask;
+            public ValueTask DisposeAsync()=>ValueTask.CompletedTask;
+        }
+    }
 }

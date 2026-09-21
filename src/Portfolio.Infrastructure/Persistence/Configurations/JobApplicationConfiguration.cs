@@ -36,7 +36,7 @@ public sealed class JobApplicationConfiguration : IEntityTypeConfiguration<JobAp
             .HasForeignKey(entity => entity.JobPostingId)
             .OnDelete(DeleteBehavior.Restrict);
 
-        builder.HasIndex(entity => entity.JobPostingId).HasDatabaseName("ix_job_applications_job_posting_id");
+        builder.HasIndex(entity => entity.JobPostingId).IsUnique().HasDatabaseName("ix_job_applications_job_posting_id");
         builder.HasIndex(entity => new { entity.Status, entity.UpdatedAt })
             .HasDatabaseName("ix_job_applications_status_updated_at")
             .IsDescending(false, true);

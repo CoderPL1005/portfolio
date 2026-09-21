@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Migrations;
+using System.Text.RegularExpressions;
 using Pgvector.EntityFrameworkCore;
 using Portfolio.Application.Common.Abstractions.Persistence;
 using Portfolio.Domain.Entities;
@@ -111,7 +112,7 @@ public sealed class ApplicationDbContextModelTests
         using var context = CreateContext();
         var migrations = context.Database.GetMigrations().ToArray();
 
-        Assert.Equal(12, migrations.Length);
+        Assert.Equal(13, migrations.Length);
         Assert.EndsWith("_InitialPortfolioSchema", migrations[0], StringComparison.Ordinal);
         Assert.EndsWith("_RemoveContactMessages", migrations[1], StringComparison.Ordinal);
         Assert.EndsWith("_AllowDuplicateSocialLinkPlatforms", migrations[2], StringComparison.Ordinal);
@@ -124,6 +125,33 @@ public sealed class ApplicationDbContextModelTests
         Assert.EndsWith("_GeneralizeRawJobPostingAttachmentsForPwa", migrations[9], StringComparison.Ordinal);
         Assert.EndsWith("_AddRawJobPostingAnalysisConcurrency", migrations[10], StringComparison.Ordinal);
         Assert.EndsWith("_AddCandidateJobPreferences", migrations[11], StringComparison.Ordinal);
+        Assert.EndsWith("_EnforceSingleJobApplicationPerPosting", migrations[12], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Application_uniqueness_migration_only_replaces_the_job_posting_index()
+    {
+        using var context = CreateContext();
+        var migrations = context.Database.GetMigrations().ToArray();
+        var migrator = context.GetService<IMigrator>();
+        var up = migrator.GenerateScript(migrations[11], migrations[12]);
+        var down = migrator.GenerateScript(migrations[12], migrations[11]);
+
+        Assert.Contains("DROP INDEX ix_job_applications_job_posting_id", up, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("CREATE UNIQUE INDEX ix_job_applications_job_posting_id", up, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("DROP INDEX ix_job_applications_job_posting_id", down, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("CREATE INDEX ix_job_applications_job_posting_id", down, StringComparison.OrdinalIgnoreCase);
+        Assert.All(new[] { up, down }, script =>
+        {
+            Assert.DoesNotContain("ALTER TABLE", script, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("DROP TABLE", script, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("CREATE TABLE", script, StringComparison.OrdinalIgnoreCase);
+            var indexes = Regex.Matches(script, "(?:CREATE(?: UNIQUE)? INDEX|DROP INDEX)\\s+\"?([^\"\\s;]+)", RegexOptions.IgnoreCase)
+                .Select(match => match.Groups[1].Value)
+                .ToArray();
+            Assert.NotEmpty(indexes);
+            Assert.All(indexes, name => Assert.Equal("ix_job_applications_job_posting_id", name));
+        });
     }
 
     [Fact]
@@ -325,9 +353,9 @@ public sealed class ApplicationDbContextModelTests
     {
         using var context = CreateContext();
         var migrations = context.Database.GetMigrations().ToArray();
-        var script = context.GetService<IMigrator>().GenerateScript(migrations[^2], migrations[^1]);
+        var script = context.GetService<IMigrator>().GenerateScript(migrations[10], migrations[11]);
 
-        Assert.EndsWith("_AddCandidateJobPreferences", migrations[^1], StringComparison.Ordinal);
+        Assert.EndsWith("_AddCandidateJobPreferences", migrations[11], StringComparison.Ordinal);
         Assert.Contains("ck_candidate_job_preferences_salary_consistency", script, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("minimum_salary IS NULL AND salary_currency IS NULL AND salary_period IS NULL", script, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("minimum_salary IS NOT NULL AND salary_currency IS NOT NULL AND salary_period IS NOT NULL", script, StringComparison.OrdinalIgnoreCase);

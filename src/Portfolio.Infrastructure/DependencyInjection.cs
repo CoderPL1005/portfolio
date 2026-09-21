@@ -90,6 +90,8 @@ public static class DependencyInjection
                 "WebPush:PrivateKey must be a valid base64url value no longer than 512 characters.");
         services.AddSingleton<IWebPushSender, WebPushSender>();
         services.AddSingleton<IIngestionKeyConflictDetector, NpgsqlIngestionKeyConflictDetector>();
+        services.AddSingleton<IJobApplicationConflictDetector, NpgsqlJobApplicationConflictDetector>();
+        services.AddScoped<IJobApplicationCreationTransactionFactory, NpgsqlJobApplicationCreationTransactionFactory>();
         services.AddOptions<JwtSettings>()
             .Bind(configuration.GetSection(JwtSettings.SectionName))
             .Validate(settings => !string.IsNullOrWhiteSpace(settings.Issuer), "Jwt:Issuer is required.")
