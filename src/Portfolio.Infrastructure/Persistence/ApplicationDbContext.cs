@@ -41,6 +41,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<JobApplicationEvent> JobApplicationEvents => Set<JobApplicationEvent>();
     public DbSet<JobApplicationDocument> JobApplicationDocuments => Set<JobApplicationDocument>();
     public DbSet<PushSubscription> PushSubscriptions => Set<PushSubscription>();
+    public DbSet<CandidateJobPreferences> CandidateJobPreferences => Set<CandidateJobPreferences>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {

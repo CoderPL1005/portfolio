@@ -44,6 +44,10 @@ public static class DependencyInjection
         services.AddOptions<R2Settings>().Bind(configuration.GetSection(R2Settings.SectionName));
         services.AddSingleton<IFileStorage, R2FileStorage>();
         services.AddOptions<GeminiSettings>().Bind(configuration.GetSection(GeminiSettings.SectionName));
+        services.AddSingleton<IValidateOptions<JobFitScoringOptions>, JobFitScoringOptionsValidator>();
+        services.AddOptions<JobFitScoringOptions>()
+            .Bind(configuration.GetSection(JobFitScoringOptions.SectionName))
+            .ValidateOnStart();
         services.AddHttpClient<IEmbeddingService, GeminiEmbeddingService>(client =>
             client.Timeout = TimeSpan.FromSeconds(30));
         services.AddHttpClient<IRetrievalQueryRewriter, GeminiRetrievalQueryRewriter>(client =>

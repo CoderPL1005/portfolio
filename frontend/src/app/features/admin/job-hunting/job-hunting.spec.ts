@@ -18,7 +18,7 @@ describe('Job Hunting admin feature', () => {
   it('registers the lazy private routes under the guarded admin shell', () => {
     const admin = routes.find(x => x.path === 'admin')!;
     const feature = admin.children!.filter(x => x.path?.startsWith('job-hunting/'));
-    expect(feature.map(x => x.path)).toEqual(['job-hunting/jobs','job-hunting/jobs/new/screenshots','job-hunting/jobs/new','job-hunting/jobs/:id','job-hunting/applications','job-hunting/applications/:id']);
+    expect(feature.map(x => x.path)).toEqual(['job-hunting/jobs','job-hunting/jobs/new/screenshots','job-hunting/jobs/new','job-hunting/jobs/:id','job-hunting/preferences','job-hunting/applications','job-hunting/applications/:id']);
     expect(feature.every(x => !!x.loadComponent)).toBe(true);
     expect(admin.canActivateChild).toHaveLength(1);
   });
@@ -44,6 +44,12 @@ describe('Job Hunting admin feature', () => {
     const list=http.expectOne(r=>r.url.endsWith('/admin/job-postings')&&r.params.get('page')==='2'&&r.params.get('source')==='MANUAL'&&r.params.get('archived')==='false');expect(list.request.method).toBe('GET');list.flush({success:true,data:{items:[],page:2,pageSize:20,total:0,totalPages:0}});
     service.verification('job','VERIFIED',3).subscribe();const state=http.expectOne('https://api.example/api/v1/admin/job-postings/job/verification');expect(state.request.method).toBe('PUT');expect(state.request.body).toEqual({status:'VERIFIED',expectedVersion:3});state.flush({success:true,data:{}});
     service.archive('job',4).subscribe();const archive=http.expectOne('https://api.example/api/v1/admin/job-postings/job/archive');expect(archive.request.method).toBe('POST');expect(archive.request.body).toEqual({expectedVersion:4});archive.flush({success:true,data:{}});
+  });
+
+  it('uses private preference and explicit fit-analysis endpoints',()=>{
+    service.preferences().subscribe();const get=http.expectOne('https://api.example/api/v1/admin/job-hunting/preferences');expect(get.request.method).toBe('GET');get.flush({success:true,data:{version:0}});
+    const body={expectedVersion:0,targetRoles:['Backend Developer'],preferredTechnologies:[],acceptableLocations:[],workplaceTypes:[],employmentTypes:[],minimumSalary:null,salaryCurrency:null,salaryPeriod:null};service.updatePreferences(body).subscribe();const put=http.expectOne('https://api.example/api/v1/admin/job-hunting/preferences');expect(put.request.method).toBe('PUT');expect(put.request.body).toEqual(body);put.flush({success:true,data:{version:1}});
+    service.analyzeFit('job-1').subscribe();const fit=http.expectOne('https://api.example/api/v1/admin/job-postings/job-1/fit-analysis');expect(fit.request.method).toBe('GET');fit.flush({success:true,data:{jobPostingId:'job-1'}});
   });
 
   it('uses exact application transition and soft-remove endpoints', () => {

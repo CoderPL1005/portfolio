@@ -107,6 +107,7 @@ internal sealed class AuthTestDbContext(DbContextOptions<AuthTestDbContext> opti
     DbSet<JobApplicationEvent> IApplicationDbContext.JobApplicationEvents => throw new NotSupportedException();
     DbSet<JobApplicationDocument> IApplicationDbContext.JobApplicationDocuments => throw new NotSupportedException();
     DbSet<PushSubscription> IApplicationDbContext.PushSubscriptions => throw new NotSupportedException();
+    DbSet<CandidateJobPreferences> IApplicationDbContext.CandidateJobPreferences => throw new NotSupportedException();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -140,6 +141,8 @@ internal sealed class AuthTestDbContext(DbContextOptions<AuthTestDbContext> opti
         modelBuilder.Ignore<JobApplication>();
         modelBuilder.Ignore<JobApplicationEvent>();
         modelBuilder.Ignore<JobApplicationDocument>();
+        modelBuilder.Ignore<PushSubscription>();
+        modelBuilder.Ignore<CandidateJobPreferences>();
         modelBuilder.Entity<AdminUser>().HasKey(admin => admin.Id);
         modelBuilder.Entity<AdminRefreshToken>().HasKey(token => token.Id);
         modelBuilder.Entity<AdminRefreshToken>()

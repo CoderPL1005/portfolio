@@ -4,7 +4,7 @@ import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { take } from 'rxjs';
 import { safeAdminError } from '../shared/admin-api';
 import { DirtyAware } from '../shared/dirty.guard';
-import { JobCreate, JobDetail, JobSource, JobWrite } from './job-hunting.models';
+import { JobCreate, JobDetail, JobFitAnalysis, JobSource, JobWrite } from './job-hunting.models';
 import { JobHuntingService } from './job-hunting.service';
 
 @Component({
@@ -100,6 +100,16 @@ import { JobHuntingService } from './job-hunting.service';
         </form>
 
         @if (job(); as current) {
+          <section class="admin-panel detail-card fit-card" aria-labelledby="fit-title">
+            <div class="section-heading"><div><p class="section-kicker">DECISION SUPPORT</p><h2 id="fit-title">Candidate fit</h2></div><button type="button" class="admin-button primary" (click)="analyzeFit()" [disabled]="fitLoading()">{{ fitLoading() ? 'Analyzing...' : 'Analyze fit' }}</button></div>
+            <p class="fit-disclaimer">A deterministic comparison of published portfolio evidence and your private preferences—not a probability of being hired.</p>
+            @if (fitAnalysis(); as analysis) {
+              <div class="fit-summary"><div><span>Fit score</span><strong>{{ analysis.overallScore === null ? 'Unknown' : analysis.overallScore + ' / 100' }}</strong></div><div><span>Evidence coverage</span><strong>{{ analysis.coveragePercent }}%</strong></div></div>
+              <div class="fit-components">@for (component of analysis.components; track component.key) { <article><header><strong>{{ component.label }}</strong><span class="fit-status" [attr.data-status]="component.status">{{ statusLabel(component.status) }}</span></header><p>{{ component.score === null ? 'Not scored' : component.score + ' / 100' }} · weight {{ component.configuredWeight }}</p><p>{{ component.explanation }}</p>@if(component.evidence.length){<ul>@for(item of component.evidence;track item){<li>{{item}}</li>}</ul>}</article> }</div>
+              <div class="fit-lists">@if(analysis.matchedTechnologies.length){<p><strong>Matched:</strong> {{analysis.matchedTechnologies.join(', ')}}</p>}@if(analysis.developingTechnologies.length){<p><strong>Developing:</strong> {{analysis.developingTechnologies.join(', ')}}</p>}@if(analysis.missingTechnologies.length){<p><strong>Missing:</strong> {{analysis.missingTechnologies.join(', ')}}</p>}@if(analysis.unknownFactors.length){<p><strong>Unknown factors:</strong> {{analysis.unknownFactors.join(', ')}}</p>}</div>
+            } @else { <p class="empty-copy">Fit analysis runs only when you choose Analyze fit.</p> }
+          </section>
+
           <section class="admin-panel detail-card" aria-labelledby="state-title">
             <div class="section-heading"><div><p class="section-kicker">WORKFLOW</p><h2 id="state-title">State</h2></div><p>Stored values remain unchanged; labels are formatted for readability.</p></div>
             <div class="state-grid">
@@ -138,9 +148,10 @@ import { JobHuntingService } from './job-hunting.service';
     .form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem}.form-grid .wide{grid-column:1/-1}.salary-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1rem}.description-textarea{min-height:22rem;line-height:1.65}.medium-textarea{min-height:8rem;line-height:1.55}.technology-textarea{min-height:6rem}.raw-textarea{min-height:12rem}.technology-preview{margin:.1rem 0 0}.technology-preview li{color:var(--color-text);background:var(--color-surface-lowest)}
     .save-bar{position:sticky;bottom:1rem;z-index:5;display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:.8rem 1rem;border:1px solid var(--color-border);border-radius:var(--radius-lg);background:color-mix(in srgb,var(--color-surface-lowest) 92%,transparent);box-shadow:0 .8rem 2.5rem #0005;backdrop-filter:blur(12px)}.save-bar span{color:var(--color-text-muted);font-size:.8rem}.save-button{min-width:8.5rem;min-height:2.75rem}
     .state-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1rem}.state-grid label,.archive-state{display:grid;gap:.45rem;color:var(--color-text-muted);font-size:.82rem;font-weight:650}.archive-state strong{display:flex;align-items:center;min-height:3rem;padding:.85rem 1rem;border:1px solid var(--color-border);border-radius:var(--radius-md);color:var(--color-text);background:var(--color-surface-lowest)}.archive-button{width:max-content}
+    .fit-disclaimer{margin:0;color:var(--color-text-muted)}.fit-summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem}.fit-summary div{display:grid;gap:.25rem;padding:1rem;border:1px solid var(--color-border);border-radius:var(--radius-md)}.fit-summary span{color:var(--color-text-muted);font-size:.75rem}.fit-summary strong{font-size:1.5rem}.fit-components{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem}.fit-components article{padding:1rem;border:1px solid var(--color-border);border-radius:var(--radius-md);background:var(--color-surface-lowest)}.fit-components header{display:flex;justify-content:space-between;gap:1rem}.fit-components p,.fit-components li,.fit-lists{color:var(--color-text-muted);font-size:.82rem}.fit-status{font-weight:800}.fit-status[data-status="MATCH"]{color:var(--color-success)}.fit-status[data-status="PARTIAL"]{color:var(--color-warning)}.fit-status[data-status="MISMATCH"]{color:var(--color-error)}.fit-status[data-status="UNKNOWN"]{color:var(--color-text-dim)}.fit-lists{display:grid;gap:.35rem}.fit-lists p{margin:0}
     .source-list,.application-list{display:grid;gap:.75rem}.source-card{display:grid;grid-template-columns:1fr auto;gap:1rem;padding:1rem;border:1px solid var(--color-border);border-radius:var(--radius-lg);background:var(--color-surface-lowest)}.source-card>div{display:grid;gap:.25rem}.source-card span,.application-row small{color:var(--color-text-dim);font-size:.72rem}.raw-content{grid-column:1/-1}.raw-content pre{max-height:22rem;margin:.25rem 0 0;padding:1rem;overflow:auto;border-radius:var(--radius-md);white-space:pre-wrap;overflow-wrap:anywhere;color:var(--color-text-muted);background:var(--color-background);font:inherit;font-size:.82rem;line-height:1.55}.application-row{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:1rem;border:1px solid var(--color-border);border-radius:var(--radius-lg);color:var(--color-text);text-decoration:none;background:var(--color-surface-lowest)}.application-row:hover{border-color:var(--color-primary)}.application-row>span:first-child{display:grid;gap:.25rem}.empty-copy{margin:0;color:var(--color-text-muted)}.empty-copy p{margin:.2rem 0}
     @media(max-width:900px){.salary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.state-grid{grid-template-columns:1fr 1fr}.archive-state{grid-column:1/-1}}
-    @media(max-width:640px){.job-editor{padding-inline:1rem}.page-header{align-items:flex-start;flex-direction:column}.header-statuses{justify-content:flex-start}.form-grid,.salary-grid,.state-grid{grid-template-columns:1fr}.form-grid .wide,.archive-state{grid-column:auto}.section-heading{gap:.5rem}.save-bar{bottom:.5rem}.save-bar span{display:none}.save-button{width:100%}.source-card{grid-template-columns:1fr}.raw-content{grid-column:auto}.description-textarea{min-height:18rem}.admin-panel{padding:1rem}.application-row{min-height:3.25rem}}
+    @media(max-width:640px){.job-editor{padding-inline:1rem}.page-header{align-items:flex-start;flex-direction:column}.header-statuses{justify-content:flex-start}.form-grid,.salary-grid,.state-grid,.fit-summary,.fit-components{grid-template-columns:1fr}.form-grid .wide,.archive-state{grid-column:auto}.section-heading{gap:.5rem}.save-bar{bottom:.5rem}.save-bar span{display:none}.save-button{width:100%}.source-card{grid-template-columns:1fr}.raw-content{grid-column:auto}.description-textarea{min-height:18rem}.admin-panel{padding:1rem}.application-row{min-height:3.25rem}}
   `],
 })
 export class JobEditPageComponent implements DirtyAware {
@@ -153,6 +164,8 @@ export class JobEditPageComponent implements DirtyAware {
   readonly loading = signal(!this.isNew);
   readonly error = signal<string | null>(null);
   readonly saving = signal(false);
+  readonly fitLoading = signal(false);
+  readonly fitAnalysis = signal<JobFitAnalysis | null>(null);
   readonly sources: JobSource[] = ['MANUAL', 'TOPCV', 'VIETNAMWORKS', 'COMPANY_SITE', 'FACEBOOK', 'INSTAGRAM', 'OTHER'];
   readonly verifications = ['PENDING', 'VERIFIED', 'UNVERIFIED', 'LIKELY_EXPIRED'];
   readonly selections = ['PENDING_ANALYSIS', 'RECOMMENDED', 'APPROVED', 'SKIPPED'];
@@ -200,6 +213,7 @@ export class JobEditPageComponent implements DirtyAware {
   select(status: string): void { if (status === this.job()!.selectionStatus) return; this.api.selection(this.id!, status, this.job()!.version).pipe(take(1)).subscribe({ next: value => this.replace(value), error: value => this.failed(value) }); }
   archive(): void { if (confirm('Archive this job?')) this.api.archive(this.id!, this.job()!.version).pipe(take(1)).subscribe({ next: value => this.replace(value), error: value => this.failed(value) }); }
   createApplication(): void { this.api.createApplication({ jobPostingId: this.id, channel: 'MANUAL' }).pipe(take(1)).subscribe({ next: value => void this.router.navigate(['/admin/job-hunting/applications', value.id]), error: value => this.error.set(safeAdminError(value)) }); }
+  analyzeFit(): void { if(this.fitLoading()||!this.id)return;this.fitLoading.set(true);this.error.set(null);this.api.analyzeFit(this.id).pipe(take(1)).subscribe({next:value=>{this.fitAnalysis.set(value);this.fitLoading.set(false)},error:value=>{this.error.set(safeAdminError(value));this.fitLoading.set(false)}}); }
 
   private jobWrite(): JobWrite {
     const value = this.form.getRawValue();

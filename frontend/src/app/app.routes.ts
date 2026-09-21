@@ -44,6 +44,7 @@ export const routes: Routes = [
       { path: 'job-hunting/jobs/new/screenshots', canDeactivate:[unsavedChangesGuard], loadComponent:()=>import('./features/admin/job-hunting/screenshot-inbox-page.component').then(m=>m.ScreenshotInboxPageComponent) },
       { path: 'job-hunting/jobs/new', canDeactivate:[unsavedChangesGuard], loadComponent:()=>import('./features/admin/job-hunting/job-edit-page.component').then(m=>m.JobEditPageComponent) },
       { path: 'job-hunting/jobs/:id', canDeactivate:[unsavedChangesGuard], loadComponent:()=>import('./features/admin/job-hunting/job-edit-page.component').then(m=>m.JobEditPageComponent) },
+      { path: 'job-hunting/preferences', canDeactivate:[unsavedChangesGuard], loadComponent:()=>import('./features/admin/job-hunting/job-preferences-page.component').then(m=>m.JobPreferencesPageComponent) },
       { path: 'job-hunting/applications', loadComponent:()=>import('./features/admin/job-hunting/application-list-page.component').then(m=>m.ApplicationListPageComponent) },
       { path: 'job-hunting/applications/:id', canDeactivate:[unsavedChangesGuard], loadComponent:()=>import('./features/admin/job-hunting/application-detail-page.component').then(m=>m.ApplicationDetailPageComponent) },
     ],

@@ -50,7 +50,7 @@ export class AdminSidebarComponent {
       { label: 'Conversations', path: '/admin/agent/conversations' },
     ] },
     { label: 'Job Hunting', links: [
-      { label: 'Jobs', path: '/admin/job-hunting/jobs' }, { label: 'Applications', path: '/admin/job-hunting/applications' },
+      { label: 'Jobs', path: '/admin/job-hunting/jobs' }, { label: 'Preferences', path: '/admin/job-hunting/preferences' }, { label: 'Applications', path: '/admin/job-hunting/applications' },
     ] },
   ];
 }

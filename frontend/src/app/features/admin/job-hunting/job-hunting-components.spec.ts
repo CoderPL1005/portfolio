@@ -7,7 +7,7 @@ import { ApplicationDetailPageComponent } from './application-detail-page.compon
 import { ApplicationListPageComponent } from './application-list-page.component';
 import { JobEditPageComponent } from './job-edit-page.component';
 import { JobListPageComponent } from './job-list-page.component';
-import { ApplicationDetail, ApplicationItem, JobDetail, JobSummary } from './job-hunting.models';
+import { ApplicationDetail, ApplicationItem, JobDetail, JobFitAnalysis, JobSummary } from './job-hunting.models';
 import { JobHuntingService } from './job-hunting.service';
 
 const paged=<T>(items:T[],page=1,totalPages=1)=>({items,page,pageSize:20,total:items.length,totalPages});
@@ -66,6 +66,13 @@ describe('Job editor workflows',()=>{
     expect(text).toContain('Backend Java');expect(text).toContain('GAP GLOBAL');expect(text).toContain('Pending analysis');expect(text).not.toContain('PENDING_ANALYSIS');
     expect([...fixture.nativeElement.querySelectorAll('.technology-preview li')].map((x:Element)=>x.textContent?.trim())).toEqual(['Java','Spring Boot','RESTful API']);
     expect(fixture.componentInstance.form.controls.salaryMinimum.value).toBe(25000000);expect(fixture.componentInstance.form.controls.description.value).toBe('Build reliable APIs');
+  });
+  it('runs fit analysis only after explicit action and renders score, coverage, statuses, and evidence',()=>{
+    const fit:JobFitAnalysis={jobPostingId:'job-1',jobVersion:1,preferenceVersion:1,overallScore:82,availableWeight:75,totalConfiguredWeight:100,coveragePercent:75,jobVerificationStatus:'PENDING',components:[{key:'SALARY',label:'Salary',score:null,configuredWeight:5,status:'UNKNOWN',explanation:'Salary is not comparable.',evidence:[]},{key:'TECHNICAL_CAPABILITY',label:'Technical capability',score:50,configuredWeight:30,status:'PARTIAL',explanation:'One match.',evidence:['Angular']}],matchedTechnologies:['Angular'],developingTechnologies:['Docker'],missingTechnologies:['PostgreSQL'],unknownFactors:['Salary']};
+    const api={job:()=>of(jobDetail()),analyzeFit:vi.fn(()=>of(fit))};const fixture=mount(JobEditPageComponent,api,'job-1');
+    expect(api.analyzeFit).not.toHaveBeenCalled();expect(fixture.nativeElement.textContent).toContain('runs only when you choose');
+    fixture.componentInstance.analyzeFit();fixture.detectChanges();expect(api.analyzeFit).toHaveBeenCalledTimes(1);const text=fixture.nativeElement.textContent as string;
+    expect(text).toContain('82 / 100');expect(text).toContain('75%');expect(text).toContain('Unknown');expect(text).toContain('Partial');expect(text).toContain('Angular');expect(text).toContain('Docker');expect(text).toContain('PostgreSQL');expect(fixture.componentInstance.job()?.selectionStatus).toBe('PENDING_ANALYSIS');
   });
   it('requires raw content in create mode and sends the exact manual-ingestion payload',()=>{
     const created=jobDetail();const api={createJob:vi.fn(()=>of(created))};const fixture=mount(JobEditPageComponent,api);const c=fixture.componentInstance;const router=TestBed.inject(Router);vi.spyOn(router,'navigate').mockResolvedValue(true);

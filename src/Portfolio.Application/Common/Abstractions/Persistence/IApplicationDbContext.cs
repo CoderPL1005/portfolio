@@ -38,6 +38,7 @@ public interface IApplicationDbContext
     DbSet<JobApplicationEvent> JobApplicationEvents { get; }
     DbSet<JobApplicationDocument> JobApplicationDocuments { get; }
     DbSet<PushSubscription> PushSubscriptions { get; }
+    DbSet<CandidateJobPreferences> CandidateJobPreferences { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }
