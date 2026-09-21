@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using Portfolio.Application.Common.Abstractions.AI;
+using Portfolio.Application.Common.Exceptions;
 using Portfolio.Infrastructure.AI;
 
 namespace Portfolio.UnitTests.PortfolioContent;
@@ -225,6 +226,89 @@ public sealed class GeminiServicesTests
         Assert.DoesNotContain("provider detail", error.ToString());
     }
 
+    [Fact]
+    public async Task Job_analysis_sends_all_images_in_order_with_strict_structured_output()
+    {
+        string? capturedBody = null;
+        var service = new GeminiJobAnalysisService(
+            new HttpClient(new StubHandler(async request =>
+            {
+                capturedBody = await request.Content!.ReadAsStringAsync();
+                return Success(RewriteResponse(ValidJobExtraction()));
+            })),
+            Options.Create(Settings()));
+
+        var result = await service.AnalyzeAsync(new JobAnalysisRequest([
+            new(2, "image/png", [2, 2], "hash-2"),
+            new(1, "image/jpeg", [1], "hash-1"),
+        ]));
+
+        Assert.Equal(JobAnalysisAssessments.SingleJobPosting, result.Assessment);
+        Assert.Equal("Acme", result.CompanyName);
+        using var body = JsonDocument.Parse(capturedBody!);
+        var root = body.RootElement;
+        var parts = root.GetProperty("contents")[0].GetProperty("parts");
+        Assert.Equal("Screenshot 1 of 2", parts[1].GetProperty("text").GetString());
+        Assert.Equal("image/jpeg", parts[2].GetProperty("inlineData").GetProperty("mimeType").GetString());
+        Assert.Equal(Convert.ToBase64String([1]), parts[2].GetProperty("inlineData").GetProperty("data").GetString());
+        Assert.Equal("Screenshot 2 of 2", parts[3].GetProperty("text").GetString());
+        Assert.Equal("image/png", parts[4].GetProperty("inlineData").GetProperty("mimeType").GetString());
+        Assert.Equal(Convert.ToBase64String([2, 2]), parts[4].GetProperty("inlineData").GetProperty("data").GetString());
+        var config = root.GetProperty("generationConfig");
+        Assert.Equal("application/json", config.GetProperty("responseMimeType").GetString());
+        var schema = config.GetProperty("responseJsonSchema");
+        Assert.False(schema.GetProperty("additionalProperties").GetBoolean());
+        Assert.Equal(17, schema.GetProperty("required").GetArrayLength());
+        Assert.DoesNotContain("score", schema.GetProperty("properties").EnumerateObject().Select(property => property.Name));
+    }
+
+    [Fact]
+    public async Task Job_analysis_rejects_oversized_serialized_inline_request_before_http()
+    {
+        var sent = false;
+        var service = new GeminiJobAnalysisService(
+            new HttpClient(new StubHandler(_ => { sent = true; return Success("{}"); })),
+            Options.Create(Settings()));
+
+        await Assert.ThrowsAsync<JobAnalysisRequestTooLargeException>(() => service.AnalyzeAsync(
+            new JobAnalysisRequest([new(1, "image/jpeg", new byte[15 * 1024 * 1024], "hash")])));
+
+        Assert.False(sent);
+    }
+
+    [Theory]
+    [InlineData("not json")]
+    [InlineData("{}")]
+    [InlineData("{\"assessment\":\"SINGLE_JOB_POSTING\"}")]
+    public async Task Job_analysis_rejects_malformed_or_incomplete_structured_output(string output)
+    {
+        var service = new GeminiJobAnalysisService(
+            new HttpClient(new StubHandler(_ => Success(RewriteResponse(output)))),
+            Options.Create(Settings()));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.AnalyzeAsync(
+            new JobAnalysisRequest([new(1, "image/png", [1], "hash")])));
+    }
+
+    [Fact]
+    public async Task Job_analysis_provider_failure_does_not_expose_key_body_or_image()
+    {
+        const string key = "private-test-key";
+        var service = new GeminiJobAnalysisService(
+            new HttpClient(new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.BadGateway)
+            {
+                Content = new StringContent("private provider response AQID")
+            })),
+            Options.Create(Settings(apiKey: key)));
+
+        var error = await Assert.ThrowsAsync<HttpRequestException>(() => service.AnalyzeAsync(
+            new JobAnalysisRequest([new(1, "image/png", [1, 2, 3], "hash")])));
+
+        Assert.DoesNotContain(key, error.ToString());
+        Assert.DoesNotContain("private provider response", error.ToString());
+        Assert.DoesNotContain("AQID", error.ToString());
+    }
+
     private static GeminiSettings Settings(
         string apiKey = "test-only-key",
         string chatModel = "gemini-3.1-flash-lite",
@@ -233,9 +317,32 @@ public sealed class GeminiServicesTests
         {
             ApiKey = apiKey,
             ChatModel = chatModel,
+            JobExtractionModel = chatModel,
             EmbeddingModel = embeddingModel,
             EmbeddingDimensions = embeddingDimensions
         };
+
+    private static string ValidJobExtraction() => """
+        {
+          "assessment":"SINGLE_JOB_POSTING",
+          "companyName":"Acme",
+          "positionTitle":"Developer",
+          "location":"Hanoi",
+          "employmentType":null,
+          "workplaceType":null,
+          "salaryMinimum":null,
+          "salaryMaximum":null,
+          "salaryCurrency":null,
+          "salaryPeriod":null,
+          "experienceRequirements":null,
+          "description":"Build software",
+          "technologyStack":[".NET"],
+          "applicationEmail":null,
+          "applicationUrl":null,
+          "expiresAt":null,
+          "conflictingFields":[]
+        }
+        """;
 
     private static ChatCompletionRequest ChatRequest() => new(
         "Stay within portfolio facts.",

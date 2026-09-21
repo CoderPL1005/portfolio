@@ -19,6 +19,7 @@ public sealed class RawJobPosting
     public Guid? DuplicateOfRawJobPostingId { get; set; }
     public JsonDocument Metadata { get; set; } = null!;
     public DateTimeOffset DiscoveredAt { get; set; }
+    public int Version { get; set; } = 1;
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
     public JobPosting? JobPosting { get; set; }

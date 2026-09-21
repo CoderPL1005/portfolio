@@ -15,6 +15,7 @@ public sealed class RawJobPostingConfiguration : IEntityTypeConfiguration<RawJob
             table.HasCheckConstraint("ck_raw_job_postings_ingestion_status", "ingestion_status IN ('RECEIVED', 'NORMALIZED', 'DUPLICATE', 'REJECTED')");
             table.HasCheckConstraint("ck_raw_job_postings_source_url_hash", "source_url_hash IS NULL OR source_url_hash ~ '^[0-9a-f]{64}$'");
             table.HasCheckConstraint("ck_raw_job_postings_content_hash", "content_hash ~ '^[0-9a-f]{64}$'");
+            table.HasCheckConstraint("ck_raw_job_postings_version", "version >= 1");
         });
 
         builder.HasKey(entity => entity.Id).HasName("raw_job_postings_pkey");
@@ -32,6 +33,7 @@ public sealed class RawJobPostingConfiguration : IEntityTypeConfiguration<RawJob
         builder.Property(entity => entity.DuplicateOfRawJobPostingId).HasColumnName("duplicate_of_raw_job_posting_id").HasColumnType("uuid");
         builder.Property(entity => entity.Metadata).HasColumnName("metadata").HasColumnType("jsonb").HasDefaultValueSql("'{}'::jsonb");
         builder.Property(entity => entity.DiscoveredAt).HasColumnName("discovered_at").HasColumnType("timestamp with time zone");
+        builder.Property(entity => entity.Version).HasColumnName("version").HasDefaultValue(1).IsConcurrencyToken();
         builder.Property(entity => entity.CreatedAt).HasColumnName("created_at").HasColumnType("timestamp with time zone").HasDefaultValueSql("NOW()");
         builder.Property(entity => entity.UpdatedAt).HasColumnName("updated_at").HasColumnType("timestamp with time zone").HasDefaultValueSql("NOW()");
 

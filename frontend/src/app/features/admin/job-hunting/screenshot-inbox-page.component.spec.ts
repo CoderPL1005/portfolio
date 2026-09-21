@@ -1,5 +1,5 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
+import { Router, provideRouter } from '@angular/router';
 import { of, Subject, throwError } from 'rxjs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JobHuntingService } from './job-hunting.service';
@@ -7,13 +7,13 @@ import { ScreenshotInboxPageComponent } from './screenshot-inbox-page.component'
 
 describe('ScreenshotInboxPageComponent',()=>{
   let fixture:ComponentFixture<ScreenshotInboxPageComponent>;
-  let api:{submitScreenshots:ReturnType<typeof vi.fn>};
+  let api:{submitScreenshots:ReturnType<typeof vi.fn>;rawJobPostings:ReturnType<typeof vi.fn>;analyzeRawJobPosting:ReturnType<typeof vi.fn>};
   let createUrl:ReturnType<typeof vi.fn>;
   let revokeUrl:ReturnType<typeof vi.fn>;
   beforeEach(()=>{
     let sequence=0;createUrl=vi.fn(()=>`blob:preview-${++sequence}`);revokeUrl=vi.fn();
     Object.defineProperty(URL,'createObjectURL',{value:createUrl,configurable:true});Object.defineProperty(URL,'revokeObjectURL',{value:revokeUrl,configurable:true});
-    api={submitScreenshots:vi.fn()};
+    api={submitScreenshots:vi.fn(),rawJobPostings:vi.fn(()=>of({items:[],page:1,pageSize:100,total:0,totalPages:0})),analyzeRawJobPosting:vi.fn()};
     TestBed.configureTestingModule({imports:[ScreenshotInboxPageComponent],providers:[provideRouter([]),{provide:JobHuntingService,useValue:api}]});
     fixture=TestBed.createComponent(ScreenshotInboxPageComponent);fixture.detectChanges();
   });
@@ -44,6 +44,19 @@ describe('ScreenshotInboxPageComponent',()=>{
   it('disables duplicate submission while one multipart request is pending',()=>{
     const pending=new Subject<never>();api.submitScreenshots.mockReturnValue(pending);select([file('one.png','image/png',1)]);fixture.componentInstance.submit();fixture.detectChanges();
     expect(fixture.componentInstance.submitting()).toBe(true);expect((fixture.nativeElement.querySelector('.submit') as HTMLButtonElement).disabled).toBe(true);fixture.componentInstance.submit();expect(api.submitScreenshots).toHaveBeenCalledTimes(1);
+  });
+
+  it('loads received submissions without private fields and analyzes only on explicit action',()=>{
+    api.rawJobPostings.mockReturnValue(of({items:[{id:'raw-1',source:'MANUAL',ingestionStatus:'RECEIVED',discoveredAt:'2026-09-18T00:00:00Z',createdAt:'2026-09-18T00:00:00Z',attachmentCount:3,version:1}],page:1,pageSize:100,total:1,totalPages:1}));
+    fixture.destroy();fixture=TestBed.createComponent(ScreenshotInboxPageComponent);fixture.detectChanges();
+    expect(api.rawJobPostings).toHaveBeenLastCalledWith({page:1,pageSize:100,ingestionStatus:'RECEIVED'});expect(api.analyzeRawJobPosting).not.toHaveBeenCalled();expect(fixture.nativeElement.textContent).toContain('3 screenshots');
+  });
+
+  it('disables duplicate analyze clicks, navigates on success, and keeps a failed submission retryable',async()=>{
+    const pending=new Subject<{id:string}>();api.analyzeRawJobPosting.mockReturnValue(pending);const router=TestBed.inject(Router);const navigate=vi.spyOn(router,'navigate').mockResolvedValue(true);
+    fixture.componentInstance.analyze('raw-1');fixture.componentInstance.analyze('raw-1');expect(api.analyzeRawJobPosting).toHaveBeenCalledTimes(1);expect(fixture.componentInstance.analyzingId()).toBe('raw-1');
+    pending.next({id:'job-1'});pending.complete();expect(navigate).toHaveBeenCalledWith(['/admin/job-hunting/jobs','job-1']);expect(fixture.componentInstance.analyzingId()).toBeNull();
+    api.analyzeRawJobPosting.mockReturnValue(throwError(()=>({status:503})));fixture.componentInstance.analyze('raw-2');expect(fixture.componentInstance.error()).toContain('retry');expect(fixture.componentInstance.analyzingId()).toBeNull();
   });
 
   function select(files:File[]):void{fixture.componentInstance.selectFiles({target:{files,value:'selected'}} as unknown as Event);fixture.detectChanges()}

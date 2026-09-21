@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Portfolio.Api.Contracts.Common;
 using Portfolio.Application.Common.Abstractions.Messaging;
 using Portfolio.Application.Features.JobHunting;
+using Portfolio.Application.Common.Models;
 
 namespace Portfolio.Api.Controllers;
 
@@ -10,6 +11,20 @@ namespace Portfolio.Api.Controllers;
 public sealed class AdminRawJobPostingsController(IRequestDispatcher dispatcher) : ControllerBase
 {
     private const long RequestLimit = 52L * 1024 * 1024;
+
+    [HttpGet]
+    public async Task<ActionResult<ApiResponse<PagedResult<RawJobPostingListItem>>>> List(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        [FromQuery] string? ingestionStatus = null,
+        CancellationToken cancellationToken = default) =>
+        Ok(ApiResponse<PagedResult<RawJobPostingListItem>>.Ok(
+            await dispatcher.DispatchAsync(new GetRawJobPostingsQuery(page, pageSize, ingestionStatus), cancellationToken)));
+
+    [HttpPost("{id:guid}/analyze")]
+    public async Task<ActionResult<ApiResponse<JobPostingResult>>> Analyze(Guid id, CancellationToken cancellationToken) =>
+        Ok(ApiResponse<JobPostingResult>.Ok(
+            await dispatcher.DispatchAsync(new AnalyzeRawJobPostingCommand(id), cancellationToken)));
 
     [HttpPost("screenshots")]
     [RequestSizeLimit(RequestLimit)]

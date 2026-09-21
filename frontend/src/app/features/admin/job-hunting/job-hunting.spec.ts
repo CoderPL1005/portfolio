@@ -33,6 +33,12 @@ describe('Job Hunting admin feature', () => {
     request.flush({success:true,data:{rawJobPostingId:'raw-1',ingestionStatus:'RECEIVED',attachmentCount:2,created:true}});
   });
 
+  it('lists received raw submissions and analyzes one without a client payload',()=>{
+    service.rawJobPostings({page:1,pageSize:100,ingestionStatus:'RECEIVED'}).subscribe();
+    const list=http.expectOne(r=>r.url.endsWith('/admin/raw-job-postings')&&r.params.get('ingestionStatus')==='RECEIVED');expect(list.request.method).toBe('GET');list.flush({success:true,data:{items:[],page:1,pageSize:100,total:0,totalPages:0}});
+    service.analyzeRawJobPosting('raw-1').subscribe();const analyze=http.expectOne('https://api.example/api/v1/admin/raw-job-postings/raw-1/analyze');expect(analyze.request.method).toBe('POST');expect(analyze.request.body).toBeNull();analyze.flush({success:true,data:{id:'job-1'}});
+  });
+
   it('uses server filters and exact posting mutation bodies', () => {
     service.jobs({page:2,pageSize:20,source:'MANUAL',archived:false}).subscribe();
     const list=http.expectOne(r=>r.url.endsWith('/admin/job-postings')&&r.params.get('page')==='2'&&r.params.get('source')==='MANUAL'&&r.params.get('archived')==='false');expect(list.request.method).toBe('GET');list.flush({success:true,data:{items:[],page:2,pageSize:20,total:0,totalPages:0}});

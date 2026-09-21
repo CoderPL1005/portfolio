@@ -60,7 +60,7 @@ public sealed class ApplicationDbContextModelTests
         var model = context.GetService<IDesignTimeModel>().Model;
 
         Assert.Equal(26, model.GetEntityTypes().SelectMany(entity => entity.GetForeignKeys()).Count());
-        Assert.Equal(64, model.GetEntityTypes().SelectMany(entity => entity.GetCheckConstraints()).Count());
+        Assert.Equal(65, model.GetEntityTypes().SelectMany(entity => entity.GetCheckConstraints()).Count());
         Assert.Equal(43, model.GetEntityTypes().SelectMany(entity => entity.GetIndexes()).Count());
 
         var experienceTechnology = model.FindEntityType(typeof(ExperienceTechnology))!;
@@ -111,7 +111,7 @@ public sealed class ApplicationDbContextModelTests
         using var context = CreateContext();
         var migrations = context.Database.GetMigrations().ToArray();
 
-        Assert.Equal(10, migrations.Length);
+        Assert.Equal(11, migrations.Length);
         Assert.EndsWith("_InitialPortfolioSchema", migrations[0], StringComparison.Ordinal);
         Assert.EndsWith("_RemoveContactMessages", migrations[1], StringComparison.Ordinal);
         Assert.EndsWith("_AllowDuplicateSocialLinkPlatforms", migrations[2], StringComparison.Ordinal);
@@ -122,6 +122,7 @@ public sealed class ApplicationDbContextModelTests
         Assert.EndsWith("_AddTelegramRawJobPostingAttachments", migrations[7], StringComparison.Ordinal);
         Assert.EndsWith("_AddWebPushSubscriptions", migrations[8], StringComparison.Ordinal);
         Assert.EndsWith("_GeneralizeRawJobPostingAttachmentsForPwa", migrations[9], StringComparison.Ordinal);
+        Assert.EndsWith("_AddRawJobPostingAnalysisConcurrency", migrations[10], StringComparison.Ordinal);
     }
 
     [Fact]

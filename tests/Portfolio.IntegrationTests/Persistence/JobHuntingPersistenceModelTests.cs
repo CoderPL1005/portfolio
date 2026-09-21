@@ -35,6 +35,7 @@ public sealed class JobHuntingPersistenceModelTests
         Assert.Equal("jsonb", Property<JobApplicationEvent>(model, nameof(JobApplicationEvent.Metadata)).GetColumnType());
         Assert.Equal("jsonb", Property<JobApplicationDocument>(model, nameof(JobApplicationDocument.Metadata)).GetColumnType());
         Assert.True(Property<JobPosting>(model, nameof(JobPosting.Version)).IsConcurrencyToken);
+        Assert.True(Property<RawJobPosting>(model, nameof(RawJobPosting.Version)).IsConcurrencyToken);
         Assert.True(Property<JobApplication>(model, nameof(JobApplication.Version)).IsConcurrencyToken);
     }
 
@@ -48,6 +49,7 @@ public sealed class JobHuntingPersistenceModelTests
         AssertConstraint<RawJobPosting>(model, "ck_raw_job_postings_ingestion_status", "NORMALIZED", "DUPLICATE");
         AssertConstraint<RawJobPosting>(model, "ck_raw_job_postings_content_hash", "^[0-9a-f]{64}$");
         AssertConstraint<RawJobPosting>(model, "ck_raw_job_postings_source_url_hash", "^[0-9a-f]{64}$");
+        AssertConstraint<RawJobPosting>(model, "ck_raw_job_postings_version", "version >= 1");
         AssertConstraint<JobPosting>(model, "ck_job_postings_verification_status", "LIKELY_EXPIRED");
         AssertConstraint<JobPosting>(model, "ck_job_postings_selection_status", "PENDING_ANALYSIS");
         AssertConstraint<JobPosting>(model, "ck_job_postings_salary_range", "salary_maximum >= salary_minimum");

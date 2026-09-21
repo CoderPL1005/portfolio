@@ -1,9 +1,9 @@
 import { Component, OnDestroy, inject, signal } from '@angular/core';
-import { RouterLink } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import { finalize, take } from 'rxjs';
-import { safeAdminError } from '../shared/admin-api';
+import { backendFieldError, safeAdminError } from '../shared/admin-api';
 import { DirtyAware } from '../shared/dirty.guard';
-import { ScreenshotSubmissionResult } from './job-hunting.models';
+import { RawJobPostingSummary, ScreenshotSubmissionResult } from './job-hunting.models';
 import { JobHuntingService } from './job-hunting.service';
 
 interface ScreenshotPreview {
@@ -26,7 +26,12 @@ interface ScreenshotPreview {
       @if (validationError()) { <p class="admin-error" role="alert">{{ validationError() }}</p> }
       @if (error()) { <p class="admin-error" role="alert">{{ error() }}</p> }
       @if (success(); as result) {
-        <div class="state-panel success" role="status">{{ result.attachmentCount }} screenshot{{ result.attachmentCount === 1 ? '' : 's' }} received. This job is awaiting processing.</div>
+        <div class="state-panel success" role="status">
+          <span>{{ result.attachmentCount }} screenshot{{ result.attachmentCount === 1 ? '' : 's' }} received. This job is awaiting processing.</span>
+          <button type="button" class="admin-button primary" (click)="analyze(result.rawJobPostingId)" [disabled]="analyzingId() !== null">
+            {{ analyzingId() === result.rawJobPostingId ? 'Analyzing...' : 'Analyze' }}
+          </button>
+        </div>
       }
       @if (previews().length) {
         <section aria-label="Selected screenshots">
@@ -45,10 +50,27 @@ interface ScreenshotPreview {
           </button>
         </section>
       }
+      <section class="awaiting" aria-labelledby="awaiting-title">
+        <h2 id="awaiting-title">Awaiting processing</h2>
+        @if (loadingAwaiting()) { <p>Loading submissions...</p> }
+        @else if (!awaiting().length) { <p>No screenshot submissions are awaiting processing.</p> }
+        @else {
+          <div class="awaiting-list">
+            @for (item of awaiting(); track item.id) {
+              <article>
+                <div><strong>{{ item.attachmentCount }} screenshot{{ item.attachmentCount === 1 ? '' : 's' }}</strong><span>{{ item.createdAt }}</span></div>
+                <button type="button" class="admin-button primary" (click)="analyze(item.id)" [disabled]="analyzingId() !== null">
+                  {{ analyzingId() === item.id ? 'Analyzing...' : 'Analyze' }}
+                </button>
+              </article>
+            }
+          </div>
+        }
+      </section>
     </div>
   `,
   styles: [`
-    .screenshot-inbox{max-width:64rem}.picker{display:grid;gap:.4rem;padding:1rem;margin:1rem 0;border:1px dashed var(--border-color,#64748b);border-radius:.75rem}.picker input{font:inherit}.preview-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(13rem,1fr));gap:1rem}.preview-grid article{position:relative;padding:.75rem;border:1px solid var(--border-color,#334155);border-radius:.75rem}.preview-grid img{display:block;width:100%;height:14rem;object-fit:contain;background:#0f172a;border-radius:.5rem}.preview-grid article>div{display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin-top:.6rem}.preview-grid article>div span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.order{position:absolute;z-index:1;top:1rem;left:1rem;min-width:2rem;padding:.25rem;border-radius:999px;background:#0f172a;color:#fff;text-align:center}.submit{margin-top:1rem;width:100%;min-height:3rem}.success{border-color:#22c55e}@media(max-width:40rem){.preview-grid{grid-template-columns:1fr}.preview-grid img{height:18rem}}
+    .screenshot-inbox{max-width:64rem}.picker{display:grid;gap:.4rem;padding:1rem;margin:1rem 0;border:1px dashed var(--border-color,#64748b);border-radius:.75rem}.picker input{font:inherit}.preview-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(13rem,1fr));gap:1rem}.preview-grid article{position:relative;padding:.75rem;border:1px solid var(--border-color,#334155);border-radius:.75rem}.preview-grid img{display:block;width:100%;height:14rem;object-fit:contain;background:#0f172a;border-radius:.5rem}.preview-grid article>div,.success,.awaiting-list article{display:flex;align-items:center;justify-content:space-between;gap:.75rem}.preview-grid article>div{margin-top:.6rem}.preview-grid article>div span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.order{position:absolute;z-index:1;top:1rem;left:1rem;min-width:2rem;padding:.25rem;border-radius:999px;background:#0f172a;color:#fff;text-align:center}.submit{margin-top:1rem;width:100%;min-height:3rem}.success{border-color:#22c55e}.awaiting{margin-top:2rem}.awaiting-list{display:grid;gap:.75rem}.awaiting-list article{padding:1rem;border:1px solid var(--border-color,#334155);border-radius:.75rem}.awaiting-list article div{display:grid;gap:.25rem}.awaiting-list article span{font-size:.85rem;color:var(--muted-color,#94a3b8)}@media(max-width:40rem){.preview-grid{grid-template-columns:1fr}.preview-grid img{height:18rem}.success,.awaiting-list article{align-items:stretch;flex-direction:column}}
   `],
 })
 export class ScreenshotInboxPageComponent implements DirtyAware, OnDestroy {
@@ -56,12 +78,18 @@ export class ScreenshotInboxPageComponent implements DirtyAware, OnDestroy {
   private static readonly maxFileBytes = 10 * 1024 * 1024;
   private static readonly maxTotalBytes = 50 * 1024 * 1024;
   private readonly api = inject(JobHuntingService);
+  private readonly router = inject(Router);
   readonly previews = signal<ScreenshotPreview[]>([]);
   readonly validationError = signal<string | null>(null);
   readonly error = signal<string | null>(null);
   readonly success = signal<ScreenshotSubmissionResult | null>(null);
   readonly submitting = signal(false);
+  readonly awaiting = signal<RawJobPostingSummary[]>([]);
+  readonly loadingAwaiting = signal(true);
+  readonly analyzingId = signal<string | null>(null);
   private submissionId = crypto.randomUUID();
+
+  constructor() { this.loadAwaiting(); }
 
   hasUnsavedChanges(): boolean { return this.previews().length > 0; }
 
@@ -101,8 +129,22 @@ export class ScreenshotInboxPageComponent implements DirtyAware, OnDestroy {
         this.clearPreviews();
         this.success.set(result);
         this.submissionId = crypto.randomUUID();
+        this.loadAwaiting();
       },
       error: value => this.error.set(safeAdminError(value)),
+    });
+  }
+
+  analyze(rawJobPostingId: string): void {
+    if (this.analyzingId()) return;
+    this.analyzingId.set(rawJobPostingId);
+    this.error.set(null);
+    this.api.analyzeRawJobPosting(rawJobPostingId).pipe(
+      take(1),
+      finalize(() => this.analyzingId.set(null)),
+    ).subscribe({
+      next: job => void this.router.navigate(['/admin/job-hunting/jobs', job.id]),
+      error: value => this.error.set(backendFieldError(value, 'screenshots') ?? safeAdminError(value, 'The screenshots could not be analyzed. You can retry this submission.')),
     });
   }
 
@@ -125,5 +167,16 @@ export class ScreenshotInboxPageComponent implements DirtyAware, OnDestroy {
   private clearPreviews(): void {
     for (const preview of this.previews()) URL.revokeObjectURL(preview.url);
     this.previews.set([]);
+  }
+
+  private loadAwaiting(): void {
+    this.loadingAwaiting.set(true);
+    this.api.rawJobPostings({ page: 1, pageSize: 100, ingestionStatus: 'RECEIVED' }).pipe(
+      take(1),
+      finalize(() => this.loadingAwaiting.set(false)),
+    ).subscribe({
+      next: result => this.awaiting.set(result.items),
+      error: value => this.error.set(safeAdminError(value, 'Awaiting submissions could not be loaded.')),
+    });
   }
 }

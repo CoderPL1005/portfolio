@@ -323,8 +323,9 @@ public sealed class ProcessTelegramWebhookCommandHandler(
                     raw.SourceUrlHash = sourceUrl is null ? null : JobHashing.Sha256(JobHashing.NormalizeUrl(sourceUrl));
                 }
                 raw.ContentHash = TelegramImageRules.AlbumHash(orderedHashes);
-                raw.Metadata = TelegramImageRules.Metadata(request, albumId, currentAttachments.Count + 1, now);
+                raw.Metadata = TelegramImageRules.Metadata(request, albumId, currentAttachments.Count + 1, now, raw.Metadata);
                 raw.UpdatedAt = now;
+                raw.Version++;
             }
             db.RawJobPostingAttachments.Add(attachment);
 
@@ -333,7 +334,8 @@ public sealed class ProcessTelegramWebhookCommandHandler(
                 await db.SaveChangesAsync(cancellationToken);
             }
             catch (DbUpdateException exception) when (
-                conflictDetector.IsIngestionKeyConflict(exception)
+                exception is DbUpdateConcurrencyException
+                || conflictDetector.IsIngestionKeyConflict(exception)
                 || conflictDetector.IsAttachmentDeliveryConflict(exception))
             {
                 lastConflict = exception;
@@ -386,18 +388,33 @@ public sealed class ProcessTelegramWebhookCommandHandler(
         string mediaGroupId,
         CancellationToken cancellationToken)
     {
-        var raw = await db.RawJobPostings.SingleAsync(item => item.Id == rawJobPostingId, cancellationToken);
-        var hashes = await db.RawJobPostingAttachments.AsNoTracking()
-            .Where(item => item.RawJobPostingId == rawJobPostingId)
-            .OrderBy(item => item.SortOrder)
-            .ThenBy(item => item.Id)
-            .Select(item => item.ContentHash)
-            .ToListAsync(cancellationToken);
-        var now = clock.GetUtcNow();
-        raw.ContentHash = TelegramImageRules.AlbumHash(hashes);
-        raw.Metadata = TelegramImageRules.Metadata(request, mediaGroupId, hashes.Count, now);
-        raw.UpdatedAt = now;
-        await db.SaveChangesAsync(cancellationToken);
+        DbUpdateConcurrencyException? lastConflict = null;
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            var raw = await db.RawJobPostings.SingleAsync(item => item.Id == rawJobPostingId, cancellationToken);
+            var hashes = await db.RawJobPostingAttachments.AsNoTracking()
+                .Where(item => item.RawJobPostingId == rawJobPostingId)
+                .OrderBy(item => item.SortOrder)
+                .ThenBy(item => item.Id)
+                .Select(item => item.ContentHash)
+                .ToListAsync(cancellationToken);
+            var now = clock.GetUtcNow();
+            raw.ContentHash = TelegramImageRules.AlbumHash(hashes);
+            raw.Metadata = TelegramImageRules.Metadata(request, mediaGroupId, hashes.Count, now, raw.Metadata);
+            raw.UpdatedAt = now;
+            raw.Version++;
+            try
+            {
+                await db.SaveChangesAsync(cancellationToken);
+                return;
+            }
+            catch (DbUpdateConcurrencyException exception)
+            {
+                lastConflict = exception;
+                db.RawJobPostings.Entry(raw).State = EntityState.Detached;
+            }
+        }
+        throw lastConflict!;
     }
 
     private async Task TryDeleteStorageAsync(string storageKey, CancellationToken cancellationToken)
@@ -557,14 +574,18 @@ internal static class TelegramImageRules
         ProcessTelegramWebhookCommand request,
         string? mediaGroupId,
         int attachmentCount,
-        DateTimeOffset fallback) =>
-        JsonSerializer.SerializeToDocument(new
-        {
-            ingestionChannel = "TELEGRAM",
-            telegramUpdateId = request.UpdateId,
-            telegramMessageId = request.MessageId,
-            telegramMessageDateUtc = TelegramInboxMapping.ResolveMessageTime(request.MessageDateUnix, fallback),
-            telegramMediaGroupId = mediaGroupId,
-            attachmentCount,
-        });
+        DateTimeOffset fallback,
+        JsonDocument? existing = null)
+    {
+        var metadata = existing?.RootElement.ValueKind == JsonValueKind.Object
+            ? existing.RootElement.EnumerateObject().ToDictionary(property => property.Name, property => property.Value.Clone(), StringComparer.Ordinal)
+            : new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        metadata["ingestionChannel"] = JsonSerializer.SerializeToElement("TELEGRAM");
+        metadata["telegramUpdateId"] = JsonSerializer.SerializeToElement(request.UpdateId);
+        metadata["telegramMessageId"] = JsonSerializer.SerializeToElement(request.MessageId);
+        metadata["telegramMessageDateUtc"] = JsonSerializer.SerializeToElement(TelegramInboxMapping.ResolveMessageTime(request.MessageDateUnix, fallback));
+        metadata["telegramMediaGroupId"] = JsonSerializer.SerializeToElement(mediaGroupId);
+        metadata["attachmentCount"] = JsonSerializer.SerializeToElement(attachmentCount);
+        return JsonSerializer.SerializeToDocument(metadata);
+    }
 }

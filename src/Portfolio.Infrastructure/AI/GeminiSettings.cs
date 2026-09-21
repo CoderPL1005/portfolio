@@ -6,6 +6,7 @@ public sealed class GeminiSettings
 
     public string ApiKey { get; init; } = "";
     public string ChatModel { get; init; } = "";
+    public string JobExtractionModel { get; init; } = "";
     public string EmbeddingModel { get; init; } = "";
     public int EmbeddingDimensions { get; init; } = 1536;
     public bool EnableIndexingWorker { get; init; }

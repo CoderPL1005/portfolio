@@ -20,6 +20,7 @@ public sealed class JobHuntingDomainTests
         Assert.Equal(JobApplicationEventTypes.Created, applicationEvent.EventType);
         Assert.Equal(JobApplicationEventActorTypes.System, applicationEvent.ActorType);
         Assert.Null(raw.IngestionKey);
+        Assert.Equal(1, raw.Version);
     }
 
     [Fact]

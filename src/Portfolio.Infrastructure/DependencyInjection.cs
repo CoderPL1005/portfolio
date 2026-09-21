@@ -50,6 +50,8 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromSeconds(30));
         services.AddHttpClient<IChatCompletionService, GeminiChatCompletionService>(client =>
             client.Timeout = TimeSpan.FromSeconds(30));
+        services.AddHttpClient<IJobAnalysisService, GeminiJobAnalysisService>(client =>
+            client.Timeout = TimeSpan.FromSeconds(60));
         services.AddScoped<IKnowledgeRetriever, PgvectorKnowledgeRetriever>();
         services.AddScoped<IKnowledgeIndexer, KnowledgeIndexer>();
         services.AddHostedService<KnowledgeIndexingWorker>();

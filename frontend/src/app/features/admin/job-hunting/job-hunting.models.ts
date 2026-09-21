@@ -11,6 +11,7 @@ export interface JobDetail extends Omit<JobSummary,'source'|'sourceCount'|'archi
 export interface JobWrite{companyName:string;positionTitle:string;location:string;employmentType:string|null;workplaceType:string|null;salaryMinimum:number|null;salaryMaximum:number|null;salaryCurrency:string|null;salaryPeriod:string|null;experienceRequirements:string|null;description:string;technologyStack:string[];applicationEmail:string|null;applicationUrl:string|null;expiresAt:string|null;notes:string|null}
 export interface JobCreate extends JobWrite{source:JobSource;sourceExternalId:string|null;sourceUrl:string|null;rawContent:string}
 export interface ScreenshotSubmissionResult{rawJobPostingId:string;ingestionStatus:string;attachmentCount:number;created:boolean}
+export interface RawJobPostingSummary{id:string;source:JobSource;ingestionStatus:string;discoveredAt:string;createdAt:string;attachmentCount:number;version:number}
 export interface EventItem{id:string;eventType:string;fromStatus:string|null;toStatus:string|null;actorType:string;actorAdminUserId:string|null;note:string|null;metadata:unknown;occurredAt:string;createdAt:string}
 export interface DocumentItem{id:string;documentType:string;versionLabel:string;fileName:string|null;storageKey:string|null;contentHash:string|null;metadata:unknown;createdAt:string;removedAt:string|null}
 export interface ApplicationItem{id:string;jobPostingId:string;companyName:string;positionTitle:string;status:ApplicationStatus;channel:ApplicationChannel|null;appliedAt:string|null;lastActivityAt:string|null;version:number}

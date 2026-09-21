@@ -203,6 +203,10 @@ public static class DependencyInjection
         services.AddScoped<IRequestValidator<ArchiveJobPostingCommand>, ArchiveJobPostingCommandValidator>();
         services.AddScoped<IRequestHandler<SubmitJobScreenshotsCommand, ScreenshotSubmissionResult>, SubmitJobScreenshotsCommandHandler>();
         services.AddScoped<IRequestValidator<SubmitJobScreenshotsCommand>, SubmitJobScreenshotsCommandValidator>();
+        services.AddScoped<IRequestHandler<AnalyzeRawJobPostingCommand, JobPostingResult>, AnalyzeRawJobPostingCommandHandler>();
+        services.AddScoped<IRequestValidator<AnalyzeRawJobPostingCommand>, AnalyzeRawJobPostingCommandValidator>();
+        services.AddScoped<IRequestHandler<GetRawJobPostingsQuery, Common.Models.PagedResult<RawJobPostingListItem>>, GetRawJobPostingsQueryHandler>();
+        services.AddScoped<IRequestValidator<GetRawJobPostingsQuery>, GetRawJobPostingsQueryValidator>();
         services.AddScoped<IRequestHandler<GetJobApplicationsQuery, Common.Models.PagedResult<JobApplicationListItem>>, GetJobApplicationsQueryHandler>();
         services.AddScoped<IRequestHandler<GetJobApplicationQuery, JobApplicationResult>, GetJobApplicationQueryHandler>();
         services.AddScoped<IRequestHandler<CreateJobApplicationCommand, JobApplicationResult>, CreateJobApplicationCommandHandler>();

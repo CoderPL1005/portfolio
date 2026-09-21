@@ -8,6 +8,7 @@ internal sealed class ContentTestDbContext(DbContextOptions<ContentTestDbContext
     : DbContext(options), IApplicationDbContext
 {
     public bool FailSaveChanges { get; set; }
+    public int ConcurrencyFailuresRemaining { get; set; }
     public DbSet<MediaAsset> MediaAssets => Set<MediaAsset>();
     public DbSet<Profile> Profiles => Set<Profile>();
     public DbSet<Experience> Experiences => Set<Experience>();
@@ -43,10 +44,16 @@ internal sealed class ContentTestDbContext(DbContextOptions<ContentTestDbContext
     DbSet<AdminUser> IApplicationDbContext.AdminUsers => throw new NotSupportedException();
     DbSet<AdminRefreshToken> IApplicationDbContext.AdminRefreshTokens => throw new NotSupportedException();
 
-    public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default) =>
-        FailSaveChanges
-            ? throw new DbUpdateException("Simulated failure")
-            : base.SaveChangesAsync(cancellationToken);
+    public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        if (FailSaveChanges) throw new DbUpdateException("Simulated failure");
+        if (ConcurrencyFailuresRemaining > 0)
+        {
+            ConcurrencyFailuresRemaining--;
+            throw new DbUpdateConcurrencyException("Simulated concurrency failure");
+        }
+        return base.SaveChangesAsync(cancellationToken);
+    }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -104,6 +111,7 @@ internal sealed class ContentTestDbContext(DbContextOptions<ContentTestDbContext
         modelBuilder.Entity<ChatMessageFeedback>().HasKey(item=>item.Id);modelBuilder.Entity<ChatMessageFeedback>().HasOne(item=>item.ChatMessage).WithMany().HasForeignKey(item=>item.ChatMessageId);
         modelBuilder.Entity<ChatUsageDaily>().HasKey(item => new { item.UsageDate, item.VisitorKey });
         modelBuilder.Entity<RawJobPosting>().HasKey(item => item.Id);
+        modelBuilder.Entity<RawJobPosting>().Property(item => item.Version).IsConcurrencyToken();
         modelBuilder.Entity<RawJobPosting>().HasOne(item => item.JobPosting).WithMany(item => item.RawJobPostings).HasForeignKey(item => item.JobPostingId);
         modelBuilder.Entity<RawJobPosting>().HasOne(item => item.DuplicateOfRawJobPosting).WithMany(item => item.DuplicateRawJobPostings).HasForeignKey(item => item.DuplicateOfRawJobPostingId);
         modelBuilder.Entity<RawJobPosting>().Property(item => item.Metadata).HasConversion(value => value.RootElement.GetRawText(), value => System.Text.Json.JsonDocument.Parse(value, default(System.Text.Json.JsonDocumentOptions)));
