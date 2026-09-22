@@ -99,7 +99,10 @@ public sealed class JobAnalysisConcurrencyPostgresTests
             CREATE TABLE job_applications (
               id uuid PRIMARY KEY, job_posting_id uuid NOT NULL, status varchar(30) NOT NULL, channel varchar(30) NULL,
               application_email varchar(255) NULL, application_url text NULL, external_application_id varchar(500) NULL,
-              applied_at timestamptz NULL, last_activity_at timestamptz NULL, notes text NULL, version integer NOT NULL DEFAULT 1,
+              applied_at timestamptz NULL, last_activity_at timestamptz NULL, notes text NULL,
+              package_status varchar(30) NOT NULL DEFAULT 'DRAFT', package_revision integer NOT NULL DEFAULT 0,
+              package_job_posting_version integer NULL, package_manifest_hash varchar(64) NULL, package_finalized_at timestamptz NULL,
+              package_finalized_by_admin_user_id uuid NULL, version integer NOT NULL DEFAULT 1,
               created_at timestamptz NOT NULL, updated_at timestamptz NOT NULL);
             """, connection);
         await command.ExecuteNonQueryAsync();

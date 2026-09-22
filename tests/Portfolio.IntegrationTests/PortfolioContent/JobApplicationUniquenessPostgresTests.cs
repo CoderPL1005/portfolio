@@ -182,7 +182,10 @@ public sealed class JobApplicationUniquenessPostgresTests
               id uuid PRIMARY KEY, job_posting_id uuid NOT NULL REFERENCES job_postings(id) ON DELETE RESTRICT,
               status varchar(30) NOT NULL, channel varchar(30) NULL, application_email varchar(255) NULL, application_url text NULL,
               external_application_id varchar(500) NULL, applied_at timestamptz NULL, last_activity_at timestamptz NULL,
-              notes text NULL, version integer NOT NULL DEFAULT 1, created_at timestamptz NOT NULL, updated_at timestamptz NOT NULL);
+              notes text NULL, package_status varchar(30) NOT NULL DEFAULT 'DRAFT', package_revision integer NOT NULL DEFAULT 0,
+              package_job_posting_version integer NULL, package_manifest_hash varchar(64) NULL, package_finalized_at timestamptz NULL,
+              package_finalized_by_admin_user_id uuid NULL, version integer NOT NULL DEFAULT 1,
+              created_at timestamptz NOT NULL, updated_at timestamptz NOT NULL);
             CREATE UNIQUE INDEX ix_job_applications_job_posting_id ON job_applications(job_posting_id);
             CREATE TABLE job_application_events (
               id uuid PRIMARY KEY, job_application_id uuid NOT NULL REFERENCES job_applications(id) ON DELETE RESTRICT,
@@ -192,7 +195,9 @@ public sealed class JobApplicationUniquenessPostgresTests
             CREATE TABLE job_application_documents (
               id uuid PRIMARY KEY, job_application_id uuid NOT NULL REFERENCES job_applications(id) ON DELETE RESTRICT,
               document_type varchar(50) NOT NULL, version_label varchar(100) NOT NULL, file_name varchar(500) NULL,
-              storage_key varchar(1000) NULL, content_hash varchar(64) NULL, metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+              storage_key varchar(1000) NULL, content_hash varchar(64) NULL, content_type varchar(100) NULL,
+              file_size_bytes bigint NULL, package_revision integer NULL, source_canonical_cv_version integer NULL,
+              metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
               created_at timestamptz NOT NULL, removed_at timestamptz NULL);
             """, connection);
         await command.ExecuteNonQueryAsync();
