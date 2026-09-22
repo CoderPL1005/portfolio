@@ -5,7 +5,7 @@ import { ActivatedRoute, RouterLink } from '@angular/router';
 import { take } from 'rxjs';
 import { safeAdminError } from '../shared/admin-api';
 import { DirtyAware } from '../shared/dirty.guard';
-import { applicationTransitions, ApplicationDetail, ApplicationPackage, ApplicationPackageReadiness, ApplicationStatus, EventItem } from './job-hunting.models';
+import { applicationTransitions, ApplicationDetail, ApplicationPackage, ApplicationPackageReadiness, ApplicationStatus, ApplicationSubmissionReadiness, EventItem } from './job-hunting.models';
 import { JobHuntingService } from './job-hunting.service';
 
 @Component({
@@ -51,6 +51,22 @@ import { JobHuntingService } from './job-hunting.service';
           }
         </section>
 
+        <section class="admin-panel submission-card" aria-labelledby="submission-title">
+          <div class="section-heading"><div><p class="section-kicker">SUBMISSION HANDOFF</p><h2 id="submission-title">Submission readiness</h2><p>The immutable package boundary for a future Phase 4C submission.</p></div>@if (application.status === 'DRAFT' && submissionReadiness()) { <button type="button" class="admin-button" [disabled]="submissionLoading()" (click)="loadSubmissionReadiness()">{{ submissionLoading() ? 'Refreshing…' : 'Refresh' }}</button> }</div>
+          @if (submissionLoading() && !submissionReadiness()) { <div class="empty-section" aria-live="polite">Checking submission readiness…</div> }
+          @if (submissionError()) { <p class="admin-error" role="alert">{{ submissionError() }}</p> }
+          @if (submissionReadiness(); as state) {
+            @if (application.status === 'DRAFT') {
+              <div class="readiness-summary" [class.ready]="isSubmissionReadyForCurrentVersion()" role="status"><strong>{{ isSubmissionReadyForCurrentVersion() ? 'Ready for submission' : 'Not ready for submission' }}</strong><span>{{ isSubmissionReadyForCurrentVersion() ? 'Immutable package prepared' : 'Refresh the current application state' }}</span></div>
+              @if (state.blockers.length) { <ul class="blocker-list">@for (blocker of state.blockers; track blocker.code) { <li><strong>{{ statusLabel(blocker.code) }}</strong><span>{{ blocker.message }}</span></li> }</ul> }
+              @if (isSubmissionReadyForCurrentVersion()) { <div class="terminal-copy"><p>The finalized package is ready for a future Phase 4C submission. This application has not been submitted by this system.</p><p>If you submit it outside the system, use <strong>Record external submission</strong> below to record what already happened.</p></div> }
+            } @else {
+              <div class="readiness-summary" role="status"><strong>Submission already recorded</strong><span>{{ statusLabel(application.status) }}</span></div>
+              <p class="terminal-copy">The application lifecycle has moved beyond DRAFT. No additional submission action is offered.</p>
+            }
+          }
+        </section>
+
         <section class="admin-panel stage-card" aria-labelledby="stage-title">
           <div class="stage-copy"><p class="section-kicker">CURRENT STAGE</p><h2 id="stage-title">{{ statusLabel(application.status) }}</h2><p>{{ stageDescription(application.status) }}</p></div>
           @if (transitions[application.status].length) {
@@ -58,7 +74,7 @@ import { JobHuntingService } from './job-hunting.service';
               <label>Optional transition note<input [formControl]="transitionNote" [readonly]="transitionPending() !== null" maxlength="2000" placeholder="Add context to the immutable activity history"></label>
               <div class="transition-actions">
                 @for (status of transitions[application.status]; track status) {
-                  <button type="button" class="admin-button" [class.primary]="!isTerminal(status)" [class.danger]="isTerminal(status)" [disabled]="transitionPending() !== null || saving() || documentPending() || removingDocumentId() !== null" (click)="transition(status)">{{ transitionPending() === status ? 'Updating…' : transitionLabel(status) }}</button>
+                  @if (canPresentTransition(status)) { <button type="button" class="admin-button" [class.primary]="!isTerminal(status)" [class.danger]="isTerminal(status)" [disabled]="transitionPending() !== null || saving() || documentPending() || removingDocumentId() !== null" (click)="transition(status)">{{ transitionPending() === status ? 'Updating…' : transitionLabel(status) }}</button> }
                 }
               </div>
             </div>
@@ -125,23 +141,25 @@ export class ApplicationDetailPageComponent implements DirtyAware {
   readonly id = inject(ActivatedRoute).snapshot.paramMap.get('id')!;
   readonly item = signal<ApplicationDetail | null>(null); readonly loading = signal(true); readonly saving = signal(false); readonly error = signal<string | null>(null);
   readonly readiness = signal<ApplicationPackageReadiness | null>(null); readonly readinessLoading = signal(true); readonly readinessError = signal<string | null>(null);
+  readonly submissionReadiness = signal<ApplicationSubmissionReadiness | null>(null); readonly submissionLoading = signal(true); readonly submissionError = signal<string | null>(null);
   readonly packageState = signal<ApplicationPackage | null>(null); readonly packageLoading = signal(true); readonly packageError = signal<string | null>(null); readonly finalizing = signal(false); readonly previewing = signal(false); readonly downloading = signal(false);
   readonly editingDetails = signal(false); readonly addingDocument = signal(false); readonly transitionPending = signal<ApplicationStatus | null>(null); readonly documentPending = signal(false); readonly removingDocumentId = signal<string | null>(null);
   readonly transitions = applicationTransitions; readonly forwardStages: ApplicationStatus[] = ['DRAFT','APPLIED','INTERVIEW','OFFER']; readonly channels = ['EMAIL','PLATFORM','MANUAL','OTHER']; readonly transitionNote = this.fb.control('');
   readonly form = this.fb.group({channel:[''],applicationEmail:[''],applicationUrl:[''],externalApplicationId:[''],notes:['']});
   readonly documentForm = this.fb.group({documentType:['',Validators.required],versionLabel:['',Validators.required],fileName:[''],storageKey:[''],contentHash:['',Validators.pattern(/^[0-9a-fA-F]{64}$/)]});
-  constructor() { this.load();this.loadReadiness();this.loadPackage(); }
+  constructor() { this.load();this.loadReadiness();this.loadPackage();this.loadSubmissionReadiness(); }
   hasUnsavedChanges() { return this.form.dirty || this.documentForm.dirty; }
   load(preserveError=false) { this.loading.set(true);this.api.application(this.id).pipe(take(1)).subscribe({next:application=>{this.item.set(application);this.syncForm(application);this.loading.set(false);if(!preserveError)this.error.set(null)},error:error=>{this.error.set(safeAdminError(error));this.loading.set(false)}}); }
   loadReadiness() { this.readinessLoading.set(true);this.readinessError.set(null);this.api.packageReadiness(this.id).pipe(take(1)).subscribe({next:state=>{this.readiness.set(state);this.readinessLoading.set(false)},error:error=>{this.readinessError.set(safeAdminError(error));this.readinessLoading.set(false)}}); }
+  loadSubmissionReadiness() { this.submissionLoading.set(true);this.submissionError.set(null);this.api.submissionReadiness(this.id).pipe(take(1)).subscribe({next:state=>{this.submissionReadiness.set(state);this.submissionLoading.set(false)},error:error=>{this.submissionError.set(safeAdminError(error));this.submissionLoading.set(false)}}); }
   loadPackage() { this.packageLoading.set(true);this.packageError.set(null);this.api.applicationPackage(this.id).pipe(take(1)).subscribe({next:state=>{this.packageState.set(state);this.packageLoading.set(false)},error:error=>{this.packageError.set(safeAdminError(error));this.packageLoading.set(false)}}); }
-  refreshPackageState() { this.loadReadiness();this.loadPackage(); }
-  finalizePackage() { const state=this.readiness();if(this.packageState()?.status!=='DRAFT'||!state?.isReady||state.jobPostingVersion===null||state.canonicalCvVersion===null||this.finalizing())return;this.finalizing.set(true);this.packageError.set(null);this.api.finalizeApplicationPackage(this.id,{expectedApplicationVersion:state.applicationVersion,expectedJobPostingVersion:state.jobPostingVersion,expectedCanonicalCvVersion:state.canonicalCvVersion}).pipe(take(1)).subscribe({next:result=>{this.packageState.set(result);this.finalizing.set(false);this.load()},error:error=>{this.packageError.set(safeAdminError(error));this.finalizing.set(false);if((error as {status?:number})?.status===409)this.refreshPackageState()}}); }
+  refreshPackageState() { this.loadReadiness();this.loadPackage();this.loadSubmissionReadiness(); }
+  finalizePackage() { const state=this.readiness();if(this.packageState()?.status!=='DRAFT'||!state?.isReady||state.jobPostingVersion===null||state.canonicalCvVersion===null||this.finalizing())return;this.finalizing.set(true);this.packageError.set(null);this.api.finalizeApplicationPackage(this.id,{expectedApplicationVersion:state.applicationVersion,expectedJobPostingVersion:state.jobPostingVersion,expectedCanonicalCvVersion:state.canonicalCvVersion}).pipe(take(1)).subscribe({next:result=>{this.packageState.set(result);this.finalizing.set(false);this.load();this.loadSubmissionReadiness()},error:error=>{this.packageError.set(safeAdminError(error));this.finalizing.set(false);if((error as {status?:number})?.status===409)this.refreshPackageState()}}); }
   openPackageCv(download:boolean) { if(this.packageState()?.status!=='FINALIZED'||this.previewing()||this.downloading())return;const pending=download?this.downloading:this.previewing;pending.set(true);this.packageError.set(null);this.api.applicationPackageCv(this.id,download).pipe(take(1)).subscribe({next:blob=>{const url=URL.createObjectURL(blob);if(download){const anchor=document.createElement('a');anchor.href=url;anchor.download=this.packageState()?.cv?.fileName||'application-cv.pdf';anchor.click()}else window.open(url,'_blank','noopener,noreferrer');setTimeout(()=>URL.revokeObjectURL(url),60_000);pending.set(false)},error:error=>{this.packageError.set(safeAdminError(error));pending.set(false)}}); }
   beginEdit() { if(!this.saving()&&!this.addingDocument()&&!this.documentPending())this.editingDetails.set(true); }
   cancelEdit() { const current=this.item();if(current)this.syncForm(current);this.editingDetails.set(false); }
   save() { const current=this.item();if(!current||!this.editingDetails()||this.form.invalid||this.saving()||this.transitionPending())return;this.saving.set(true);this.error.set(null);this.api.updateApplication(this.id,{expectedVersion:current.version,...this.form.getRawValue()}).pipe(take(1)).subscribe({next:application=>{this.item.set(application);this.syncForm(application);this.editingDetails.set(false);this.saving.set(false)},error:error=>this.failed(error)}); }
-  transition(status:ApplicationStatus) { const current=this.item();if(!current||this.saving()||this.documentPending()||this.removingDocumentId()||this.transitionPending()||!this.transitions[current.status].includes(status)||!confirm(`Change status to ${this.statusLabel(status)}?`))return;this.transitionPending.set(status);this.error.set(null);this.api.transition(this.id,{status,expectedVersion:current.version,note:this.transitionNote.value||null}).pipe(take(1)).subscribe({next:application=>{const preserveDraft=this.editingDetails()&&this.form.dirty;this.item.set(application);if(!preserveDraft)this.syncForm(application);this.transitionNote.reset();this.transitionPending.set(null);this.loadReadiness()},error:error=>this.failed(error)}); }
+  transition(status:ApplicationStatus) { const current=this.item();if(!current||this.saving()||this.documentPending()||this.removingDocumentId()||this.transitionPending()||!this.transitions[current.status].includes(status)||!this.canPresentTransition(status)||!confirm(status==='APPLIED'?'Confirm this application was already submitted outside this system?':`Change status to ${this.statusLabel(status)}?`))return;this.transitionPending.set(status);this.error.set(null);this.api.transition(this.id,{status,expectedVersion:current.version,note:this.transitionNote.value||null}).pipe(take(1)).subscribe({next:application=>{const preserveDraft=this.editingDetails()&&this.form.dirty;this.item.set(application);if(!preserveDraft)this.syncForm(application);this.transitionNote.reset();this.transitionPending.set(null);this.loadReadiness();this.loadSubmissionReadiness()},error:error=>this.failed(error)}); }
   beginDocument() { if(!this.documentPending()&&!this.editingDetails()&&!this.saving())this.addingDocument.set(true); }
   cancelDocument() { this.documentForm.reset();this.documentForm.markAsPristine();this.addingDocument.set(false); }
   attach() { if(!this.addingDocument()||this.documentForm.invalid||this.documentPending())return;this.documentPending.set(true);this.error.set(null);this.api.attach(this.id,{...this.documentForm.getRawValue(),metadata:null}).pipe(take(1)).subscribe({next:()=>{this.documentPending.set(false);this.cancelDocument();this.load()},error:error=>this.failed(error)}); }
@@ -149,9 +167,11 @@ export class ApplicationDetailPageComponent implements DirtyAware {
   isTerminal(status:ApplicationStatus) { return status==='REJECTED'||status==='WITHDRAWN'; }
   progressIndex(application:ApplicationDetail) { if(!this.isTerminal(application.status))return this.forwardStages.indexOf(application.status);const source=application.events.find(event=>event.toStatus===application.status)?.fromStatus as ApplicationStatus|null|undefined;return Math.max(0,source?this.forwardStages.indexOf(source):-1); }
   statusLabel(value:string) { return value.toLowerCase().replaceAll('_',' ').replace(/\b\w/g,letter=>letter.toUpperCase()); }
-  transitionLabel(status:ApplicationStatus) { return ({APPLIED:'Mark as applied',INTERVIEW:'Move to interview',REJECTED:'Reject',OFFER:'Mark offer received',WITHDRAWN:'Withdraw'} as Partial<Record<ApplicationStatus,string>>)[status]??this.statusLabel(status); }
+  isSubmissionReadyForCurrentVersion() { const current=this.item();const readiness=this.submissionReadiness();return readiness?.isReady===true&&readiness.package?.applicationVersion===current?.version; }
+  canPresentTransition(status:ApplicationStatus) { return status!=='APPLIED'||this.isSubmissionReadyForCurrentVersion(); }
+  transitionLabel(status:ApplicationStatus) { return ({APPLIED:'Record external submission',INTERVIEW:'Move to interview',REJECTED:'Reject',OFFER:'Mark offer received',WITHDRAWN:'Withdraw'} as Partial<Record<ApplicationStatus,string>>)[status]??this.statusLabel(status); }
   stageDescription(status:ApplicationStatus) { return ({DRAFT:'This application has not been submitted yet.',APPLIED:'The application has been submitted and is awaiting a response.',INTERVIEW:'The application is progressing through interviews.',OFFER:'An offer has been received for this application.',REJECTED:'The employer ended this application process.',WITHDRAWN:'This application was withdrawn and is no longer active.'} as Record<ApplicationStatus,string>)[status]; }
   eventLabel(event:EventItem) { return event.eventType==='CREATED'?'Application created':event.eventType==='STATUS_CHANGED'?'Status changed':this.statusLabel(event.eventType); }
   private syncForm(application:ApplicationDetail) { this.form.reset({channel:application.channel||'',applicationEmail:application.applicationEmail||'',applicationUrl:application.applicationUrl||'',externalApplicationId:application.externalApplicationId||'',notes:application.notes||''},{emitEvent:false});this.form.markAsPristine(); }
-  private failed(error:unknown) { this.error.set(safeAdminError(error));this.saving.set(false);this.transitionPending.set(null);this.documentPending.set(false);this.removingDocumentId.set(null);if((error as {status?:number})?.status===409)this.load(true); }
+  private failed(error:unknown) { this.error.set(safeAdminError(error));this.saving.set(false);this.transitionPending.set(null);this.documentPending.set(false);this.removingDocumentId.set(null);if((error as {status?:number})?.status===409){this.load(true);this.loadSubmissionReadiness()} }
 }

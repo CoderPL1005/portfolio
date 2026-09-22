@@ -16,6 +16,8 @@ public sealed class AdminJobApplicationsController(IRequestDispatcher dispatcher
     [HttpGet("{id:guid}")]public async Task<ActionResult<ApiResponse<JobApplicationResult>>> Get(Guid id,CancellationToken ct)=>Ok(ApiResponse<JobApplicationResult>.Ok(await dispatcher.DispatchAsync(new GetJobApplicationQuery(id),ct)));
     [HttpGet("/api/v1/admin/job-hunting/applications/{applicationId:guid}/package-readiness")]
     public async Task<ActionResult<ApiResponse<ApplicationPackageReadinessResult>>> PackageReadiness(Guid applicationId,CancellationToken ct)=>Ok(ApiResponse<ApplicationPackageReadinessResult>.Ok(await dispatcher.DispatchAsync(new GetApplicationPackageReadinessQuery(applicationId),ct)));
+    [HttpGet("/api/v1/admin/job-hunting/applications/{applicationId:guid}/submission-readiness")]
+    public async Task<ActionResult<ApiResponse<ApplicationSubmissionReadinessResult>>> SubmissionReadiness(Guid applicationId,CancellationToken ct)=>Ok(ApiResponse<ApplicationSubmissionReadinessResult>.Ok(await dispatcher.DispatchAsync(new GetApplicationSubmissionReadinessQuery(applicationId),ct)));
     [HttpGet("/api/v1/admin/job-hunting/applications/{applicationId:guid}/package")]
     public async Task<ActionResult<ApiResponse<ApplicationPackageResult>>> Package(Guid applicationId,CancellationToken ct)=>Ok(ApiResponse<ApplicationPackageResult>.Ok(await dispatcher.DispatchAsync(new GetApplicationPackageQuery(applicationId),ct)));
     [HttpPost("/api/v1/admin/job-hunting/applications/{applicationId:guid}/package/finalize")]

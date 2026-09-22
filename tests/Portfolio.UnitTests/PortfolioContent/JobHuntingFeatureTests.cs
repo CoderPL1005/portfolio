@@ -105,19 +105,31 @@ public sealed class JobHuntingFeatureTests
     [InlineData("DRAFT","APPLIED")][InlineData("DRAFT","WITHDRAWN")][InlineData("APPLIED","INTERVIEW")][InlineData("APPLIED","REJECTED")][InlineData("APPLIED","WITHDRAWN")][InlineData("INTERVIEW","REJECTED")][InlineData("INTERVIEW","OFFER")][InlineData("INTERVIEW","WITHDRAWN")][InlineData("OFFER","WITHDRAWN")]
     public async Task Every_allowed_transition_updates_state_version_timestamps_and_history(string from,string to)
     {
-        await using var db=PublicPortfolioTests.CreateContext();var job=Posting("Company","Role",Now);var app=Application(job.Id,from);db.AddRange(job,app);await db.SaveChangesAsync();var result=await new TransitionJobApplicationCommandHandler(db,new FixedTimeProvider(Now),new FakeCurrentUser(AdminId)).HandleAsync(new(app.Id,to,1,"transition",null));Assert.Equal(to,result.Status);Assert.Equal(2,result.Version);Assert.Equal(Now,result.LastActivityAt);if(to=="APPLIED")Assert.Equal(Now,result.AppliedAt);var e=Assert.Single(result.Events);Assert.Equal((from,to,"STATUS_CHANGED"),(e.FromStatus,e.ToStatus,e.EventType));
+        await using var db=PublicPortfolioTests.CreateContext();var job=Posting("Company","Role",Now);var app=Application(job.Id,from);db.AddRange(job,app);if(from=="DRAFT"&&to=="APPLIED")AddFinalizedPackage(db,app);await db.SaveChangesAsync();var result=await TransitionHandler(db).HandleAsync(new(app.Id,to,1,"transition",null));Assert.Equal(to,result.Status);Assert.Equal(2,result.Version);Assert.Equal(Now,result.LastActivityAt);if(to=="APPLIED")Assert.Equal(Now,result.AppliedAt);var e=Assert.Single(result.Events);Assert.Equal((from,to,"STATUS_CHANGED"),(e.FromStatus,e.ToStatus,e.EventType));
     }
 
     [Theory][InlineData("DRAFT","INTERVIEW")][InlineData("APPLIED","OFFER")][InlineData("OFFER","REJECTED")][InlineData("REJECTED","APPLIED")][InlineData("WITHDRAWN","DRAFT")]
     public async Task Prohibited_and_terminal_transitions_fail_without_event(string from,string to)
     {
-        await using var db=PublicPortfolioTests.CreateContext();var job=Posting("Company","Role",Now);var app=Application(job.Id,from);db.AddRange(job,app);await db.SaveChangesAsync();await Assert.ThrowsAsync<ConflictException>(()=>new TransitionJobApplicationCommandHandler(db,new FixedTimeProvider(Now),new FakeCurrentUser(AdminId)).HandleAsync(new(app.Id,to,1,null,null)));Assert.Empty(await db.JobApplicationEvents.ToListAsync());Assert.Equal(from,app.Status);
+        await using var db=PublicPortfolioTests.CreateContext();var job=Posting("Company","Role",Now);var app=Application(job.Id,from);db.AddRange(job,app);await db.SaveChangesAsync();await Assert.ThrowsAsync<ConflictException>(()=>TransitionHandler(db).HandleAsync(new(app.Id,to,1,null,null)));Assert.Empty(await db.JobApplicationEvents.ToListAsync());Assert.Equal(from,app.Status);
     }
 
     [Fact]
     public async Task Stale_application_status_transition_conflicts_without_a_second_event()
     {
-        await using var db=PublicPortfolioTests.CreateContext();var job=Posting("Company","Role",Now);var app=Application(job.Id,"DRAFT");db.AddRange(job,app);await db.SaveChangesAsync();var handler=new TransitionJobApplicationCommandHandler(db,new FixedTimeProvider(Now),new FakeCurrentUser(AdminId));await handler.HandleAsync(new(app.Id,"APPLIED",1,null,null));var error=await Assert.ThrowsAsync<ConflictException>(()=>handler.HandleAsync(new(app.Id,"WITHDRAWN",1,null,null)));Assert.Equal("JOB_APPLICATION_VERSION_CONFLICT",error.Code);Assert.Single(await db.JobApplicationEvents.ToListAsync());Assert.Equal("APPLIED",app.Status);
+        await using var db=PublicPortfolioTests.CreateContext();var job=Posting("Company","Role",Now);var app=Application(job.Id,"DRAFT");db.AddRange(job,app);AddFinalizedPackage(db,app);await db.SaveChangesAsync();var handler=TransitionHandler(db);await handler.HandleAsync(new(app.Id,"APPLIED",1,null,null));var error=await Assert.ThrowsAsync<ConflictException>(()=>handler.HandleAsync(new(app.Id,"WITHDRAWN",1,null,null)));Assert.Equal("JOB_APPLICATION_VERSION_CONFLICT",error.Code);Assert.Single(await db.JobApplicationEvents.ToListAsync());Assert.Equal("APPLIED",app.Status);
+    }
+
+    [Fact]
+    public async Task Draft_to_applied_requires_an_authoritatively_ready_finalized_package()
+    {
+        await using var db=PublicPortfolioTests.CreateContext();var job=Posting("Company","Role",Now);var app=Application(job.Id,"DRAFT");db.AddRange(job,app);await db.SaveChangesAsync();var error=await Assert.ThrowsAsync<ConflictException>(()=>TransitionHandler(db).HandleAsync(new(app.Id,"APPLIED",1,null,null)));Assert.Equal("PACKAGE_NOT_FINALIZED",error.Code);Assert.Equal("DRAFT",app.Status);Assert.Null(app.AppliedAt);Assert.Empty(await db.JobApplicationEvents.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Draft_to_applied_ignores_removed_historical_snapshot_and_uses_active_snapshot()
+    {
+        await using var db=PublicPortfolioTests.CreateContext();var job=Posting("Company","Role",Now);var app=Application(job.Id,"DRAFT");db.AddRange(job,app);AddFinalizedPackage(db,app);var removed=new JobApplicationDocument{Id=Guid.NewGuid(),JobApplicationId=app.Id,DocumentType="CV",VersionLabel="Package revision 1",FileName="old.pdf",StorageKey="applications/private/old.pdf",ContentHash=new string('c',64),ContentType="application/pdf",FileSizeBytes=512,PackageRevision=1,SourceCanonicalCvVersion=1,Metadata=JsonDocument.Parse("{}"),CreatedAt=Now.AddMinutes(-1),RemovedAt=Now};db.JobApplicationDocuments.Add(removed);await db.SaveChangesAsync();var result=await TransitionHandler(db).HandleAsync(new(app.Id,"APPLIED",1,null,null));Assert.Equal("APPLIED",result.Status);Assert.Equal(2,result.Version);Assert.Single(result.Events);
     }
 
     [Fact]public async Task Documents_attach_and_soft_remove_with_events_and_repeat_conflict()
@@ -128,12 +140,14 @@ public sealed class JobHuntingFeatureTests
     [Fact]public async Task Validators_reject_invalid_paging_values_urls_stack_versions_and_future_transition_time()
     {
         var q=await new GetJobPostingsQueryValidator().ValidateAsync(new(0,101,null,"bad",null,null,null));Assert.NotEmpty(q);using var objectJson=JsonDocument.Parse("{}");var create=Create("x","bad-url","raw") with{TechnologyStack=objectJson.RootElement};Assert.NotEmpty(await new CreateJobPostingCommandValidator().ValidateAsync(create));Assert.NotEmpty(await new UpdateJobApplicationCommandValidator().ValidateAsync(new(Guid.NewGuid(),0,"bad","bad","bad",new string('x',501),null)));
-        await using var db=PublicPortfolioTests.CreateContext();var job=Posting("Company","Role",Now);var app=Application(job.Id,"DRAFT");db.AddRange(job,app);await db.SaveChangesAsync();await Assert.ThrowsAsync<ValidationException>(()=>new TransitionJobApplicationCommandHandler(db,new FixedTimeProvider(Now),new FakeCurrentUser(AdminId)).HandleAsync(new(app.Id,"APPLIED",1,null,Now.AddSeconds(1))));
+        await using var db=PublicPortfolioTests.CreateContext();var job=Posting("Company","Role",Now);var app=Application(job.Id,"DRAFT");db.AddRange(job,app);await db.SaveChangesAsync();await Assert.ThrowsAsync<ValidationException>(()=>TransitionHandler(db).HandleAsync(new(app.Id,"APPLIED",1,null,Now.AddSeconds(1))));
     }
 
     private static CreateJobPostingCommand Create(string external,string url,string raw){using var json=JsonDocument.Parse("[\"C#\"]");return new("MANUAL",external,url,raw,"Acme","Developer","Hanoi",null,null,null,null,"USD",null,null,"Description",json.RootElement.Clone(),"jobs@example.com","https://example.com/apply",null,null);}
     private static UpdateJobPostingCommand Update(Guid id,int version,string company){using var json=JsonDocument.Parse("[\"C#\"]");return new(id,version,company,"Role","Hanoi",null,null,null,null,null,null,null,"Description",json.RootElement.Clone(),null,null,null,null);}
     private static CreateJobApplicationCommandHandler CreateHandler(IApplicationDbContext db)=>new(db,new FixedTimeProvider(Now),new FakeCurrentUser(AdminId),new NeverJobApplicationConflictDetector(),new TestCreationTransactionFactory(db));
+    private static TransitionJobApplicationCommandHandler TransitionHandler(IApplicationDbContext db)=>new(db,new FixedTimeProvider(Now),new FakeCurrentUser(AdminId),new ApplicationSubmissionReadinessEvaluator());
+    private static void AddFinalizedPackage(IApplicationDbContext db,JobApplication application){application.PackageStatus="FINALIZED";application.PackageRevision=1;application.PackageJobPostingVersion=1;application.PackageManifestHash=new string('b',64);application.PackageFinalizedAt=Now;application.PackageFinalizedByAdminUserId=AdminId;db.JobApplicationDocuments.Add(new(){Id=Guid.NewGuid(),JobApplicationId=application.Id,DocumentType="CV",VersionLabel="Package revision 1",FileName="cv.pdf",StorageKey="applications/private/cv.pdf",ContentHash=new string('a',64),ContentType="application/pdf",FileSizeBytes=1024,PackageRevision=1,SourceCanonicalCvVersion=1,Metadata=JsonDocument.Parse("{}"),CreatedAt=Now});}
     private static JobPosting Posting(string company,string title,DateTimeOffset at,Guid? id=null){return new(){Id=id??Guid.NewGuid(),CompanyName=company,PositionTitle=title,Location="Hanoi",Description="Description",TechnologyStack=JsonDocument.Parse("[]"),VerificationStatus="PENDING",SelectionStatus="PENDING_ANALYSIS",Version=1,CreatedAt=at,UpdatedAt=at};}
     private static RawJobPosting Raw(Guid jobId,string source)=>new(){Id=Guid.NewGuid(),JobPostingId=jobId,Source=source,RawContent="raw",ContentHash="hash",IngestionStatus="NORMALIZED",Metadata=JsonDocument.Parse("{}"),DiscoveredAt=Now,CreatedAt=Now,UpdatedAt=Now};
     private static JobApplication Application(Guid jobId,string status)=>new(){Id=Guid.NewGuid(),JobPostingId=jobId,Status=status,Version=1,CreatedAt=Now,UpdatedAt=Now};

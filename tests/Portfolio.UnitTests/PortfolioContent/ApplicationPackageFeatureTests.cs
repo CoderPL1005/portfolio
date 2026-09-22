@@ -33,6 +33,7 @@ public sealed class ApplicationPackageFeatureTests
         Assert.Equal(state.Cv.Version, result.Cv!.SourceCanonicalCvVersion);
         var application = await db.JobApplications.AsNoTracking().SingleAsync();
         Assert.Equal("FINALIZED", application.PackageStatus);
+        Assert.Equal("DRAFT", application.Status);
         Assert.Equal(1, application.PackageRevision);
         Assert.Equal(2, application.Version);
         var document = await db.JobApplicationDocuments.AsNoTracking().SingleAsync();
