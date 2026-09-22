@@ -20,6 +20,10 @@ export class ApiClientService {
     return this.http.get<T>(this.url(path), options);
   }
 
+  getBlob(path: string, options: ApiRequestOptions = {}): Observable<Blob> {
+    return this.http.get(this.url(path), { ...options, responseType: 'blob' });
+  }
+
   post<T>(path: string, body: unknown, options: ApiRequestOptions = {}): Observable<T> {
     return this.http.post<T>(this.url(path), body, options);
   }

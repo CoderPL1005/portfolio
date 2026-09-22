@@ -132,11 +132,10 @@ public sealed class TelegramPhotoInboxTests
         public Task<TelegramDownloadedFile> DownloadFileAsync(string fileId,long maximumBytes,CancellationToken ct=default){DownloadedFileIds.Add(fileId);if(FailDownload)throw new HttpRequestException("sanitized simulated failure");return Task.FromResult(new TelegramDownloadedFile(bytes,contentType));}
         public Task SendMessageAsync(long chatId,string text,CancellationToken ct=default){if(FailSend)throw new HttpRequestException("simulated");Messages.Add((chatId,text));return Task.CompletedTask;}
     }
-    private sealed class FakeStorage:IFileStorage
+    private sealed class FakeStorage:IPrivateFileStorage
     {
         public bool FailUpload{get;init;}public List<string> UploadedKeys{get;}=[];public List<string> DeletedKeys{get;}=[];
-        public Task<string> UploadAsync(string key,Stream content,string contentType,CancellationToken ct=default)=>throw new InvalidOperationException("Public upload must not be used for job screenshots.");
-        public Task UploadPrivateAsync(string key,Stream content,string contentType,CancellationToken ct=default){UploadedKeys.Add(key);if(FailUpload)throw new IOException("simulated");return Task.CompletedTask;}
+        public Task UploadAsync(string key,Stream content,string contentType,CancellationToken ct=default){UploadedKeys.Add(key);if(FailUpload)throw new IOException("simulated");return Task.CompletedTask;}
         public Task<Stream> OpenReadAsync(string key,long maximumBytes,CancellationToken ct=default)=>Task.FromResult<Stream>(new MemoryStream());
         public Task DeleteAsync(string key,CancellationToken ct=default){DeletedKeys.Add(key);return Task.CompletedTask;}
     }

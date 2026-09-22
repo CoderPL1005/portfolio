@@ -173,15 +173,13 @@ public sealed class ScreenshotInboxTests
         public bool IsIngestionKeyConflict(DbUpdateException exception) => false;
         public bool IsAttachmentDeliveryConflict(DbUpdateException exception) => false;
     }
-    private sealed class FakeStorage : IFileStorage
+    private sealed class FakeStorage : IPrivateFileStorage
     {
         private int uploads;
         public int? FailUploadNumber { get; init; }
         public HashSet<string> Objects { get; } = [];
         public List<string> DeletedKeys { get; } = [];
-        public Task<string> UploadAsync(string key, Stream content, string contentType, CancellationToken ct = default) =>
-            throw new InvalidOperationException("Public upload must not be used.");
-        public Task UploadPrivateAsync(string key, Stream content, string contentType, CancellationToken ct = default)
+        public Task UploadAsync(string key, Stream content, string contentType, CancellationToken ct = default)
         {
             uploads++;
             if (uploads == FailUploadNumber) throw new IOException("Simulated private upload failure.");

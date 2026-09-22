@@ -71,7 +71,7 @@ public sealed class GetRawJobPostingsQueryHandler(IApplicationDbContext db)
 
 public sealed class AnalyzeRawJobPostingCommandHandler(
     IApplicationDbContext db,
-    IFileStorage storage,
+    IPrivateFileStorage storage,
     IJobAnalysisService analysis,
     TimeProvider clock,
     ILogger<AnalyzeRawJobPostingCommandHandler> logger)

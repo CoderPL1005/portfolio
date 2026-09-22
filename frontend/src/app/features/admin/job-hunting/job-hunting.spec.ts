@@ -52,6 +52,12 @@ describe('Job Hunting admin feature', () => {
     service.analyzeFit('job-1').subscribe();const fit=http.expectOne('https://api.example/api/v1/admin/job-postings/job-1/fit-analysis');expect(fit.request.method).toBe('GET');fit.flush({success:true,data:{jobPostingId:'job-1'}});
   });
 
+  it('uses authenticated canonical CV metadata, multipart upload, and blob content endpoints',()=>{
+    service.canonicalCv().subscribe();const metadata=http.expectOne('https://api.example/api/v1/admin/job-hunting/canonical-cv');expect(metadata.request.method).toBe('GET');metadata.flush({success:true,data:{isConfigured:false,version:0}});
+    const file=new File(['%PDF-test'],'CV.pdf',{type:'application/pdf'});service.uploadCanonicalCv(file,3).subscribe();const upload=http.expectOne('https://api.example/api/v1/admin/job-hunting/canonical-cv');expect(upload.request.method).toBe('PUT');expect(upload.request.body).toBeInstanceOf(FormData);const body=upload.request.body as FormData;const uploadedFile=body.get('file') as File;expect(uploadedFile).toBeInstanceOf(File);expect(uploadedFile.name).toBe('CV.pdf');expect(uploadedFile.type).toBe('application/pdf');expect(body.get('expectedVersion')).toBe('3');upload.flush({success:true,data:{isConfigured:true,version:4}});
+    service.canonicalCvContent().subscribe(blob=>expect(blob.type).toBe('application/pdf'));const content=http.expectOne('https://api.example/api/v1/admin/job-hunting/canonical-cv/content');expect(content.request.method).toBe('GET');expect(content.request.responseType).toBe('blob');content.flush(new Blob(['%PDF-test'],{type:'application/pdf'}));
+  });
+
   it('uses exact application transition and soft-remove endpoints', () => {
     service.applications({page:3,pageSize:20,search:'Acme',status:'APPLIED',channel:'EMAIL'}).subscribe();const list=http.expectOne(r=>r.url.endsWith('/admin/job-applications')&&r.params.get('page')==='3'&&r.params.get('pageSize')==='20'&&r.params.get('search')==='Acme'&&r.params.get('status')==='APPLIED'&&r.params.get('channel')==='EMAIL');expect(list.request.method).toBe('GET');list.flush({success:true,data:{items:[],page:3,pageSize:20,total:0,totalPages:0}});
     service.createApplication({jobPostingId:'job-1',expectedJobVersion:4}).subscribe();const create=http.expectOne('https://api.example/api/v1/admin/job-applications');expect(create.request.method).toBe('POST');expect(create.request.body).toEqual({jobPostingId:'job-1',expectedJobVersion:4});create.flush({success:true,data:{id:'app'}});

@@ -534,15 +534,14 @@ public sealed class JobAnalysisFeatureTests
         public bool IsAttachmentDeliveryConflict(DbUpdateException exception) => false;
     }
 
-    private sealed class FakeStorage : IFileStorage
+    private sealed class FakeStorage : IPrivateFileStorage
     {
         private int privateUploads;
         public Dictionary<string, byte[]> Objects { get; } = [];
         public List<string> OpenedKeys { get; } = [];
         public bool FailRead { get; set; }
         public Func<Task>? BeforeFirstPrivateUpload { get; init; }
-        public Task<string> UploadAsync(string key, Stream content, string contentType, CancellationToken ct = default) => throw new NotSupportedException();
-        public async Task UploadPrivateAsync(string key, Stream content, string contentType, CancellationToken ct = default)
+        public async Task UploadAsync(string key, Stream content, string contentType, CancellationToken ct = default)
         {
             if (Interlocked.Increment(ref privateUploads) == 1 && BeforeFirstPrivateUpload is not null)
                 await BeforeFirstPrivateUpload();

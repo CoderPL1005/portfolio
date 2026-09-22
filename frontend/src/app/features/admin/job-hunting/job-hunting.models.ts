@@ -13,6 +13,7 @@ export interface JobWrite{companyName:string;positionTitle:string;location:strin
 export interface JobCreate extends JobWrite{source:JobSource;sourceExternalId:string|null;sourceUrl:string|null;rawContent:string}
 export interface CandidateJobPreferences{id:string|null;targetRoles:string[];preferredTechnologies:string[];acceptableLocations:string[];workplaceTypes:string[];employmentTypes:string[];minimumSalary:number|null;salaryCurrency:string|null;salaryPeriod:string|null;version:number;createdAt:string|null;updatedAt:string|null}
 export interface CandidateJobPreferencesWrite{expectedVersion:number;targetRoles:string[];preferredTechnologies:string[];acceptableLocations:string[];workplaceTypes:string[];employmentTypes:string[];minimumSalary:number|null;salaryCurrency:string|null;salaryPeriod:string|null}
+export interface CanonicalCv{isConfigured:boolean;id:string|null;fileName:string|null;contentType:string|null;fileSizeBytes:number|null;contentHash:string|null;version:number;createdAt:string|null;updatedAt:string|null}
 export type JobFitStatus='MATCH'|'PARTIAL'|'MISMATCH'|'UNKNOWN';
 export interface JobFitComponent{key:string;label:string;score:number|null;configuredWeight:number;status:JobFitStatus;explanation:string;evidence:string[]}
 export type JobRecommendation='RECOMMENDED'|'NEEDS_REVIEW'|'NOT_RECOMMENDED';

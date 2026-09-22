@@ -15,35 +15,10 @@ public sealed class R2FileStorage(IOptions<R2Settings> options) : IFileStorage
         return $"{settings.PublicBaseUrl.TrimEnd('/')}/{string.Join('/', storageKey.Split('/').Select(Uri.EscapeDataString))}";
     }
 
-    public async Task UploadPrivateAsync(string storageKey, Stream content, string contentType, CancellationToken cancellationToken = default)
-    {
-        var settings = RequireSettings();
-        await PutAsync(settings, storageKey, content, contentType, cancellationToken);
-    }
-
     public async Task DeleteAsync(string storageKey, CancellationToken cancellationToken = default)
     {
         var settings = RequireSettings(); using var client = CreateClient(settings);
         await client.DeleteObjectAsync(new DeleteObjectRequest { BucketName = settings.BucketName, Key = storageKey }, cancellationToken);
-    }
-
-    public async Task<Stream> OpenReadAsync(string storageKey, long maximumBytes, CancellationToken cancellationToken = default)
-    {
-        if (maximumBytes <= 0) throw new ArgumentOutOfRangeException(nameof(maximumBytes));
-        var settings = RequireSettings(); using var client = CreateClient(settings);
-        using var response = await client.GetObjectAsync(settings.BucketName, storageKey, cancellationToken);
-        if (response.ContentLength > maximumBytes) throw new InvalidOperationException("The stored object exceeds the permitted read size.");
-        var content = new MemoryStream();
-        var buffer = new byte[81920];
-        while (true)
-        {
-            var read = await response.ResponseStream.ReadAsync(buffer, cancellationToken);
-            if (read == 0) break;
-            if (content.Length + read > maximumBytes) throw new InvalidOperationException("The stored object exceeds the permitted read size.");
-            await content.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
-        }
-        content.Position = 0;
-        return content;
     }
 
     private R2Settings RequireSettings(bool requirePublicBaseUrl = false)

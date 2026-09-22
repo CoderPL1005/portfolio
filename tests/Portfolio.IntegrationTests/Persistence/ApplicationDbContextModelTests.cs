@@ -21,11 +21,11 @@ public sealed class ApplicationDbContextModelTests
         "knowledge_documents", "knowledge_chunks", "chat_sessions", "chat_messages",
         "chat_message_sources", "chat_message_feedback", "chat_usage_daily", "raw_job_postings",
         "raw_job_posting_attachments", "job_postings", "job_applications", "job_application_events", "job_application_documents",
-        "push_subscriptions", "candidate_job_preferences"
+        "push_subscriptions", "candidate_job_preferences", "canonical_cvs"
     ];
 
     [Fact]
-    public void Model_contains_all_34_expected_tables_and_excludes_contact_messages()
+    public void Model_contains_all_35_expected_tables_and_excludes_contact_messages()
     {
         using var context = CreateContext();
         var tables = context.Model.GetEntityTypes().Select(entity => entity.GetTableName()).Order().ToArray();
@@ -36,13 +36,13 @@ public sealed class ApplicationDbContextModelTests
     }
 
     [Fact]
-    public void Application_context_contract_exposes_all_34_sets()
+    public void Application_context_contract_exposes_all_35_sets()
     {
         var dbSetCount = typeof(IApplicationDbContext).GetProperties()
             .Count(property => property.PropertyType.IsGenericType &&
                 property.PropertyType.GetGenericTypeDefinition() == typeof(DbSet<>));
 
-        Assert.Equal(34, dbSetCount);
+        Assert.Equal(35, dbSetCount);
     }
 
     [Fact]
@@ -61,8 +61,8 @@ public sealed class ApplicationDbContextModelTests
         var model = context.GetService<IDesignTimeModel>().Model;
 
         Assert.Equal(26, model.GetEntityTypes().SelectMany(entity => entity.GetForeignKeys()).Count());
-        Assert.Equal(75, model.GetEntityTypes().SelectMany(entity => entity.GetCheckConstraints()).Count());
-        Assert.Equal(44, model.GetEntityTypes().SelectMany(entity => entity.GetIndexes()).Count());
+        Assert.Equal(80, model.GetEntityTypes().SelectMany(entity => entity.GetCheckConstraints()).Count());
+        Assert.Equal(46, model.GetEntityTypes().SelectMany(entity => entity.GetIndexes()).Count());
 
         var experienceTechnology = model.FindEntityType(typeof(ExperienceTechnology))!;
         Assert.Equal(2, experienceTechnology.FindPrimaryKey()!.Properties.Count);
@@ -112,7 +112,7 @@ public sealed class ApplicationDbContextModelTests
         using var context = CreateContext();
         var migrations = context.Database.GetMigrations().ToArray();
 
-        Assert.Equal(13, migrations.Length);
+        Assert.Equal(14, migrations.Length);
         Assert.EndsWith("_InitialPortfolioSchema", migrations[0], StringComparison.Ordinal);
         Assert.EndsWith("_RemoveContactMessages", migrations[1], StringComparison.Ordinal);
         Assert.EndsWith("_AllowDuplicateSocialLinkPlatforms", migrations[2], StringComparison.Ordinal);
@@ -126,6 +126,29 @@ public sealed class ApplicationDbContextModelTests
         Assert.EndsWith("_AddRawJobPostingAnalysisConcurrency", migrations[10], StringComparison.Ordinal);
         Assert.EndsWith("_AddCandidateJobPreferences", migrations[11], StringComparison.Ordinal);
         Assert.EndsWith("_EnforceSingleJobApplicationPerPosting", migrations[12], StringComparison.Ordinal);
+        Assert.EndsWith("_AddPrivateCanonicalCv", migrations[13], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Canonical_cv_migration_only_adds_the_private_singleton_table()
+    {
+        using var context = CreateContext();
+        var migrations = context.Database.GetMigrations().ToArray();
+        var migrator = context.GetService<IMigrator>();
+        var up = migrator.GenerateScript(migrations[12], migrations[13]);
+        var down = migrator.GenerateScript(migrations[13], migrations[12]);
+
+        Assert.Contains("CREATE TABLE canonical_cvs", up, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("uq_canonical_cvs_singleton", up, StringComparison.Ordinal);
+        Assert.Contains("uq_canonical_cvs_storage_key", up, StringComparison.Ordinal);
+        Assert.Contains("ck_canonical_cvs_content_hash", up, StringComparison.Ordinal);
+        Assert.Contains("ck_canonical_cvs_file_size", up, StringComparison.Ordinal);
+        Assert.Equal(1, CountOccurrences(up.ToUpperInvariant(), "CREATE TABLE"));
+        Assert.DoesNotContain("DROP TABLE", up, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("job_applications", up, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("job_application_documents", up, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("DROP TABLE canonical_cvs", down, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(1, CountOccurrences(down.ToUpperInvariant(), "DROP TABLE"));
     }
 
     [Fact]

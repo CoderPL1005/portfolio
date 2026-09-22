@@ -42,6 +42,7 @@ internal sealed class ContentTestDbContext(DbContextOptions<ContentTestDbContext
     public DbSet<JobApplicationDocument> JobApplicationDocuments => Set<JobApplicationDocument>();
     public DbSet<PushSubscription> PushSubscriptions => Set<PushSubscription>();
     public DbSet<CandidateJobPreferences> CandidateJobPreferences => Set<CandidateJobPreferences>();
+    public DbSet<CanonicalCv> CanonicalCvs => Set<CanonicalCv>();
 
     DbSet<AdminUser> IApplicationDbContext.AdminUsers => throw new NotSupportedException();
     DbSet<AdminRefreshToken> IApplicationDbContext.AdminRefreshTokens => throw new NotSupportedException();
@@ -137,6 +138,10 @@ internal sealed class ContentTestDbContext(DbContextOptions<ContentTestDbContext
         modelBuilder.Entity<CandidateJobPreferences>().HasKey(item => item.Id);
         modelBuilder.Entity<CandidateJobPreferences>().HasIndex(item => item.SingletonKey).IsUnique();
         modelBuilder.Entity<CandidateJobPreferences>().Property(item => item.Version).IsConcurrencyToken();
+        modelBuilder.Entity<CanonicalCv>().HasKey(item => item.Id);
+        modelBuilder.Entity<CanonicalCv>().HasIndex(item => item.SingletonKey).IsUnique();
+        modelBuilder.Entity<CanonicalCv>().HasIndex(item => item.StorageKey).IsUnique();
+        modelBuilder.Entity<CanonicalCv>().Property(item => item.Version).IsConcurrencyToken();
         foreach (var property in new[] { nameof(Portfolio.Domain.Entities.CandidateJobPreferences.TargetRoles), nameof(Portfolio.Domain.Entities.CandidateJobPreferences.PreferredTechnologies), nameof(Portfolio.Domain.Entities.CandidateJobPreferences.AcceptableLocations), nameof(Portfolio.Domain.Entities.CandidateJobPreferences.WorkplaceTypes), nameof(Portfolio.Domain.Entities.CandidateJobPreferences.EmploymentTypes) })
             modelBuilder.Entity<CandidateJobPreferences>().Property<JsonDocument>(property).HasConversion(value => value.RootElement.GetRawText(), value => JsonDocument.Parse(value, default(JsonDocumentOptions)));
         modelBuilder.Entity<ChatSession>().Property(item => item.Metadata).HasConversion(

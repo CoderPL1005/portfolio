@@ -108,6 +108,7 @@ internal sealed class AuthTestDbContext(DbContextOptions<AuthTestDbContext> opti
     DbSet<JobApplicationDocument> IApplicationDbContext.JobApplicationDocuments => throw new NotSupportedException();
     DbSet<PushSubscription> IApplicationDbContext.PushSubscriptions => throw new NotSupportedException();
     DbSet<CandidateJobPreferences> IApplicationDbContext.CandidateJobPreferences => throw new NotSupportedException();
+    DbSet<CanonicalCv> IApplicationDbContext.CanonicalCvs => throw new NotSupportedException();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

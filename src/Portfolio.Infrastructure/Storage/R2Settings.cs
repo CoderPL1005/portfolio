@@ -7,5 +7,6 @@ public sealed class R2Settings
     public string AccessKeyId { get; init; } = "";
     public string SecretAccessKey { get; init; } = "";
     public string BucketName { get; init; } = "";
+    public string PrivateBucketName { get; init; } = "";
     public string PublicBaseUrl { get; init; } = "";
 }

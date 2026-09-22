@@ -43,6 +43,7 @@ public static class DependencyInjection
         services.AddScoped<IRefreshTokenStore, RefreshTokenStore>();
         services.AddOptions<R2Settings>().Bind(configuration.GetSection(R2Settings.SectionName));
         services.AddSingleton<IFileStorage, R2FileStorage>();
+        services.AddSingleton<IPrivateFileStorage, R2PrivateFileStorage>();
         services.AddOptions<GeminiSettings>().Bind(configuration.GetSection(GeminiSettings.SectionName));
         services.AddSingleton<IValidateOptions<JobFitScoringOptions>, JobFitScoringOptionsValidator>();
         services.AddOptions<JobFitScoringOptions>()
@@ -91,6 +92,7 @@ public static class DependencyInjection
         services.AddSingleton<IWebPushSender, WebPushSender>();
         services.AddSingleton<IIngestionKeyConflictDetector, NpgsqlIngestionKeyConflictDetector>();
         services.AddSingleton<IJobApplicationConflictDetector, NpgsqlJobApplicationConflictDetector>();
+        services.AddSingleton<ICanonicalCvConflictDetector, NpgsqlCanonicalCvConflictDetector>();
         services.AddScoped<IJobApplicationCreationTransactionFactory, NpgsqlJobApplicationCreationTransactionFactory>();
         services.AddOptions<JwtSettings>()
             .Bind(configuration.GetSection(JwtSettings.SectionName))

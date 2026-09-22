@@ -56,7 +56,7 @@ public sealed class SubmitJobScreenshotsCommandValidator : IRequestValidator<Sub
 
 public sealed class SubmitJobScreenshotsCommandHandler(
     IApplicationDbContext db,
-    IFileStorage storage,
+    IPrivateFileStorage storage,
     ICurrentUser currentUser,
     IIngestionKeyConflictDetector conflictDetector,
     TimeProvider clock,
@@ -95,7 +95,7 @@ public sealed class SubmitJobScreenshotsCommandHandler(
                 var storageKey = $"job-hunting/raw/{rawId:N}/{attachmentId:N}{image.Extension}";
                 await using var content = new MemoryStream(image.Content, writable: false);
                 uploadedKeys.Add(storageKey);
-                await storage.UploadPrivateAsync(storageKey, content, image.ContentType, cancellationToken);
+                await storage.UploadAsync(storageKey, content, image.ContentType, cancellationToken);
                 attachments.Add(new RawJobPostingAttachment
                 {
                     Id = attachmentId,

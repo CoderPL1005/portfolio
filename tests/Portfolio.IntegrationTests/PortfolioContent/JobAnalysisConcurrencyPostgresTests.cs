@@ -65,7 +65,7 @@ public sealed class JobAnalysisConcurrencyPostgresTests
         }
     }
 
-    private static AnalyzeRawJobPostingCommandHandler Handler(ApplicationDbContext db, IFileStorage storage, IJobAnalysisService analyzer) =>
+    private static AnalyzeRawJobPostingCommandHandler Handler(ApplicationDbContext db, IPrivateFileStorage storage, IJobAnalysisService analyzer) =>
         new(db, storage, analyzer, new FixedTimeProvider(), NullLogger<AnalyzeRawJobPostingCommandHandler>.Instance);
 
     private static ApplicationDbContext Context(string connectionString) => new(
@@ -137,11 +137,10 @@ public sealed class JobAnalysisConcurrencyPostgresTests
         }
     }
 
-    private sealed class Storage(byte[] bytes) : IFileStorage
+    private sealed class Storage(byte[] bytes) : IPrivateFileStorage
     {
         public Task<Stream> OpenReadAsync(string key, long maximumBytes, CancellationToken ct = default) => Task.FromResult<Stream>(new MemoryStream(bytes, false));
-        public Task<string> UploadAsync(string key, Stream content, string contentType, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task UploadPrivateAsync(string key, Stream content, string contentType, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task UploadAsync(string key, Stream content, string contentType, CancellationToken ct = default) => throw new NotSupportedException();
         public Task DeleteAsync(string key, CancellationToken ct = default) => throw new NotSupportedException();
     }
 

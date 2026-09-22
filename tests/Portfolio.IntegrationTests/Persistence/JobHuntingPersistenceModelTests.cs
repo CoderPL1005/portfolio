@@ -22,6 +22,7 @@ public sealed class JobHuntingPersistenceModelTests
         Assert.Equal("job_application_documents", model.FindEntityType(typeof(JobApplicationDocument))!.GetTableName());
         Assert.Equal("raw_job_posting_attachments", model.FindEntityType(typeof(RawJobPostingAttachment))!.GetTableName());
         Assert.Equal("candidate_job_preferences", model.FindEntityType(typeof(CandidateJobPreferences))!.GetTableName());
+        Assert.Equal("canonical_cvs", model.FindEntityType(typeof(CanonicalCv))!.GetTableName());
 
         Assert.Equal("jsonb", Property<RawJobPosting>(model, nameof(RawJobPosting.Metadata)).GetColumnType());
         Assert.True(Property<RawJobPostingAttachment>(model, nameof(RawJobPostingAttachment.TelegramMessageId)).IsNullable);
@@ -39,6 +40,7 @@ public sealed class JobHuntingPersistenceModelTests
         Assert.True(Property<RawJobPosting>(model, nameof(RawJobPosting.Version)).IsConcurrencyToken);
         Assert.True(Property<JobApplication>(model, nameof(JobApplication.Version)).IsConcurrencyToken);
         Assert.True(Property<CandidateJobPreferences>(model, nameof(CandidateJobPreferences.Version)).IsConcurrencyToken);
+        Assert.True(Property<CanonicalCv>(model, nameof(CanonicalCv.Version)).IsConcurrencyToken);
         Assert.Equal("numeric(18,2)", Property<CandidateJobPreferences>(model, nameof(CandidateJobPreferences.MinimumSalary)).GetColumnType());
     }
 
@@ -72,6 +74,11 @@ public sealed class JobHuntingPersistenceModelTests
         AssertConstraint<CandidateJobPreferences>(model, "ck_candidate_job_preferences_salary_currency", "^[A-Z]{3}$");
         AssertConstraint<CandidateJobPreferences>(model, "ck_candidate_job_preferences_salary_consistency", "minimum_salary IS NULL", "salary_currency IS NULL", "salary_period IS NULL", "minimum_salary IS NOT NULL", "salary_currency IS NOT NULL", "salary_period IS NOT NULL");
         AssertConstraint<CandidateJobPreferences>(model, "ck_candidate_job_preferences_version", "version >= 1");
+        AssertConstraint<CanonicalCv>(model, "ck_canonical_cvs_singleton", "singleton_key = 1");
+        AssertConstraint<CanonicalCv>(model, "ck_canonical_cvs_content_type", "content_type = 'application/pdf'");
+        AssertConstraint<CanonicalCv>(model, "ck_canonical_cvs_file_size", "file_size_bytes > 0", "file_size_bytes <= 10485760");
+        AssertConstraint<CanonicalCv>(model, "ck_canonical_cvs_content_hash", "^[0-9a-f]{64}$");
+        AssertConstraint<CanonicalCv>(model, "ck_canonical_cvs_version", "version >= 1");
     }
 
     [Fact]
@@ -119,6 +126,8 @@ public sealed class JobHuntingPersistenceModelTests
         AssertIndex(attachment,"ix_raw_job_posting_attachments_order",false);
         AssertIndex(attachment,"ix_raw_job_posting_attachments_content_hash",false);
         AssertIndex(model.FindEntityType(typeof(CandidateJobPreferences))!, "uq_candidate_job_preferences_singleton_key", true);
+        AssertIndex(model.FindEntityType(typeof(CanonicalCv))!, "uq_canonical_cvs_singleton", true);
+        AssertIndex(model.FindEntityType(typeof(CanonicalCv))!, "uq_canonical_cvs_storage_key", true);
 
         Assert.DoesNotContain(raw.GetIndexes(), index =>
             index.IsUnique && index.Properties.Any(property => property.Name is nameof(RawJobPosting.ContentHash) or nameof(RawJobPosting.CompanyTitleFingerprint)));

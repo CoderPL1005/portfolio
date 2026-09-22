@@ -64,7 +64,7 @@ public static class TelegramAcknowledgements
 public sealed class ProcessTelegramWebhookCommandHandler(
     IApplicationDbContext db,
     ITelegramBotClient telegram,
-    IFileStorage storage,
+    IPrivateFileStorage storage,
     IIngestionKeyConflictDetector conflictDetector,
     IOptions<TelegramOptions> configured,
     TimeProvider clock,
@@ -255,7 +255,7 @@ public sealed class ProcessTelegramWebhookCommandHandler(
             await using var imageStream = new MemoryStream(downloaded.Content, writable: false);
             try
             {
-                await storage.UploadPrivateAsync(storageKey, imageStream, image.ContentType, cancellationToken);
+                await storage.UploadAsync(storageKey, imageStream, image.ContentType, cancellationToken);
             }
             catch
             {

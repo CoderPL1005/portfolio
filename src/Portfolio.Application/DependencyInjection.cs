@@ -201,6 +201,10 @@ public static class DependencyInjection
         services.AddScoped<IRequestHandler<GetCandidateJobPreferencesQuery, CandidateJobPreferencesResult>, GetCandidateJobPreferencesQueryHandler>();
         services.AddScoped<IRequestHandler<UpdateCandidateJobPreferencesCommand, CandidateJobPreferencesResult>, UpdateCandidateJobPreferencesCommandHandler>();
         services.AddScoped<IRequestValidator<UpdateCandidateJobPreferencesCommand>, UpdateCandidateJobPreferencesCommandValidator>();
+        services.AddScoped<IRequestHandler<GetCanonicalCvQuery, CanonicalCvResult>, GetCanonicalCvQueryHandler>();
+        services.AddScoped<IRequestHandler<GetCanonicalCvContentQuery, CanonicalCvContentResult>, GetCanonicalCvContentQueryHandler>();
+        services.AddScoped<IRequestHandler<UploadCanonicalCvCommand, CanonicalCvResult>, UploadCanonicalCvCommandHandler>();
+        services.AddScoped<IRequestValidator<UploadCanonicalCvCommand>, UploadCanonicalCvCommandValidator>();
         services.AddScoped<IRequestHandler<GetJobFitAnalysisQuery, JobFitAnalysisResult>, GetJobFitAnalysisQueryHandler>();
         services.AddScoped<IRequestValidator<GetJobPostingsQuery>, GetJobPostingsQueryValidator>();
         services.AddScoped<IRequestValidator<CreateJobPostingCommand>, CreateJobPostingCommandValidator>();
