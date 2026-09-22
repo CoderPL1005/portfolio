@@ -65,10 +65,11 @@ public sealed class JobHuntingDomainTests
         Assert.Equal(
             ["DRAFT", "APPLIED", "INTERVIEW", "REJECTED", "OFFER", "WITHDRAWN"],
             ValuesOf(typeof(JobApplicationStatuses)));
+        Assert.Equal(["DRAFT", "FINALIZED"], ValuesOf(typeof(JobApplicationPackageStatuses)));
         Assert.Equal(["EMAIL", "PLATFORM", "MANUAL", "OTHER"], ValuesOf(typeof(JobApplicationChannels)));
         Assert.Equal(["ADMIN", "SYSTEM", "TELEGRAM", "EMAIL_CONNECTOR"], ValuesOf(typeof(JobApplicationEventActorTypes)));
         Assert.Equal(
-            ["CREATED", "STATUS_CHANGED", "NOTE_ADDED", "DOCUMENT_ATTACHED", "DOCUMENT_REMOVED"],
+            ["CREATED", "STATUS_CHANGED", "NOTE_ADDED", "DOCUMENT_ATTACHED", "DOCUMENT_REMOVED", "PACKAGE_FINALIZED"],
             ValuesOf(typeof(JobApplicationEventTypes)));
     }
 

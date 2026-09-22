@@ -11,6 +11,10 @@ public sealed class JobApplicationDocument
     public string? FileName { get; set; }
     public string? StorageKey { get; set; }
     public string? ContentHash { get; set; }
+    public string? ContentType { get; set; }
+    public long? FileSizeBytes { get; set; }
+    public int? PackageRevision { get; set; }
+    public int? SourceCanonicalCvVersion { get; set; }
     public JsonDocument Metadata { get; set; } = null!;
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset? RemovedAt { get; set; }

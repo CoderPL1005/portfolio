@@ -14,6 +14,12 @@ public sealed class JobApplication
     public DateTimeOffset? AppliedAt { get; set; }
     public DateTimeOffset? LastActivityAt { get; set; }
     public string? Notes { get; set; }
+    public string PackageStatus { get; set; } = JobApplicationPackageStatuses.Draft;
+    public int PackageRevision { get; set; }
+    public int? PackageJobPostingVersion { get; set; }
+    public string? PackageManifestHash { get; set; }
+    public DateTimeOffset? PackageFinalizedAt { get; set; }
+    public Guid? PackageFinalizedByAdminUserId { get; set; }
     public int Version { get; set; } = 1;
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }

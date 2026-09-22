@@ -60,9 +60,9 @@ public sealed class ApplicationDbContextModelTests
         using var context = CreateContext();
         var model = context.GetService<IDesignTimeModel>().Model;
 
-        Assert.Equal(26, model.GetEntityTypes().SelectMany(entity => entity.GetForeignKeys()).Count());
-        Assert.Equal(80, model.GetEntityTypes().SelectMany(entity => entity.GetCheckConstraints()).Count());
-        Assert.Equal(46, model.GetEntityTypes().SelectMany(entity => entity.GetIndexes()).Count());
+        Assert.Equal(27, model.GetEntityTypes().SelectMany(entity => entity.GetForeignKeys()).Count());
+        Assert.Equal(85, model.GetEntityTypes().SelectMany(entity => entity.GetCheckConstraints()).Count());
+        Assert.Equal(47, model.GetEntityTypes().SelectMany(entity => entity.GetIndexes()).Count());
 
         var experienceTechnology = model.FindEntityType(typeof(ExperienceTechnology))!;
         Assert.Equal(2, experienceTechnology.FindPrimaryKey()!.Properties.Count);
@@ -112,7 +112,7 @@ public sealed class ApplicationDbContextModelTests
         using var context = CreateContext();
         var migrations = context.Database.GetMigrations().ToArray();
 
-        Assert.Equal(14, migrations.Length);
+        Assert.Equal(15, migrations.Length);
         Assert.EndsWith("_InitialPortfolioSchema", migrations[0], StringComparison.Ordinal);
         Assert.EndsWith("_RemoveContactMessages", migrations[1], StringComparison.Ordinal);
         Assert.EndsWith("_AllowDuplicateSocialLinkPlatforms", migrations[2], StringComparison.Ordinal);
@@ -127,6 +127,14 @@ public sealed class ApplicationDbContextModelTests
         Assert.EndsWith("_AddCandidateJobPreferences", migrations[11], StringComparison.Ordinal);
         Assert.EndsWith("_EnforceSingleJobApplicationPerPosting", migrations[12], StringComparison.Ordinal);
         Assert.EndsWith("_AddPrivateCanonicalCv", migrations[13], StringComparison.Ordinal);
+        Assert.EndsWith("_FinalizeApplicationPackage", migrations[14], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Application_package_migration_only_adds_package_metadata_constraints_and_index()
+    {
+        using var context=CreateContext();var migrations=context.Database.GetMigrations().ToArray();var migrator=context.GetService<IMigrator>();var up=migrator.GenerateScript(migrations[13],migrations[14]);var down=migrator.GenerateScript(migrations[14],migrations[13]);
+        Assert.Contains("package_status",up,StringComparison.OrdinalIgnoreCase);Assert.Contains("package_revision",up,StringComparison.OrdinalIgnoreCase);Assert.Contains("package_manifest_hash",up,StringComparison.OrdinalIgnoreCase);Assert.Contains("source_canonical_cv_version",up,StringComparison.OrdinalIgnoreCase);Assert.Contains("uq_job_application_documents_managed_cv_revision",up,StringComparison.Ordinal);Assert.Contains("PACKAGE_FINALIZED",up,StringComparison.Ordinal);Assert.DoesNotContain("CREATE TABLE",up,StringComparison.OrdinalIgnoreCase);Assert.DoesNotContain("DROP TABLE",up,StringComparison.OrdinalIgnoreCase);Assert.DoesNotContain("DELETE FROM",up,StringComparison.OrdinalIgnoreCase);Assert.Contains("DROP COLUMN package_status",down,StringComparison.OrdinalIgnoreCase);Assert.Contains("DOCUMENT_REMOVED",down,StringComparison.Ordinal);
     }
 
     [Fact]

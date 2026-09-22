@@ -50,6 +50,12 @@ public static class JobApplicationStatuses
     public const string Withdrawn = "WITHDRAWN";
 }
 
+public static class JobApplicationPackageStatuses
+{
+    public const string Draft = "DRAFT";
+    public const string Finalized = "FINALIZED";
+}
+
 public static class JobApplicationChannels
 {
     public const string Email = "EMAIL";
@@ -73,4 +79,5 @@ public static class JobApplicationEventTypes
     public const string NoteAdded = "NOTE_ADDED";
     public const string DocumentAttached = "DOCUMENT_ATTACHED";
     public const string DocumentRemoved = "DOCUMENT_REMOVED";
+    public const string PackageFinalized = "PACKAGE_FINALIZED";
 }

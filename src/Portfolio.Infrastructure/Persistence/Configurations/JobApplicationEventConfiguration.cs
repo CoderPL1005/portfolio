@@ -10,7 +10,7 @@ public sealed class JobApplicationEventConfiguration : IEntityTypeConfiguration<
     {
         builder.ToTable("job_application_events", table =>
         {
-            table.HasCheckConstraint("ck_job_application_events_event_type", "event_type IN ('CREATED', 'STATUS_CHANGED', 'NOTE_ADDED', 'DOCUMENT_ATTACHED', 'DOCUMENT_REMOVED')");
+            table.HasCheckConstraint("ck_job_application_events_event_type", "event_type IN ('CREATED', 'STATUS_CHANGED', 'NOTE_ADDED', 'DOCUMENT_ATTACHED', 'DOCUMENT_REMOVED', 'PACKAGE_FINALIZED')");
             table.HasCheckConstraint("ck_job_application_events_from_status", "from_status IS NULL OR from_status IN ('DRAFT', 'APPLIED', 'INTERVIEW', 'REJECTED', 'OFFER', 'WITHDRAWN')");
             table.HasCheckConstraint("ck_job_application_events_to_status", "to_status IS NULL OR to_status IN ('DRAFT', 'APPLIED', 'INTERVIEW', 'REJECTED', 'OFFER', 'WITHDRAWN')");
             table.HasCheckConstraint("ck_job_application_events_actor_type", "actor_type IN ('ADMIN', 'SYSTEM', 'TELEGRAM', 'EMAIL_CONNECTOR')");

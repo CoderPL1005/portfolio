@@ -124,6 +124,7 @@ internal sealed class ContentTestDbContext(DbContextOptions<ContentTestDbContext
         modelBuilder.Entity<JobPosting>().HasKey(item => item.Id);
         modelBuilder.Entity<JobPosting>().Property(item => item.TechnologyStack).HasConversion(value => value.RootElement.GetRawText(), value => System.Text.Json.JsonDocument.Parse(value, default(System.Text.Json.JsonDocumentOptions)));
         modelBuilder.Entity<JobApplication>().HasKey(item => item.Id);
+        modelBuilder.Entity<JobApplication>().Property(item => item.Version).IsConcurrencyToken();
         modelBuilder.Entity<JobApplication>().HasOne(item => item.JobPosting).WithMany(item => item.JobApplications).HasForeignKey(item => item.JobPostingId);
         modelBuilder.Entity<JobApplication>().HasIndex(item => item.JobPostingId).IsUnique();
         modelBuilder.Entity<JobApplicationEvent>().HasKey(item => item.Id);
@@ -133,6 +134,7 @@ internal sealed class ContentTestDbContext(DbContextOptions<ContentTestDbContext
         modelBuilder.Entity<JobApplicationDocument>().HasKey(item => item.Id);
         modelBuilder.Entity<JobApplicationDocument>().HasOne(item => item.JobApplication).WithMany(item => item.Documents).HasForeignKey(item => item.JobApplicationId);
         modelBuilder.Entity<JobApplicationDocument>().Property(item => item.Metadata).HasConversion(value => value.RootElement.GetRawText(), value => System.Text.Json.JsonDocument.Parse(value, default(System.Text.Json.JsonDocumentOptions)));
+        modelBuilder.Entity<JobApplicationDocument>().HasIndex(item => new { item.JobApplicationId, item.PackageRevision }).IsUnique();
         modelBuilder.Entity<PushSubscription>().HasKey(item => item.Id);
         modelBuilder.Entity<PushSubscription>().HasIndex(item => item.Endpoint).IsUnique();
         modelBuilder.Entity<CandidateJobPreferences>().HasKey(item => item.Id);

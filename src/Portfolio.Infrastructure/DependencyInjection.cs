@@ -94,6 +94,8 @@ public static class DependencyInjection
         services.AddSingleton<IJobApplicationConflictDetector, NpgsqlJobApplicationConflictDetector>();
         services.AddSingleton<ICanonicalCvConflictDetector, NpgsqlCanonicalCvConflictDetector>();
         services.AddScoped<IJobApplicationCreationTransactionFactory, NpgsqlJobApplicationCreationTransactionFactory>();
+        services.AddScoped<IApplicationPackageFinalizationTransactionFactory, NpgsqlApplicationPackageFinalizationTransactionFactory>();
+        services.AddSingleton<IApplicationPackageConflictDetector, NpgsqlApplicationPackageConflictDetector>();
         services.AddOptions<JwtSettings>()
             .Bind(configuration.GetSection(JwtSettings.SectionName))
             .Validate(settings => !string.IsNullOrWhiteSpace(settings.Issuer), "Jwt:Issuer is required.")

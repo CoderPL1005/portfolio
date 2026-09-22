@@ -62,11 +62,16 @@ public sealed class JobHuntingPersistenceModelTests
         AssertConstraint<JobPosting>(model, "ck_job_postings_technology_stack", "jsonb_typeof(technology_stack) = 'array'");
         AssertConstraint<JobApplication>(model, "ck_job_applications_status", "INTERVIEW", "WITHDRAWN");
         AssertConstraint<JobApplication>(model, "ck_job_applications_channel", "PLATFORM", "MANUAL");
-        AssertConstraint<JobApplicationEvent>(model, "ck_job_application_events_event_type", "DOCUMENT_ATTACHED");
+        AssertConstraint<JobApplication>(model, "ck_job_applications_package_status", "DRAFT", "FINALIZED");
+        AssertConstraint<JobApplication>(model, "ck_job_applications_package_revision", "package_revision IN (0, 1)");
+        AssertConstraint<JobApplication>(model, "ck_job_applications_package_state", "package_manifest_hash", "package_finalized_at");
+        AssertConstraint<JobApplicationEvent>(model, "ck_job_application_events_event_type", "DOCUMENT_ATTACHED", "PACKAGE_FINALIZED");
         AssertConstraint<JobApplicationEvent>(model, "ck_job_application_events_actor_type", "EMAIL_CONNECTOR");
         AssertConstraint<JobApplicationEvent>(model, "ck_job_application_events_from_status", "from_status IS NULL", "OFFER");
         AssertConstraint<JobApplicationEvent>(model, "ck_job_application_events_to_status", "to_status IS NULL", "REJECTED");
         AssertConstraint<JobApplicationDocument>(model, "ck_job_application_documents_content_hash", "^[0-9a-f]{64}$");
+        AssertConstraint<JobApplicationDocument>(model, "ck_job_application_documents_package_revision", "package_revision = 1");
+        AssertConstraint<JobApplicationDocument>(model, "ck_job_application_documents_managed_snapshot", "content_type = 'application/pdf'", "source_canonical_cv_version >= 1");
         AssertConstraint<RawJobPostingAttachment>(model, "ck_raw_job_posting_attachments_type", "IMAGE");
         AssertConstraint<RawJobPostingAttachment>(model, "ck_raw_job_posting_attachments_content_hash", "^[0-9a-f]{64}$");
         AssertConstraint<RawJobPostingAttachment>(model, "ck_raw_job_posting_attachments_file_size", "file_size_bytes > 0");
@@ -121,6 +126,7 @@ public sealed class JobHuntingPersistenceModelTests
         AssertIndex(application, "ix_job_applications_channel_applied_at", false);
         AssertIndex(model.FindEntityType(typeof(JobApplicationEvent))!, "ix_job_application_events_application_occurred_id", false);
         AssertIndex(model.FindEntityType(typeof(JobApplicationDocument))!, "ix_job_application_documents_application_type_created_id", false);
+        AssertIndex(model.FindEntityType(typeof(JobApplicationDocument))!, "uq_job_application_documents_managed_cv_revision", true, "document_type = 'CV' AND package_revision IS NOT NULL AND removed_at IS NULL");
         var attachment=model.FindEntityType(typeof(RawJobPostingAttachment))!;
         AssertIndex(attachment,"uq_raw_job_posting_attachments_delivery",true,"telegram_message_id IS NOT NULL");
         AssertIndex(attachment,"ix_raw_job_posting_attachments_order",false);
