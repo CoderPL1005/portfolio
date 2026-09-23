@@ -3,6 +3,7 @@ using Npgsql;
 using Pgvector.EntityFrameworkCore;
 using Portfolio.Application.Common.Abstractions.Authentication;
 using Portfolio.Application.Common.Exceptions;
+using Portfolio.Application.Common.Abstractions.Submission;
 using Portfolio.Application.Features.JobHunting;
 using Portfolio.Infrastructure.Persistence;
 
@@ -14,6 +15,7 @@ public sealed class SubmissionAttemptConcurrencyPostgresTests
     private static readonly Guid AdminId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
     private static readonly Guid ApplicationId = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
     private static readonly Guid ClientRequestId = Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");
+    private static readonly Guid AttemptId = Guid.Parse("99999999-9999-9999-9999-999999999999");
     private static readonly DateTimeOffset Now = new(2026, 9, 23, 12, 0, 0, TimeSpan.Zero);
     private static readonly string ManifestHash = new('b', 64);
 
@@ -62,6 +64,33 @@ public sealed class SubmissionAttemptConcurrencyPostgresTests
         finally { await DropAsync(Connection(), schema); }
     }
 
+    [PostgresFact]
+    public async Task Concurrent_execute_claim_invokes_adapter_exactly_once_without_holding_the_transaction()
+    {
+        var schema = "submission_attempt_" + Guid.NewGuid().ToString("N");
+        var connectionString = Connection(schema); await CreateAsync(connectionString, schema);
+        try
+        {
+            await SeedAsync(connectionString); await SeedApprovedAttemptAsync(connectionString);
+            var adapter = new BlockingAdapter();
+            var first = ExecuteAsync(connectionString, adapter);
+            await adapter.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            var second = await Assert.ThrowsAsync<ConflictException>(() => ExecuteAsync(connectionString, adapter));
+            Assert.Equal("SUBMISSION_ATTEMPT_VERSION_CONFLICT", second.Code);
+            adapter.Release.SetResult();
+            var result = await first;
+
+            Assert.Equal("FAILED", result.Status);
+            Assert.Equal(1, adapter.CallCount);
+            Assert.False(adapter.TransactionWasActive);
+            await using var verify = Context(connectionString);
+            Assert.Equal(["CREATED","APPROVED","SUBMITTING","FAILED"], await verify.SubmissionAttemptEvents
+                .AsNoTracking().OrderBy(item=>item.OccurredAt).ThenBy(item=>item.Id).Select(item=>item.ToStatus).ToListAsync());
+            Assert.Equal("DRAFT", (await verify.JobApplications.AsNoTracking().SingleAsync()).Status);
+        }
+        finally { await DropAsync(Connection(), schema); }
+    }
+
     private static async Task<SubmissionAttemptResult> AttemptAsync(string connectionString, Guid? clientRequestId = null)
     {
         await using var db = Context(connectionString);
@@ -75,6 +104,15 @@ public sealed class SubmissionAttemptConcurrencyPostgresTests
     {
         try { return new(await AttemptAsync(connectionString, clientRequestId), null); }
         catch (ConflictException exception) { return new(null, exception.Code); }
+    }
+
+    private static async Task<SubmissionAttemptResult> ExecuteAsync(string connectionString, ISubmissionAdapter adapter)
+    {
+        await using var db=Context(connectionString);
+        var factory=new NpgsqlSubmissionAttemptExecutionTransactionFactory(db);
+        if(adapter is BlockingAdapter blocking)blocking.TransactionProbe=()=>db.Database.CurrentTransaction is not null;
+        var handler=new ExecuteSubmissionAttemptCommandHandler(db,factory,[adapter],new(),new CurrentUser(),new FixedTimeProvider());
+        return await handler.HandleAsync(new(AttemptId,2));
     }
 
     private static ApplicationDbContext Context(string connectionString) => new(
@@ -94,6 +132,18 @@ public sealed class SubmissionAttemptConcurrencyPostgresTests
             VALUES ('eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee','{{ApplicationId}}','CV','Package revision 1','cv.pdf','applications/private/cv.pdf','{{new string('a',64)}}','application/pdf',1024,1,3,'{}','{{Now:O}}');
             """, connection);
         await command.ExecuteNonQueryAsync();
+    }
+
+    private static async Task SeedApprovedAttemptAsync(string connectionString)
+    {
+        await using var connection=new NpgsqlConnection(connectionString);await connection.OpenAsync();
+        await using var command=new NpgsqlCommand($$"""
+            INSERT INTO submission_attempts(id,job_application_id,provider,status,idempotency_key,package_revision,package_manifest_hash,application_version_at_creation,created_at,created_by_admin_user_id,version)
+            VALUES ('{{AttemptId}}','{{ApplicationId}}','EMAIL','APPROVED','{{new string('c',64)}}',1,'{{ManifestHash}}',7,'{{Now:O}}','{{AdminId}}',2);
+            INSERT INTO submission_attempt_events(id,submission_attempt_id,from_status,to_status,actor_admin_user_id,occurred_at,created_at) VALUES
+            ('11111111-aaaa-aaaa-aaaa-aaaaaaaaaaaa','{{AttemptId}}',NULL,'CREATED','{{AdminId}}','{{Now:O}}','{{Now:O}}'),
+            ('22222222-aaaa-aaaa-aaaa-aaaaaaaaaaaa','{{AttemptId}}','CREATED','APPROVED','{{AdminId}}','{{Now.AddTicks(10):O}}','{{Now.AddTicks(10):O}}');
+            """,connection);await command.ExecuteNonQueryAsync();
     }
 
     private static async Task CreateAsync(string connectionString, string schema)
@@ -140,4 +190,10 @@ public sealed class SubmissionAttemptConcurrencyPostgresTests
     private sealed class CurrentUser:ICurrentUser{public bool IsAuthenticated=>true;public Guid? AdminUserId=>AdminId;public string? Email=>"admin@example.com";}
     private sealed class FixedTimeProvider:TimeProvider{public override DateTimeOffset GetUtcNow()=>Now;}
     private sealed record AttemptOutcome(SubmissionAttemptResult? Result, string? ErrorCode);
+    private sealed class BlockingAdapter:ISubmissionAdapter
+    {
+        private int calls;public string Provider=>"EMAIL";public SubmissionAdapterCapabilities Capabilities=>new(true,false,false,false,true);public int CallCount=>calls;public Func<bool>? TransactionProbe{get;set;}public bool TransactionWasActive{get;private set;}public TaskCompletionSource Entered{get;}=new(TaskCreationOptions.RunContinuationsAsynchronously);public TaskCompletionSource Release{get;}=new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public bool Supports(SubmissionRequest request)=>true;
+        public async Task<SubmissionResult> SubmitAsync(SubmissionRequest request,CancellationToken cancellationToken=default){Interlocked.Increment(ref calls);TransactionWasActive=TransactionProbe?.Invoke()==true;Entered.TrySetResult();await Release.Task.WaitAsync(cancellationToken);return new("FAILURE",null,"REJECTED","Rejected safely.");}
+    }
 }

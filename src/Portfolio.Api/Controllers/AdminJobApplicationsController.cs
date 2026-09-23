@@ -24,6 +24,10 @@ public sealed class AdminJobApplicationsController(IRequestDispatcher dispatcher
     public async Task<ActionResult<ApiResponse<SubmissionAttemptResult>>> CreateSubmissionAttempt(Guid applicationId,CreateSubmissionAttemptRequest request,CancellationToken ct){var result=await dispatcher.DispatchAsync(request.Command(applicationId),ct);return CreatedAtAction(nameof(SubmissionAttempt),new{attemptId=result.Id},ApiResponse<SubmissionAttemptResult>.Ok(result));}
     [HttpGet("/api/v1/admin/job-hunting/submission-attempts/{attemptId:guid}")]
     public async Task<ActionResult<ApiResponse<SubmissionAttemptResult>>> SubmissionAttempt(Guid attemptId,CancellationToken ct)=>Ok(ApiResponse<SubmissionAttemptResult>.Ok(await dispatcher.DispatchAsync(new GetSubmissionAttemptQuery(attemptId),ct)));
+    [HttpPost("/api/v1/admin/job-hunting/submission-attempts/{attemptId:guid}/approve")]
+    public async Task<ActionResult<ApiResponse<SubmissionAttemptResult>>> ApproveSubmissionAttempt(Guid attemptId,SubmissionAttemptActionRequest request,CancellationToken ct)=>Ok(ApiResponse<SubmissionAttemptResult>.Ok(await dispatcher.DispatchAsync(new ApproveSubmissionAttemptCommand(attemptId,request.ExpectedVersion),ct)));
+    [HttpPost("/api/v1/admin/job-hunting/submission-attempts/{attemptId:guid}/execute")]
+    public async Task<ActionResult<ApiResponse<SubmissionAttemptResult>>> ExecuteSubmissionAttempt(Guid attemptId,SubmissionAttemptActionRequest request,CancellationToken ct)=>Ok(ApiResponse<SubmissionAttemptResult>.Ok(await dispatcher.DispatchAsync(new ExecuteSubmissionAttemptCommand(attemptId,request.ExpectedVersion),ct)));
     [HttpGet("/api/v1/admin/job-hunting/applications/{applicationId:guid}/package")]
     public async Task<ActionResult<ApiResponse<ApplicationPackageResult>>> Package(Guid applicationId,CancellationToken ct)=>Ok(ApiResponse<ApplicationPackageResult>.Ok(await dispatcher.DispatchAsync(new GetApplicationPackageQuery(applicationId),ct)));
     [HttpPost("/api/v1/admin/job-hunting/applications/{applicationId:guid}/package/finalize")]
@@ -54,3 +58,4 @@ public sealed record FinalizeApplicationPackageRequest(int ExpectedApplicationVe
 {public FinalizeApplicationPackageCommand Command(Guid applicationId)=>new(applicationId,ExpectedApplicationVersion,ExpectedJobPostingVersion,ExpectedCanonicalCvVersion);}
 public sealed record CreateSubmissionAttemptRequest(string Provider,Guid ClientRequestId,int ExpectedApplicationVersion,int ExpectedPackageRevision,string ExpectedManifestHash)
 {public CreateSubmissionAttemptCommand Command(Guid applicationId)=>new(applicationId,Provider,ClientRequestId,ExpectedApplicationVersion,ExpectedPackageRevision,ExpectedManifestHash);}
+public sealed record SubmissionAttemptActionRequest(int ExpectedVersion);

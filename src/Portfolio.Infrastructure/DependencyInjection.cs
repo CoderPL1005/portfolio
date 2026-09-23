@@ -97,6 +97,7 @@ public static class DependencyInjection
         services.AddScoped<IApplicationPackageFinalizationTransactionFactory, NpgsqlApplicationPackageFinalizationTransactionFactory>();
         services.AddSingleton<IApplicationPackageConflictDetector, NpgsqlApplicationPackageConflictDetector>();
         services.AddScoped<ISubmissionAttemptCreationTransactionFactory, NpgsqlSubmissionAttemptCreationTransactionFactory>();
+        services.AddScoped<ISubmissionAttemptExecutionTransactionFactory, NpgsqlSubmissionAttemptExecutionTransactionFactory>();
         services.AddSingleton<ISubmissionAttemptConflictDetector, NpgsqlSubmissionAttemptConflictDetector>();
         services.AddOptions<JwtSettings>()
             .Bind(configuration.GetSection(JwtSettings.SectionName))

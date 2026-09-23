@@ -228,6 +228,10 @@ public static class DependencyInjection
         services.AddScoped<IRequestHandler<GetSubmissionAttemptQuery, SubmissionAttemptResult>, GetSubmissionAttemptQueryHandler>();
         services.AddScoped<IRequestHandler<CreateSubmissionAttemptCommand, SubmissionAttemptResult>, CreateSubmissionAttemptCommandHandler>();
         services.AddScoped<IRequestValidator<CreateSubmissionAttemptCommand>, CreateSubmissionAttemptCommandValidator>();
+        services.AddScoped<IRequestHandler<ApproveSubmissionAttemptCommand, SubmissionAttemptResult>, ApproveSubmissionAttemptCommandHandler>();
+        services.AddScoped<IRequestValidator<ApproveSubmissionAttemptCommand>, ApproveSubmissionAttemptCommandValidator>();
+        services.AddScoped<IRequestHandler<ExecuteSubmissionAttemptCommand, SubmissionAttemptResult>, ExecuteSubmissionAttemptCommandHandler>();
+        services.AddScoped<IRequestValidator<ExecuteSubmissionAttemptCommand>, ExecuteSubmissionAttemptCommandValidator>();
         services.AddScoped<IRequestHandler<GetApplicationPackageQuery, ApplicationPackageResult>, GetApplicationPackageQueryHandler>();
         services.AddScoped<IRequestHandler<GetApplicationPackageContentQuery, ApplicationPackageContentResult>, GetApplicationPackageContentQueryHandler>();
         services.AddScoped<IRequestHandler<FinalizeApplicationPackageCommand, ApplicationPackageResult>, FinalizeApplicationPackageCommandHandler>();

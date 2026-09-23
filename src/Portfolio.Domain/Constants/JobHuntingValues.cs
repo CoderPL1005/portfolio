@@ -109,4 +109,7 @@ public static class SubmissionOutcomes
     public const string Success = "SUCCESS";
     public const string Failure = "FAILURE";
     public const string Unknown = "UNKNOWN";
+
+    public static readonly IReadOnlySet<string> All = new HashSet<string>(StringComparer.Ordinal)
+    { Success, Failure, Unknown };
 }
