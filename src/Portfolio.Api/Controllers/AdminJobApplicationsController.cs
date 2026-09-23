@@ -18,6 +18,12 @@ public sealed class AdminJobApplicationsController(IRequestDispatcher dispatcher
     public async Task<ActionResult<ApiResponse<ApplicationPackageReadinessResult>>> PackageReadiness(Guid applicationId,CancellationToken ct)=>Ok(ApiResponse<ApplicationPackageReadinessResult>.Ok(await dispatcher.DispatchAsync(new GetApplicationPackageReadinessQuery(applicationId),ct)));
     [HttpGet("/api/v1/admin/job-hunting/applications/{applicationId:guid}/submission-readiness")]
     public async Task<ActionResult<ApiResponse<ApplicationSubmissionReadinessResult>>> SubmissionReadiness(Guid applicationId,CancellationToken ct)=>Ok(ApiResponse<ApplicationSubmissionReadinessResult>.Ok(await dispatcher.DispatchAsync(new GetApplicationSubmissionReadinessQuery(applicationId),ct)));
+    [HttpGet("/api/v1/admin/job-hunting/applications/{applicationId:guid}/submission-attempts")]
+    public async Task<ActionResult<ApiResponse<IReadOnlyCollection<SubmissionAttemptResult>>>> SubmissionAttempts(Guid applicationId,CancellationToken ct)=>Ok(ApiResponse<IReadOnlyCollection<SubmissionAttemptResult>>.Ok(await dispatcher.DispatchAsync(new GetSubmissionAttemptsQuery(applicationId),ct)));
+    [HttpPost("/api/v1/admin/job-hunting/applications/{applicationId:guid}/submission-attempts")]
+    public async Task<ActionResult<ApiResponse<SubmissionAttemptResult>>> CreateSubmissionAttempt(Guid applicationId,CreateSubmissionAttemptRequest request,CancellationToken ct){var result=await dispatcher.DispatchAsync(request.Command(applicationId),ct);return CreatedAtAction(nameof(SubmissionAttempt),new{attemptId=result.Id},ApiResponse<SubmissionAttemptResult>.Ok(result));}
+    [HttpGet("/api/v1/admin/job-hunting/submission-attempts/{attemptId:guid}")]
+    public async Task<ActionResult<ApiResponse<SubmissionAttemptResult>>> SubmissionAttempt(Guid attemptId,CancellationToken ct)=>Ok(ApiResponse<SubmissionAttemptResult>.Ok(await dispatcher.DispatchAsync(new GetSubmissionAttemptQuery(attemptId),ct)));
     [HttpGet("/api/v1/admin/job-hunting/applications/{applicationId:guid}/package")]
     public async Task<ActionResult<ApiResponse<ApplicationPackageResult>>> Package(Guid applicationId,CancellationToken ct)=>Ok(ApiResponse<ApplicationPackageResult>.Ok(await dispatcher.DispatchAsync(new GetApplicationPackageQuery(applicationId),ct)));
     [HttpPost("/api/v1/admin/job-hunting/applications/{applicationId:guid}/package/finalize")]
@@ -46,3 +52,5 @@ public sealed record JobApplicationStatusRequest(string Status,int ExpectedVersi
 public sealed record JobApplicationDocumentRequest(string DocumentType,string VersionLabel,string? FileName,string? StorageKey,string? ContentHash,JsonElement? Metadata){public AttachJobApplicationDocumentCommand Command(Guid id)=>new(id,DocumentType,VersionLabel,FileName,StorageKey,ContentHash,Metadata);}
 public sealed record FinalizeApplicationPackageRequest(int ExpectedApplicationVersion,int ExpectedJobPostingVersion,int ExpectedCanonicalCvVersion)
 {public FinalizeApplicationPackageCommand Command(Guid applicationId)=>new(applicationId,ExpectedApplicationVersion,ExpectedJobPostingVersion,ExpectedCanonicalCvVersion);}
+public sealed record CreateSubmissionAttemptRequest(string Provider,Guid ClientRequestId,int ExpectedApplicationVersion,int ExpectedPackageRevision,string ExpectedManifestHash)
+{public CreateSubmissionAttemptCommand Command(Guid applicationId)=>new(applicationId,Provider,ClientRequestId,ExpectedApplicationVersion,ExpectedPackageRevision,ExpectedManifestHash);}

@@ -81,3 +81,32 @@ public static class JobApplicationEventTypes
     public const string DocumentRemoved = "DOCUMENT_REMOVED";
     public const string PackageFinalized = "PACKAGE_FINALIZED";
 }
+
+public static class SubmissionProviders
+{
+    public const string Email = "EMAIL";
+    public const string CompanySite = "COMPANY_SITE";
+    public const string TopCv = "TOPCV";
+    public const string VietnamWorks = "VIETNAMWORKS";
+    public const string Manual = "MANUAL";
+
+    public static readonly IReadOnlySet<string> All = new HashSet<string>(StringComparer.Ordinal)
+    { Email, CompanySite, TopCv, VietnamWorks, Manual };
+}
+
+public static class SubmissionAttemptStatuses
+{
+    public const string Created = "CREATED";
+    public const string Approved = "APPROVED";
+    public const string Submitting = "SUBMITTING";
+    public const string Succeeded = "SUCCEEDED";
+    public const string Failed = "FAILED";
+    public const string Unknown = "UNKNOWN";
+}
+
+public static class SubmissionOutcomes
+{
+    public const string Success = "SUCCESS";
+    public const string Failure = "FAILURE";
+    public const string Unknown = "UNKNOWN";
+}

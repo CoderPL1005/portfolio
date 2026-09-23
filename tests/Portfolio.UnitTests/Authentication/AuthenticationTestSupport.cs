@@ -106,6 +106,8 @@ internal sealed class AuthTestDbContext(DbContextOptions<AuthTestDbContext> opti
     DbSet<JobApplication> IApplicationDbContext.JobApplications => throw new NotSupportedException();
     DbSet<JobApplicationEvent> IApplicationDbContext.JobApplicationEvents => throw new NotSupportedException();
     DbSet<JobApplicationDocument> IApplicationDbContext.JobApplicationDocuments => throw new NotSupportedException();
+    DbSet<SubmissionAttempt> IApplicationDbContext.SubmissionAttempts => throw new NotSupportedException();
+    DbSet<SubmissionAttemptEvent> IApplicationDbContext.SubmissionAttemptEvents => throw new NotSupportedException();
     DbSet<PushSubscription> IApplicationDbContext.PushSubscriptions => throw new NotSupportedException();
     DbSet<CandidateJobPreferences> IApplicationDbContext.CandidateJobPreferences => throw new NotSupportedException();
     DbSet<CanonicalCv> IApplicationDbContext.CanonicalCvs => throw new NotSupportedException();
@@ -142,6 +144,8 @@ internal sealed class AuthTestDbContext(DbContextOptions<AuthTestDbContext> opti
         modelBuilder.Ignore<JobApplication>();
         modelBuilder.Ignore<JobApplicationEvent>();
         modelBuilder.Ignore<JobApplicationDocument>();
+        modelBuilder.Ignore<SubmissionAttempt>();
+        modelBuilder.Ignore<SubmissionAttemptEvent>();
         modelBuilder.Ignore<PushSubscription>();
         modelBuilder.Ignore<CandidateJobPreferences>();
         modelBuilder.Entity<AdminUser>().HasKey(admin => admin.Id);

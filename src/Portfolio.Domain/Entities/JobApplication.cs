@@ -26,4 +26,5 @@ public sealed class JobApplication
     public JobPosting JobPosting { get; set; } = null!;
     public ICollection<JobApplicationEvent> Events { get; set; } = [];
     public ICollection<JobApplicationDocument> Documents { get; set; } = [];
+    public ICollection<SubmissionAttempt> SubmissionAttempts { get; set; } = [];
 }

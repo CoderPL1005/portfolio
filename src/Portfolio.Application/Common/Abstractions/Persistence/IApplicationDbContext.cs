@@ -37,6 +37,8 @@ public interface IApplicationDbContext
     DbSet<JobApplication> JobApplications { get; }
     DbSet<JobApplicationEvent> JobApplicationEvents { get; }
     DbSet<JobApplicationDocument> JobApplicationDocuments { get; }
+    DbSet<SubmissionAttempt> SubmissionAttempts { get; }
+    DbSet<SubmissionAttemptEvent> SubmissionAttemptEvents { get; }
     DbSet<PushSubscription> PushSubscriptions { get; }
     DbSet<CandidateJobPreferences> CandidateJobPreferences { get; }
     DbSet<CanonicalCv> CanonicalCvs { get; }

@@ -40,6 +40,8 @@ internal sealed class ContentTestDbContext(DbContextOptions<ContentTestDbContext
     public DbSet<JobApplication> JobApplications => Set<JobApplication>();
     public DbSet<JobApplicationEvent> JobApplicationEvents => Set<JobApplicationEvent>();
     public DbSet<JobApplicationDocument> JobApplicationDocuments => Set<JobApplicationDocument>();
+    public DbSet<SubmissionAttempt> SubmissionAttempts => Set<SubmissionAttempt>();
+    public DbSet<SubmissionAttemptEvent> SubmissionAttemptEvents => Set<SubmissionAttemptEvent>();
     public DbSet<PushSubscription> PushSubscriptions => Set<PushSubscription>();
     public DbSet<CandidateJobPreferences> CandidateJobPreferences => Set<CandidateJobPreferences>();
     public DbSet<CanonicalCv> CanonicalCvs => Set<CanonicalCv>();
@@ -135,6 +137,15 @@ internal sealed class ContentTestDbContext(DbContextOptions<ContentTestDbContext
         modelBuilder.Entity<JobApplicationDocument>().HasOne(item => item.JobApplication).WithMany(item => item.Documents).HasForeignKey(item => item.JobApplicationId);
         modelBuilder.Entity<JobApplicationDocument>().Property(item => item.Metadata).HasConversion(value => value.RootElement.GetRawText(), value => System.Text.Json.JsonDocument.Parse(value, default(System.Text.Json.JsonDocumentOptions)));
         modelBuilder.Entity<JobApplicationDocument>().HasIndex(item => new { item.JobApplicationId, item.PackageRevision }).IsUnique();
+        modelBuilder.Entity<SubmissionAttempt>().HasKey(item => item.Id);
+        modelBuilder.Entity<SubmissionAttempt>().Property(item => item.Version).IsConcurrencyToken();
+        modelBuilder.Entity<SubmissionAttempt>().HasIndex(item => item.IdempotencyKey).IsUnique();
+        modelBuilder.Entity<SubmissionAttempt>().HasIndex(item => new { item.JobApplicationId, item.PackageRevision, item.Provider }).IsUnique();
+        modelBuilder.Entity<SubmissionAttempt>().HasOne(item => item.JobApplication).WithMany(item => item.SubmissionAttempts).HasForeignKey(item => item.JobApplicationId);
+        modelBuilder.Entity<SubmissionAttempt>().HasOne(item => item.CreatedByAdminUser).WithMany().HasForeignKey(item => item.CreatedByAdminUserId);
+        modelBuilder.Entity<SubmissionAttemptEvent>().HasKey(item => item.Id);
+        modelBuilder.Entity<SubmissionAttemptEvent>().HasOne(item => item.SubmissionAttempt).WithMany(item => item.Events).HasForeignKey(item => item.SubmissionAttemptId);
+        modelBuilder.Entity<SubmissionAttemptEvent>().HasOne(item => item.ActorAdminUser).WithMany().HasForeignKey(item => item.ActorAdminUserId);
         modelBuilder.Entity<PushSubscription>().HasKey(item => item.Id);
         modelBuilder.Entity<PushSubscription>().HasIndex(item => item.Endpoint).IsUnique();
         modelBuilder.Entity<CandidateJobPreferences>().HasKey(item => item.Id);

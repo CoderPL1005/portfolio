@@ -23,6 +23,8 @@ public sealed class JobHuntingPersistenceModelTests
         Assert.Equal("raw_job_posting_attachments", model.FindEntityType(typeof(RawJobPostingAttachment))!.GetTableName());
         Assert.Equal("candidate_job_preferences", model.FindEntityType(typeof(CandidateJobPreferences))!.GetTableName());
         Assert.Equal("canonical_cvs", model.FindEntityType(typeof(CanonicalCv))!.GetTableName());
+        Assert.Equal("submission_attempts", model.FindEntityType(typeof(SubmissionAttempt))!.GetTableName());
+        Assert.Equal("submission_attempt_events", model.FindEntityType(typeof(SubmissionAttemptEvent))!.GetTableName());
 
         Assert.Equal("jsonb", Property<RawJobPosting>(model, nameof(RawJobPosting.Metadata)).GetColumnType());
         Assert.True(Property<RawJobPostingAttachment>(model, nameof(RawJobPostingAttachment.TelegramMessageId)).IsNullable);
@@ -41,6 +43,7 @@ public sealed class JobHuntingPersistenceModelTests
         Assert.True(Property<JobApplication>(model, nameof(JobApplication.Version)).IsConcurrencyToken);
         Assert.True(Property<CandidateJobPreferences>(model, nameof(CandidateJobPreferences.Version)).IsConcurrencyToken);
         Assert.True(Property<CanonicalCv>(model, nameof(CanonicalCv.Version)).IsConcurrencyToken);
+        Assert.True(Property<SubmissionAttempt>(model, nameof(SubmissionAttempt.Version)).IsConcurrencyToken);
         Assert.Equal("numeric(18,2)", Property<CandidateJobPreferences>(model, nameof(CandidateJobPreferences.MinimumSalary)).GetColumnType());
     }
 
@@ -84,6 +87,11 @@ public sealed class JobHuntingPersistenceModelTests
         AssertConstraint<CanonicalCv>(model, "ck_canonical_cvs_file_size", "file_size_bytes > 0", "file_size_bytes <= 10485760");
         AssertConstraint<CanonicalCv>(model, "ck_canonical_cvs_content_hash", "^[0-9a-f]{64}$");
         AssertConstraint<CanonicalCv>(model, "ck_canonical_cvs_version", "version >= 1");
+        AssertConstraint<SubmissionAttempt>(model, "ck_submission_attempts_provider", "EMAIL", "COMPANY_SITE", "TOPCV", "VIETNAMWORKS", "MANUAL");
+        AssertConstraint<SubmissionAttempt>(model, "ck_submission_attempts_status", "CREATED", "APPROVED", "SUBMITTING", "SUCCEEDED", "FAILED", "UNKNOWN");
+        AssertConstraint<SubmissionAttempt>(model, "ck_submission_attempts_idempotency_key", "^[0-9a-f]{64}$");
+        AssertConstraint<SubmissionAttempt>(model, "ck_submission_attempts_outcome", "SUCCEEDED", "FAILED", "UNKNOWN");
+        AssertConstraint<SubmissionAttemptEvent>(model, "ck_submission_attempt_events_to_status", "UNKNOWN");
     }
 
     [Fact]
@@ -99,6 +107,9 @@ public sealed class JobHuntingPersistenceModelTests
         AssertDeleteBehavior<JobApplicationEvent>(model, nameof(JobApplicationEvent.ActorAdminUserId), DeleteBehavior.SetNull);
         AssertDeleteBehavior<JobApplicationDocument>(model, nameof(JobApplicationDocument.JobApplicationId), DeleteBehavior.Restrict);
         AssertDeleteBehavior<RawJobPostingAttachment>(model, nameof(RawJobPostingAttachment.RawJobPostingId), DeleteBehavior.Restrict);
+        AssertDeleteBehavior<SubmissionAttempt>(model, nameof(SubmissionAttempt.JobApplicationId), DeleteBehavior.Restrict);
+        AssertDeleteBehavior<SubmissionAttempt>(model, nameof(SubmissionAttempt.CreatedByAdminUserId), DeleteBehavior.Restrict);
+        AssertDeleteBehavior<SubmissionAttemptEvent>(model, nameof(SubmissionAttemptEvent.SubmissionAttemptId), DeleteBehavior.Restrict);
     }
 
     [Fact]
@@ -134,6 +145,10 @@ public sealed class JobHuntingPersistenceModelTests
         AssertIndex(model.FindEntityType(typeof(CandidateJobPreferences))!, "uq_candidate_job_preferences_singleton_key", true);
         AssertIndex(model.FindEntityType(typeof(CanonicalCv))!, "uq_canonical_cvs_singleton", true);
         AssertIndex(model.FindEntityType(typeof(CanonicalCv))!, "uq_canonical_cvs_storage_key", true);
+        AssertIndex(model.FindEntityType(typeof(SubmissionAttempt))!, "uq_submission_attempts_idempotency_key", true);
+        AssertIndex(model.FindEntityType(typeof(SubmissionAttempt))!, "uq_submission_attempts_non_retryable_context", true, "status IN ('CREATED', 'APPROVED', 'SUBMITTING', 'SUCCEEDED', 'UNKNOWN')");
+        AssertIndex(model.FindEntityType(typeof(SubmissionAttempt))!, "ix_submission_attempts_application_created_id", false);
+        AssertIndex(model.FindEntityType(typeof(SubmissionAttemptEvent))!, "ix_submission_attempt_events_attempt_occurred_id", false);
 
         Assert.DoesNotContain(raw.GetIndexes(), index =>
             index.IsUnique && index.Properties.Any(property => property.Name is nameof(RawJobPosting.ContentHash) or nameof(RawJobPosting.CompanyTitleFingerprint)));
