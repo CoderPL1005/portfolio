@@ -50,6 +50,7 @@ describe('Job Hunting admin feature', () => {
     service.preferences().subscribe();const get=http.expectOne('https://api.example/api/v1/admin/job-hunting/preferences');expect(get.request.method).toBe('GET');get.flush({success:true,data:{version:0}});
     const body={expectedVersion:0,targetRoles:['Backend Developer'],preferredTechnologies:[],acceptableLocations:[],workplaceTypes:[],employmentTypes:[],minimumSalary:null,salaryCurrency:null,salaryPeriod:null};service.updatePreferences(body).subscribe();const put=http.expectOne('https://api.example/api/v1/admin/job-hunting/preferences');expect(put.request.method).toBe('PUT');expect(put.request.body).toEqual(body);put.flush({success:true,data:{version:1}});
     service.analyzeFit('job-1').subscribe();const fit=http.expectOne('https://api.example/api/v1/admin/job-postings/job-1/fit-analysis');expect(fit.request.method).toBe('GET');fit.flush({success:true,data:{jobPostingId:'job-1'}});
+    service.emailApplication('job-1','request-1').subscribe();const email=http.expectOne('https://api.example/api/v1/admin/job-postings/job-1/email-application');expect(email.request.method).toBe('POST');expect(email.request.body).toEqual({clientRequestId:'request-1'});email.flush({success:true,data:{jobPostingId:'job-1',status:'SUCCEEDED'}});
   });
 
   it('uses authenticated canonical CV metadata, multipart upload, and blob content endpoints',()=>{

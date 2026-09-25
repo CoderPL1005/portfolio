@@ -20,12 +20,23 @@ public sealed class ApproveSubmissionAttemptCommandHandler(
     ICurrentUser currentUser,
     TimeProvider clock) : IRequestHandler<ApproveSubmissionAttemptCommand, SubmissionAttemptResult>
 {
-    public async Task<SubmissionAttemptResult> HandleAsync(ApproveSubmissionAttemptCommand request, CancellationToken cancellationToken = default)
+    public Task<SubmissionAttemptResult> HandleAsync(ApproveSubmissionAttemptCommand request, CancellationToken cancellationToken = default) =>
+        HandleCoreAsync(request, false, cancellationToken);
+
+    internal Task<SubmissionAttemptResult> HandleAuthorizedEmailAsync(
+        ApproveSubmissionAttemptCommand request, CancellationToken cancellationToken = default) =>
+        HandleCoreAsync(request, true, cancellationToken);
+
+    private async Task<SubmissionAttemptResult> HandleCoreAsync(
+        ApproveSubmissionAttemptCommand request,
+        bool authorizedEmailWorkflow,
+        CancellationToken cancellationToken)
     {
         var adminUserId = currentUser.AdminUserId
             ?? throw new UnauthorizedException("UNAUTHORIZED", "Authentication is required.");
         var attempt = await db.SubmissionAttempts.SingleOrDefaultAsync(item => item.Id == request.AttemptId, cancellationToken)
             ?? throw SubmissionExecutionRules.NotFound();
+        SubmissionExecutionRules.RequireEmailOrchestration(attempt, authorizedEmailWorkflow);
         SubmissionExecutionRules.RequireVersion(attempt, request.ExpectedVersion);
         SubmissionExecutionRules.RequireState(attempt, SubmissionAttemptStatuses.Created);
 
@@ -45,7 +56,17 @@ public sealed class ExecuteSubmissionAttemptCommandHandler(
     ICurrentUser currentUser,
     TimeProvider clock) : IRequestHandler<ExecuteSubmissionAttemptCommand, SubmissionAttemptResult>
 {
-    public async Task<SubmissionAttemptResult> HandleAsync(ExecuteSubmissionAttemptCommand request, CancellationToken cancellationToken = default)
+    public Task<SubmissionAttemptResult> HandleAsync(ExecuteSubmissionAttemptCommand request, CancellationToken cancellationToken = default) =>
+        HandleCoreAsync(request, false, cancellationToken);
+
+    internal Task<SubmissionAttemptResult> HandleAuthorizedEmailAsync(
+        ExecuteSubmissionAttemptCommand request, CancellationToken cancellationToken = default) =>
+        HandleCoreAsync(request, true, cancellationToken);
+
+    private async Task<SubmissionAttemptResult> HandleCoreAsync(
+        ExecuteSubmissionAttemptCommand request,
+        bool authorizedEmailWorkflow,
+        CancellationToken cancellationToken)
     {
         var adminUserId = currentUser.AdminUserId
             ?? throw new UnauthorizedException("UNAUTHORIZED", "Authentication is required.");
@@ -56,6 +77,7 @@ public sealed class ExecuteSubmissionAttemptCommandHandler(
         await using (var transaction = await transactionFactory.BeginAsync(request.AttemptId, cancellationToken))
         {
             var attempt = transaction.Attempt ?? throw SubmissionExecutionRules.NotFound();
+            SubmissionExecutionRules.RequireEmailOrchestration(attempt, authorizedEmailWorkflow);
             SubmissionExecutionRules.RequireVersion(attempt, request.ExpectedVersion);
             SubmissionExecutionRules.RequireState(attempt, SubmissionAttemptStatuses.Approved);
             var application = transaction.Application
@@ -229,6 +251,13 @@ internal static class SubmissionExecutionRules
         if (attempt.Status != required)
             throw new ConflictException("SUBMISSION_ATTEMPT_STATE_CONFLICT",
                 $"The submission attempt must be {required}.");
+    }
+
+    public static void RequireEmailOrchestration(SubmissionAttempt attempt, bool authorizedEmailWorkflow)
+    {
+        if (attempt.Provider == SubmissionProviders.Email && !authorizedEmailWorkflow)
+            throw new ConflictException("EMAIL_SUBMISSION_REQUIRES_ORCHESTRATION",
+                "Email submission attempts can only be approved or executed by the controlled email-application workflow.");
     }
 
     public static FinalizedApplicationPackageHandoff RequireCurrentPackage(

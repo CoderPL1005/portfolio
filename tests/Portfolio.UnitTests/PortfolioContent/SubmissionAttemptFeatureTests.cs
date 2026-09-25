@@ -29,7 +29,7 @@ public sealed class SubmissionAttemptFeatureTests
         var second = await handler.HandleAsync(command);
 
         Assert.Equal(first.Id, second.Id);
-        Assert.Equal(("EMAIL", "CREATED", 1, state.Application.Version),
+        Assert.Equal(("MANUAL", "CREATED", 1, state.Application.Version),
             (first.Provider, first.Status, first.PackageRevision, first.ApplicationVersionAtCreation));
         Assert.Single(await db.SubmissionAttempts.ToListAsync());
         var history = Assert.Single(first.Events);
@@ -95,7 +95,7 @@ public sealed class SubmissionAttemptFeatureTests
         var handler = new CreateSubmissionAttemptCommandHandler(db,
             new FakeTransactionFactory(null, null), new NeverConflict(), new(), new CurrentUser(), new FixedTimeProvider());
         var error = await Assert.ThrowsAsync<NotFoundException>(() => handler.HandleAsync(
-            new(Guid.NewGuid(), "EMAIL", Guid.NewGuid(), 1, 1, new string('a', 64))));
+            new(Guid.NewGuid(), "MANUAL", Guid.NewGuid(), 1, 1, new string('a', 64))));
         Assert.Equal("JOB_APPLICATION_NOT_FOUND", error.Code);
     }
 
@@ -144,6 +144,23 @@ public sealed class SubmissionAttemptFeatureTests
         Assert.Contains("provider", error.Errors.Keys, StringComparer.OrdinalIgnoreCase);
         Assert.NotEmpty(await new CreateSubmissionAttemptCommandValidator().ValidateAsync(
             new(Guid.Empty, "", Guid.Empty, 0, 2, "bad")));
+    }
+
+    [Fact]
+    public async Task Generic_creation_rejects_email_before_starting_a_submission_transaction()
+    {
+        await using var db = PublicPortfolioTests.CreateContext();
+        var state = await SeedAsync(db);
+        var transaction = new CountingTransactionFactory(state.Application, state.Snapshot);
+        var handler = new CreateSubmissionAttemptCommandHandler(db, transaction, new NeverConflict(), new(),
+            new CurrentUser(), new FixedTimeProvider());
+
+        var error = await Assert.ThrowsAsync<ConflictException>(() => handler.HandleAsync(
+            Command(state) with { Provider = SubmissionProviders.Email }));
+
+        Assert.Equal("EMAIL_SUBMISSION_REQUIRES_ORCHESTRATION", error.Code);
+        Assert.Equal(0, transaction.Calls);
+        Assert.Empty(await db.SubmissionAttempts.ToListAsync());
     }
 
     [Fact]
@@ -207,7 +224,7 @@ public sealed class SubmissionAttemptFeatureTests
         db, new FakeTransactionFactory(state.Application, state.Snapshot), new NeverConflict(), new(),
         new CurrentUser(), new FixedTimeProvider());
     private static CreateSubmissionAttemptCommand Command(State state) => new(
-        state.Application.Id, "EMAIL", Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+        state.Application.Id, "MANUAL", Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
         state.Application.Version, 1, state.ManifestHash);
 
     private static async Task<State> SeedAsync(ContentTestDbContext db)
@@ -226,6 +243,12 @@ public sealed class SubmissionAttemptFeatureTests
         public Task<ISubmissionAttemptCreationTransaction> BeginAsync(Guid applicationId, CancellationToken cancellationToken = default) => Task.FromResult<ISubmissionAttemptCreationTransaction>(new Transaction(application, snapshot));
         private sealed class Transaction(JobApplication? application, JobApplicationDocument? snapshot) : ISubmissionAttemptCreationTransaction
         { public JobApplication? Application { get; }=application;public JobApplicationDocument? ManagedCv { get; }=snapshot;public Task CommitAsync(CancellationToken cancellationToken=default)=>Task.CompletedTask;public ValueTask DisposeAsync()=>ValueTask.CompletedTask; }
+    }
+    private sealed class CountingTransactionFactory(JobApplication? application, JobApplicationDocument? snapshot) : ISubmissionAttemptCreationTransactionFactory
+    {
+        public int Calls { get; private set; }
+        public Task<ISubmissionAttemptCreationTransaction> BeginAsync(Guid applicationId, CancellationToken cancellationToken = default)
+        { Calls++;return new FakeTransactionFactory(application,snapshot).BeginAsync(applicationId,cancellationToken); }
     }
     private sealed class NeverConflict : ISubmissionAttemptConflictDetector { public bool IsDuplicateIdempotencyKey(DbUpdateException exception) => false;public bool IsNonRetryableAttemptConflict(DbUpdateException exception)=>false; }
     private sealed class CurrentUser : ICurrentUser { public bool IsAuthenticated=>true;public Guid? AdminUserId=>AdminId;public string? Email=>"admin@example.com"; }

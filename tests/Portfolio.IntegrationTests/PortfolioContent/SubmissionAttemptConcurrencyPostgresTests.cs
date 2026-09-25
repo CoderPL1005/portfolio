@@ -97,7 +97,7 @@ public sealed class SubmissionAttemptConcurrencyPostgresTests
         var handler = new CreateSubmissionAttemptCommandHandler(db,
             new NpgsqlSubmissionAttemptCreationTransactionFactory(db),
             new NpgsqlSubmissionAttemptConflictDetector(), new(), new CurrentUser(), new FixedTimeProvider());
-        return await handler.HandleAsync(new(ApplicationId, "EMAIL", clientRequestId ?? ClientRequestId, 7, 1, ManifestHash));
+        return await handler.HandleAsync(new(ApplicationId, "COMPANY_SITE", clientRequestId ?? ClientRequestId, 7, 1, ManifestHash));
     }
 
     private static async Task<AttemptOutcome> AttemptOutcomeAsync(string connectionString, Guid clientRequestId)
@@ -139,7 +139,7 @@ public sealed class SubmissionAttemptConcurrencyPostgresTests
         await using var connection=new NpgsqlConnection(connectionString);await connection.OpenAsync();
         await using var command=new NpgsqlCommand($$"""
             INSERT INTO submission_attempts(id,job_application_id,provider,status,idempotency_key,package_revision,package_manifest_hash,application_version_at_creation,created_at,created_by_admin_user_id,version)
-            VALUES ('{{AttemptId}}','{{ApplicationId}}','EMAIL','APPROVED','{{new string('c',64)}}',1,'{{ManifestHash}}',7,'{{Now:O}}','{{AdminId}}',2);
+            VALUES ('{{AttemptId}}','{{ApplicationId}}','COMPANY_SITE','APPROVED','{{new string('c',64)}}',1,'{{ManifestHash}}',7,'{{Now:O}}','{{AdminId}}',2);
             INSERT INTO submission_attempt_events(id,submission_attempt_id,from_status,to_status,actor_admin_user_id,occurred_at,created_at) VALUES
             ('11111111-aaaa-aaaa-aaaa-aaaaaaaaaaaa','{{AttemptId}}',NULL,'CREATED','{{AdminId}}','{{Now:O}}','{{Now:O}}'),
             ('22222222-aaaa-aaaa-aaaa-aaaaaaaaaaaa','{{AttemptId}}','CREATED','APPROVED','{{AdminId}}','{{Now.AddTicks(10):O}}','{{Now.AddTicks(10):O}}');
@@ -192,7 +192,7 @@ public sealed class SubmissionAttemptConcurrencyPostgresTests
     private sealed record AttemptOutcome(SubmissionAttemptResult? Result, string? ErrorCode);
     private sealed class BlockingAdapter:ISubmissionAdapter
     {
-        private int calls;public string Provider=>"EMAIL";public SubmissionAdapterCapabilities Capabilities=>new(true,false,false,false,true);public int CallCount=>calls;public Func<bool>? TransactionProbe{get;set;}public bool TransactionWasActive{get;private set;}public TaskCompletionSource Entered{get;}=new(TaskCreationOptions.RunContinuationsAsynchronously);public TaskCompletionSource Release{get;}=new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int calls;public string Provider=>"COMPANY_SITE";public SubmissionAdapterCapabilities Capabilities=>new(true,false,false,false,true);public int CallCount=>calls;public Func<bool>? TransactionProbe{get;set;}public bool TransactionWasActive{get;private set;}public TaskCompletionSource Entered{get;}=new(TaskCreationOptions.RunContinuationsAsynchronously);public TaskCompletionSource Release{get;}=new(TaskCreationOptions.RunContinuationsAsynchronously);
         public bool Supports(SubmissionRequest request)=>true;
         public async Task<SubmissionResult> SubmitAsync(SubmissionRequest request,CancellationToken cancellationToken=default){Interlocked.Increment(ref calls);TransactionWasActive=TransactionProbe?.Invoke()==true;Entered.TrySetResult();await Release.Task.WaitAsync(cancellationToken);return new("FAILURE",null,"REJECTED","Rejected safely.");}
     }

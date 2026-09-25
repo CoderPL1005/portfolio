@@ -1082,6 +1082,13 @@ Example:
 
 Secrets must come from environment variables / deployment secrets.
 
+Milestone A Gmail submission uses the Gmail REST API with the `gmail.send` OAuth scope.
+Render configuration uses `EmailSubmission__Enabled`, `EmailSubmission__TestMode`,
+`EmailSubmission__AllowedRecipients__0` (and subsequent array indexes),
+`EmailSubmission__SenderEmail`, `EmailSubmission__GoogleClientId`,
+`EmailSubmission__GoogleClientSecret`, and `EmailSubmission__GoogleRefreshToken`.
+The OAuth values are server-only secrets. Test mode is fail-closed: an empty allowlist permits no recipients.
+
 Examples:
 
 ```text

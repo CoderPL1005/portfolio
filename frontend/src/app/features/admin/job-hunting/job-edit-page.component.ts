@@ -1,3 +1,4 @@
+import { DatePipe } from '@angular/common';
 import { Component, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
@@ -5,12 +6,12 @@ import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { take } from 'rxjs';
 import { safeAdminError } from '../shared/admin-api';
 import { DirtyAware } from '../shared/dirty.guard';
-import { JobCreate, JobDetail, JobFitAnalysis, JobSource, JobWrite } from './job-hunting.models';
+import { EmailApplicationWorkflowResult, JobCreate, JobDetail, JobFitAnalysis, JobSource, JobWrite } from './job-hunting.models';
 import { JobHuntingService } from './job-hunting.service';
 
 @Component({
   selector: 'app-job-edit',
-  imports: [ReactiveFormsModule, RouterLink],
+  imports: [ReactiveFormsModule, RouterLink, DatePipe],
   template: `
     <div class="admin-page job-editor">
       <a class="back-link" routerLink="/admin/job-hunting/jobs">&larr; Jobs</a>
@@ -118,6 +119,15 @@ import { JobHuntingService } from './job-hunting.service';
             } @else { <p class="empty-copy">Fit analysis runs only when you choose Analyze fit.</p> }
           </section>
 
+          @if (supportsEmailWorkflow(current)) {
+            <section class="admin-panel detail-card email-workflow" aria-labelledby="email-workflow-title">
+              <div class="section-heading"><div><p class="section-kicker">CONTROLLED SUBMISSION</p><h2 id="email-workflow-title">Facebook email application</h2></div><button type="button" class="admin-button primary" (click)="submitEmailApplication()" [disabled]="emailSubmitting()">{{ emailSubmitting() ? 'Processing...' : 'Apply by email' }}</button></div>
+              <p class="fit-disclaimer">Runs the deterministic fit gate, prepares the immutable CV package, and sends only through the configured Gmail test-mode safety boundary.</p>
+              <dl class="fit-summary"><div><dt>Detected email</dt><dd>{{ current.applicationEmail || 'Not found' }}</dd></div><div><dt>Fit gate</dt><dd>{{ fitAnalysis()?.recommendation ? statusLabel(fitAnalysis()!.recommendation) : 'Evaluated on submit' }}</dd></div><div><dt>Package</dt><dd>{{ emailResult()?.packageStatus ? statusLabel(emailResult()!.packageStatus!) + ' revision ' + emailResult()!.packageRevision : 'Prepared on submit' }}</dd></div></dl>
+              @if (emailResult(); as result) { <div class="email-result" [attr.data-status]="result.status"><strong>{{ statusLabel(result.status) }}</strong><span>{{ result.message }}</span>@if(result.status === 'SUCCEEDED' && result.attempt?.completedAt){<span>Sent {{ result.attempt!.completedAt | date:'medium' }}</span>}@if(result.jobApplicationId){<a class="text-link" [routerLink]="['/admin/job-hunting/applications',result.jobApplicationId]">Open application workspace</a>}</div> }
+            </section>
+          }
+
           <section class="admin-panel detail-card" aria-labelledby="state-title">
             <div class="section-heading"><div><p class="section-kicker">WORKFLOW</p><h2 id="state-title">State</h2></div><p>Stored values remain unchanged; labels are formatted for readability.</p></div>
             <div class="state-grid">
@@ -178,6 +188,9 @@ export class JobEditPageComponent implements DirtyAware {
   readonly fitLoading = signal(false);
   readonly selectionAction = signal<string | null>(null);
   readonly applicationCreating = signal(false);
+  readonly emailSubmitting = signal(false);
+  readonly emailResult = signal<EmailApplicationWorkflowResult | null>(null);
+  private emailClientRequestId: string | null = null;
   readonly fitAnalysis = signal<JobFitAnalysis | null>(null);
   readonly sources: JobSource[] = ['MANUAL', 'TOPCV', 'VIETNAMWORKS', 'COMPANY_SITE', 'FACEBOOK', 'INSTAGRAM', 'OTHER'];
   readonly verifications = ['PENDING', 'VERIFIED', 'UNVERIFIED', 'LIKELY_EXPIRED'];
@@ -232,6 +245,8 @@ export class JobEditPageComponent implements DirtyAware {
   archive(): void { if (confirm('Archive this job?')) this.api.archive(this.id!, this.job()!.version).pipe(take(1)).subscribe({ next: value => this.replace(value), error: value => this.failed(value) }); }
   createApplication(): void { const current=this.job();if(!current||this.applicationCreating()||current.selectionStatus!=='APPROVED'||current.archivedAt!==null||current.applications.length)return;this.applicationCreating.set(true);this.error.set(null);this.api.createApplication({jobPostingId:current.id,expectedJobVersion:current.version}).pipe(take(1)).subscribe({next:value=>{this.applicationCreating.set(false);void this.router.navigate(['/admin/job-hunting/applications',value.id])},error:value=>{this.applicationCreating.set(false);this.error.set(safeAdminError(value))}}); }
   analyzeFit(): void { if(this.fitLoading()||!this.id)return;this.fitLoading.set(true);this.error.set(null);this.api.analyzeFit(this.id).pipe(take(1)).subscribe({next:value=>{this.fitAnalysis.set(value);this.fitLoading.set(false)},error:value=>{this.error.set(safeAdminError(value));this.fitLoading.set(false)}}); }
+  supportsEmailWorkflow(job:JobDetail):boolean{return job.sources.some(source=>source.source==='FACEBOOK'||source.source==='MANUAL');}
+  submitEmailApplication():void{const current=this.job();if(!current||this.emailSubmitting()||!this.supportsEmailWorkflow(current)||!confirm('Run the fit gate and, if safe, send this application through Gmail?'))return;this.emailClientRequestId??=crypto.randomUUID();this.emailSubmitting.set(true);this.error.set(null);this.api.emailApplication(current.id,this.emailClientRequestId).pipe(take(1)).subscribe({next:value=>{this.emailResult.set(value);this.emailSubmitting.set(false);if(value.overallScore!==null)this.analyzeFit();this.load()},error:value=>{this.error.set(safeAdminError(value));this.emailSubmitting.set(false)}});}
 
   private jobWrite(): JobWrite {
     const value = this.form.getRawValue();

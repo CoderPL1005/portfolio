@@ -6,6 +6,8 @@ using Portfolio.Api.Contracts.Common;
 using Portfolio.Application.Common.Abstractions.Messaging;
 using Portfolio.Application.Common.Models;
 using Portfolio.Application.Features.JobHunting;
+using Portfolio.Application.Common.Exceptions;
+using Portfolio.Domain.Constants;
 
 namespace Portfolio.Api.Controllers;
 
@@ -57,5 +59,5 @@ public sealed record JobApplicationDocumentRequest(string DocumentType,string Ve
 public sealed record FinalizeApplicationPackageRequest(int ExpectedApplicationVersion,int ExpectedJobPostingVersion,int ExpectedCanonicalCvVersion)
 {public FinalizeApplicationPackageCommand Command(Guid applicationId)=>new(applicationId,ExpectedApplicationVersion,ExpectedJobPostingVersion,ExpectedCanonicalCvVersion);}
 public sealed record CreateSubmissionAttemptRequest(string Provider,Guid ClientRequestId,int ExpectedApplicationVersion,int ExpectedPackageRevision,string ExpectedManifestHash)
-{public CreateSubmissionAttemptCommand Command(Guid applicationId)=>new(applicationId,Provider,ClientRequestId,ExpectedApplicationVersion,ExpectedPackageRevision,ExpectedManifestHash);}
+{public CreateSubmissionAttemptCommand Command(Guid applicationId){var provider=Provider?.Trim()??string.Empty;if(string.Equals(provider,SubmissionProviders.Email,StringComparison.OrdinalIgnoreCase))throw new ConflictException("EMAIL_SUBMISSION_REQUIRES_ORCHESTRATION","Email submission attempts can only be created by the controlled email-application workflow.");return new(applicationId,provider,ClientRequestId,ExpectedApplicationVersion,ExpectedPackageRevision,ExpectedManifestHash);}}
 public sealed record SubmissionAttemptActionRequest(int ExpectedVersion);

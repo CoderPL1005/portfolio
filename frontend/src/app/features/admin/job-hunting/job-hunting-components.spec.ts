@@ -104,6 +104,26 @@ describe('Job editor workflows',()=>{
     c.analyzeFit();c.form.patchValue({location:'Hanoi'});expect(c.fitAnalysis()).toBeNull();c.analyzeFit();fixture.detectChanges();
     expect(api.analyzeFit).toHaveBeenCalledTimes(2);expect(c.fitAnalysis()?.overallScore).toBe(55);expect(fixture.nativeElement.textContent).toContain('Needs review');expect(fixture.nativeElement.textContent).toContain('Review the changed job.');
   });
+  it('shows the email workflow only for manual discovery and submits once with a stable client request id',()=>{
+    vi.spyOn(window,'confirm').mockReturnValue(true);
+    const pending=new Subject<any>();
+    const current=jobDetail({applicationEmail:'owner@example.com',sources:[{...jobDetail().sources[0],source:'FACEBOOK'}]});
+    const api={job:vi.fn(()=>of(current)),emailApplication:vi.fn((_id:string,_requestId:string)=>pending),analyzeFit:vi.fn(()=>of(fitAnalysis()))};
+    const fixture=mount(JobEditPageComponent,api,'job-1');const c=fixture.componentInstance;
+    expect(fixture.nativeElement.textContent).toContain('Facebook email application');expect(fixture.nativeElement.textContent).toContain('owner@example.com');
+    c.submitEmailApplication();c.submitEmailApplication();fixture.detectChanges();
+    expect(api.emailApplication).toHaveBeenCalledTimes(1);const requestId=api.emailApplication.mock.calls[0][1];expect(requestId).toEqual(expect.any(String));expect(requestId.length).toBeGreaterThan(0);expect(c.emailSubmitting()).toBe(true);
+    pending.next({jobPostingId:'job-1',jobApplicationId:'app-1',status:'SUCCEEDED',blockerCode:null,message:'Application email sent successfully.',overallScore:90,coveragePercent:90,applicationEmail:'owner@example.com',packageStatus:'FINALIZED',packageRevision:1,attempt:submissionAttempt({provider:'EMAIL',status:'SUCCEEDED',completedAt:'2026-09-24T04:00:00Z'})});pending.complete();fixture.detectChanges();
+    expect(c.emailSubmitting()).toBe(false);expect(fixture.nativeElement.textContent).toContain('Succeeded');expect(fixture.nativeElement.textContent).toContain('Application email sent successfully.');expect(fixture.nativeElement.textContent).toContain('Sent');
+  });
+  it('does not expose the email workflow for an autonomous source',()=>{
+    const current=jobDetail({applicationEmail:'owner@example.com',sources:[{...jobDetail().sources[0],source:'COMPANY_SITE'}]});const api={job:()=>of(current),emailApplication:vi.fn()};const fixture=mount(JobEditPageComponent,api,'job-1');
+    expect(fixture.nativeElement.textContent).not.toContain('Facebook email application');fixture.componentInstance.submitEmailApplication();expect(api.emailApplication).not.toHaveBeenCalled();
+  });
+  it('reuses the same client request id after a safe workflow error',()=>{
+    vi.spyOn(window,'confirm').mockReturnValue(true);const api={job:()=>of(jobDetail({applicationEmail:'owner@example.com'})),emailApplication:vi.fn((_id:string,_requestId:string)=>throwError(()=>({status:409})))};const fixture=mount(JobEditPageComponent,api,'job-1');const c=fixture.componentInstance;
+    c.submitEmailApplication();c.submitEmailApplication();expect(api.emailApplication).toHaveBeenCalledTimes(2);expect(api.emailApplication.mock.calls[1][1]).toBe(api.emailApplication.mock.calls[0][1]);expect(c.emailSubmitting()).toBe(false);expect(c.error()).toBeTruthy();
+  });
   it('requires raw content in create mode and sends the exact manual-ingestion payload',()=>{
     const created=jobDetail();const api={createJob:vi.fn(()=>of(created))};const fixture=mount(JobEditPageComponent,api);const c=fixture.componentInstance;const router=TestBed.inject(Router);vi.spyOn(router,'navigate').mockResolvedValue(true);
     c.form.patchValue({companyName:'Acme',positionTitle:'Developer',location:'Remote',description:'Description',technologyStack:'Angular, .NET'});c.save();expect(api.createJob).not.toHaveBeenCalled();expect(c.sourceForm.controls.rawContent.hasError('required')).toBe(true);

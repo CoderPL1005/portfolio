@@ -30,6 +30,7 @@ using Portfolio.Application.Features.Agent;
 using Portfolio.Application.Features.Chat;
 using Portfolio.Application.Features.JobHunting;
 using Portfolio.Application.Features.PushNotifications;
+using Portfolio.Application.Common.Abstractions.Submission;
 
 namespace Portfolio.Application;
 
@@ -226,12 +227,22 @@ public static class DependencyInjection
         services.AddScoped<IRequestHandler<GetApplicationSubmissionReadinessQuery, ApplicationSubmissionReadinessResult>, GetApplicationSubmissionReadinessQueryHandler>();
         services.AddScoped<IRequestHandler<GetSubmissionAttemptsQuery, IReadOnlyCollection<SubmissionAttemptResult>>, GetSubmissionAttemptsQueryHandler>();
         services.AddScoped<IRequestHandler<GetSubmissionAttemptQuery, SubmissionAttemptResult>, GetSubmissionAttemptQueryHandler>();
-        services.AddScoped<IRequestHandler<CreateSubmissionAttemptCommand, SubmissionAttemptResult>, CreateSubmissionAttemptCommandHandler>();
+        services.AddScoped<CreateSubmissionAttemptCommandHandler>();
+        services.AddScoped<IRequestHandler<CreateSubmissionAttemptCommand, SubmissionAttemptResult>>(provider => provider.GetRequiredService<CreateSubmissionAttemptCommandHandler>());
         services.AddScoped<IRequestValidator<CreateSubmissionAttemptCommand>, CreateSubmissionAttemptCommandValidator>();
-        services.AddScoped<IRequestHandler<ApproveSubmissionAttemptCommand, SubmissionAttemptResult>, ApproveSubmissionAttemptCommandHandler>();
+        services.AddScoped<ApproveSubmissionAttemptCommandHandler>();
+        services.AddScoped<IRequestHandler<ApproveSubmissionAttemptCommand, SubmissionAttemptResult>>(provider => provider.GetRequiredService<ApproveSubmissionAttemptCommandHandler>());
         services.AddScoped<IRequestValidator<ApproveSubmissionAttemptCommand>, ApproveSubmissionAttemptCommandValidator>();
-        services.AddScoped<IRequestHandler<ExecuteSubmissionAttemptCommand, SubmissionAttemptResult>, ExecuteSubmissionAttemptCommandHandler>();
+        services.AddScoped<ExecuteSubmissionAttemptCommandHandler>();
+        services.AddScoped<IRequestHandler<ExecuteSubmissionAttemptCommand, SubmissionAttemptResult>>(provider => provider.GetRequiredService<ExecuteSubmissionAttemptCommandHandler>());
         services.AddScoped<IRequestValidator<ExecuteSubmissionAttemptCommand>, ExecuteSubmissionAttemptCommandValidator>();
+        services.AddScoped<IApplicationEmailComposer, DeterministicApplicationEmailComposer>();
+        services.AddScoped<IAdminJobNotificationSender, AdminJobNotificationSender>();
+        services.AddScoped<IRequestHandler<SubmitFacebookEmailApplicationCommand, EmailApplicationWorkflowResult>, SubmitFacebookEmailApplicationCommandHandler>();
+        services.AddScoped<IRequestValidator<SubmitFacebookEmailApplicationCommand>, SubmitFacebookEmailApplicationCommandValidator>();
+        services.AddScoped<IRequestHandler<CreateAuthorizedEmailSubmissionAttemptCommand, SubmissionAttemptResult>, CreateAuthorizedEmailSubmissionAttemptCommandHandler>();
+        services.AddScoped<IRequestHandler<ApproveAuthorizedEmailSubmissionAttemptCommand, SubmissionAttemptResult>, ApproveAuthorizedEmailSubmissionAttemptCommandHandler>();
+        services.AddScoped<IRequestHandler<ExecuteAuthorizedEmailSubmissionAttemptCommand, SubmissionAttemptResult>, ExecuteAuthorizedEmailSubmissionAttemptCommandHandler>();
         services.AddScoped<IRequestHandler<GetApplicationPackageQuery, ApplicationPackageResult>, GetApplicationPackageQueryHandler>();
         services.AddScoped<IRequestHandler<GetApplicationPackageContentQuery, ApplicationPackageContentResult>, GetApplicationPackageContentQueryHandler>();
         services.AddScoped<IRequestHandler<FinalizeApplicationPackageCommand, ApplicationPackageResult>, FinalizeApplicationPackageCommandHandler>();

@@ -19,6 +19,8 @@ using Portfolio.Application.Common.Configuration;
 using Portfolio.Infrastructure.Integrations.Telegram;
 using Portfolio.Application.Common.Abstractions.Notifications;
 using Portfolio.Infrastructure.Notifications;
+using Portfolio.Application.Common.Abstractions.Submission;
+using Portfolio.Infrastructure.Integrations.Gmail;
 using System.Net.Mail;
 
 namespace Portfolio.Infrastructure;
@@ -90,6 +92,14 @@ public static class DependencyInjection
             .Validate(settings => IsValidWebPushKey(settings.PrivateKey),
                 "WebPush:PrivateKey must be a valid base64url value no longer than 512 characters.");
         services.AddSingleton<IWebPushSender, WebPushSender>();
+        services.AddSingleton<IValidateOptions<EmailSubmissionOptions>, EmailSubmissionOptionsValidator>();
+        services.AddOptions<EmailSubmissionOptions>()
+            .Bind(configuration.GetSection(EmailSubmissionOptions.SectionName))
+            .ValidateOnStart();
+        services.AddHttpClient<IApplicationEmailSender, GmailApplicationEmailSender>(client =>
+            client.Timeout = TimeSpan.FromSeconds(45))
+            .RemoveAllLoggers();
+        services.AddScoped<ISubmissionAdapter, GmailSubmissionAdapter>();
         services.AddSingleton<IIngestionKeyConflictDetector, NpgsqlIngestionKeyConflictDetector>();
         services.AddSingleton<IJobApplicationConflictDetector, NpgsqlJobApplicationConflictDetector>();
         services.AddSingleton<ICanonicalCvConflictDetector, NpgsqlCanonicalCvConflictDetector>();

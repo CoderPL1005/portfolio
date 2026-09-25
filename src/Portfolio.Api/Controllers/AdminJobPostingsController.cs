@@ -19,6 +19,7 @@ public sealed class AdminJobPostingsController(IRequestDispatcher dispatcher):Co
     [HttpPut("{id:guid}/selection")]public async Task<ActionResult<ApiResponse<JobPostingResult>>> Selection(Guid id,JobStateRequest request,CancellationToken ct)=>Ok(ApiResponse<JobPostingResult>.Ok(await dispatcher.DispatchAsync(new UpdateJobSelectionCommand(id,request.Status,request.ExpectedVersion),ct)));
     [HttpPost("{id:guid}/archive")]public async Task<ActionResult<ApiResponse<JobPostingResult>>> Archive(Guid id,ExpectedVersionRequest request,CancellationToken ct)=>Ok(ApiResponse<JobPostingResult>.Ok(await dispatcher.DispatchAsync(new ArchiveJobPostingCommand(id,request.ExpectedVersion),ct)));
     [HttpGet("{id:guid}/fit-analysis")]public async Task<ActionResult<ApiResponse<JobFitAnalysisResult>>> FitAnalysis(Guid id,CancellationToken ct)=>Ok(ApiResponse<JobFitAnalysisResult>.Ok(await dispatcher.DispatchAsync(new GetJobFitAnalysisQuery(id),ct)));
+    [HttpPost("{id:guid}/email-application")]public async Task<ActionResult<ApiResponse<EmailApplicationWorkflowResult>>> EmailApplication(Guid id,EmailApplicationRequest request,CancellationToken ct)=>Ok(ApiResponse<EmailApplicationWorkflowResult>.Ok(await dispatcher.DispatchAsync(new SubmitFacebookEmailApplicationCommand(id,request.ClientRequestId),ct)));
 }
 
 public sealed record JobPostingCreateRequest(string Source,string? SourceExternalId,string? SourceUrl,string RawContent,string CompanyName,string PositionTitle,string Location,string? EmploymentType,string? WorkplaceType,decimal? SalaryMinimum,decimal? SalaryMaximum,string? SalaryCurrency,string? SalaryPeriod,string? ExperienceRequirements,string Description,JsonElement TechnologyStack,string? ApplicationEmail,string? ApplicationUrl,DateTimeOffset? ExpiresAt,string? Notes)
@@ -27,3 +28,4 @@ public sealed record JobPostingUpdateRequest(int ExpectedVersion,string CompanyN
 {public UpdateJobPostingCommand Command(Guid id)=>new(id,ExpectedVersion,CompanyName,PositionTitle,Location,EmploymentType,WorkplaceType,SalaryMinimum,SalaryMaximum,SalaryCurrency,SalaryPeriod,ExperienceRequirements,Description,TechnologyStack,ApplicationEmail,ApplicationUrl,ExpiresAt,Notes);}
 public sealed record JobStateRequest(string Status,int ExpectedVersion);
 public sealed record ExpectedVersionRequest(int ExpectedVersion);
+public sealed record EmailApplicationRequest(Guid ClientRequestId);

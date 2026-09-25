@@ -71,7 +71,7 @@ public sealed class SubmissionExecutionFeatureTests
         await using var db = PublicPortfolioTests.CreateContext();
         var state = await SeedAsync(db);
         var factory = new TransactionFactory(state);
-        var adapter = new Adapter(SubmissionProviders.Email, (request, _) =>
+        var adapter = new Adapter(SubmissionProviders.CompanySite, (request, _) =>
         {
             Assert.False(factory.TransactionActive);
             Assert.Equal((state.Snapshot.Id, state.ManifestHash), (request.CvDocumentId, request.PackageManifestHash));
@@ -101,7 +101,7 @@ public sealed class SubmissionExecutionFeatureTests
         state.Application.ExternalApplicationId = "existing-external-id";
         await db.SaveChangesAsync();
         var factory = new TransactionFactory(state);
-        var adapter = new Adapter(SubmissionProviders.Email, (_, _) => Task.FromResult(
+        var adapter = new Adapter(SubmissionProviders.CompanySite, (_, _) => Task.FromResult(
             new SubmissionResult(SubmissionOutcomes.Success, null, null, null)));
 
         var result = await Handler(db, factory, [adapter]).HandleAsync(new(state.Attempt.Id, 2));
@@ -119,7 +119,7 @@ public sealed class SubmissionExecutionFeatureTests
     {
         await using var db = PublicPortfolioTests.CreateContext();
         var state = await SeedAsync(db); var factory = new TransactionFactory(state);
-        var adapter = new Adapter(SubmissionProviders.Email, (_, _) => Task.FromResult(
+        var adapter = new Adapter(SubmissionProviders.CompanySite, (_, _) => Task.FromResult(
             new SubmissionResult(outcome, null, "provider rejected!", " Safe diagnostic ")));
 
         var result = await Handler(db, factory, [adapter]).HandleAsync(new(state.Attempt.Id, 2));
@@ -139,7 +139,7 @@ public sealed class SubmissionExecutionFeatureTests
     {
         await using var db = PublicPortfolioTests.CreateContext();
         var state = await SeedAsync(db); var factory = new TransactionFactory(state);
-        var adapter = new Adapter(SubmissionProviders.Email, (_, _) => cancel
+        var adapter = new Adapter(SubmissionProviders.CompanySite, (_, _) => cancel
             ? Task.FromException<SubmissionResult>(new OperationCanceledException())
             : Task.FromException<SubmissionResult>(new InvalidOperationException("private provider response")));
 
@@ -210,11 +210,33 @@ public sealed class SubmissionExecutionFeatureTests
     }
 
     [Fact]
+    public async Task Generic_approval_and_execution_reject_email_before_the_adapter_is_invoked()
+    {
+        await using var db = PublicPortfolioTests.CreateContext();
+        var state = await SeedAsync(db, SubmissionAttemptStatuses.Created, 1, approvedEvent: false);
+        state.Attempt.Provider = SubmissionProviders.Email;await db.SaveChangesAsync();
+        var approval = new ApproveSubmissionAttemptCommandHandler(db, new CurrentUser(), new FixedTimeProvider());
+        var approvalError = await Assert.ThrowsAsync<ConflictException>(() => approval.HandleAsync(new(state.Attempt.Id, 1)));
+        Assert.Equal("EMAIL_SUBMISSION_REQUIRES_ORCHESTRATION", approvalError.Code);
+
+        state.Attempt.Status = SubmissionAttemptStatuses.Approved;state.Attempt.Version = 2;
+        db.SubmissionAttemptEvents.Add(new(){Id=Guid.NewGuid(),SubmissionAttemptId=state.Attempt.Id,FromStatus="CREATED",ToStatus="APPROVED",ActorAdminUserId=AdminId,OccurredAt=Now.AddTicks(10),CreatedAt=Now.AddTicks(10)});
+        await db.SaveChangesAsync();
+        var adapter = new Adapter(SubmissionProviders.Email, (_, _) => Task.FromResult(
+            new SubmissionResult(SubmissionOutcomes.Success,"gmail-id",null,null)));
+        var execution = Handler(db, new TransactionFactory(state), [adapter]);
+        var executionError = await Assert.ThrowsAsync<ConflictException>(() => execution.HandleAsync(new(state.Attempt.Id, 2)));
+        Assert.Equal("EMAIL_SUBMISSION_REQUIRES_ORCHESTRATION", executionError.Code);
+        Assert.Equal(0, adapter.CallCount);
+        Assert.Equal(SubmissionAttemptStatuses.Approved, state.Attempt.Status);
+    }
+
+    [Fact]
     public async Task Provider_success_with_changed_local_state_becomes_unknown_without_applying()
     {
         await using var db = PublicPortfolioTests.CreateContext();
         var state = await SeedAsync(db); var factory = new TransactionFactory(state);
-        var adapter = new Adapter(SubmissionProviders.Email, (_, _) =>
+        var adapter = new Adapter(SubmissionProviders.CompanySite, (_, _) =>
         {
             state.Application.Version++;
             return Task.FromResult(new SubmissionResult(SubmissionOutcomes.Success, "external-1", null, null));
@@ -251,7 +273,7 @@ public sealed class SubmissionExecutionFeatureTests
         var job = new JobPosting { Id=Guid.NewGuid(),CompanyName="Acme",PositionTitle="Developer",Location="Hanoi",Description="Description",TechnologyStack=JsonDocument.Parse("[]"),VerificationStatus="VERIFIED",SelectionStatus="APPROVED",Version=4,CreatedAt=Now,UpdatedAt=Now };
         var application = new JobApplication { Id=Guid.NewGuid(),JobPostingId=job.Id,Status="DRAFT",ApplicationEmail="jobs@example.com",ApplicationUrl="https://example.com/jobs/1",PackageStatus="FINALIZED",PackageRevision=1,PackageJobPostingVersion=4,PackageManifestHash=manifest,PackageFinalizedAt=Now,PackageFinalizedByAdminUserId=AdminId,Version=1,CreatedAt=Now,UpdatedAt=Now };
         var snapshot = new JobApplicationDocument { Id=Guid.NewGuid(),JobApplicationId=application.Id,DocumentType="CV",VersionLabel="Package revision 1",FileName="cv.pdf",StorageKey="applications/private/cv.pdf",ContentHash=new string('a',64),ContentType="application/pdf",FileSizeBytes=1024,PackageRevision=1,SourceCanonicalCvVersion=3,Metadata=JsonDocument.Parse("{}"),CreatedAt=Now };
-        var attempt = new SubmissionAttempt { Id=Guid.NewGuid(),JobApplicationId=application.Id,Provider=SubmissionProviders.Email,Status=status,IdempotencyKey=new string('c',64),PackageRevision=1,PackageManifestHash=manifest,ApplicationVersionAtCreation=1,CreatedAt=Now,CreatedByAdminUserId=AdminId,Version=version };
+        var attempt = new SubmissionAttempt { Id=Guid.NewGuid(),JobApplicationId=application.Id,Provider=SubmissionProviders.CompanySite,Status=status,IdempotencyKey=new string('c',64),PackageRevision=1,PackageManifestHash=manifest,ApplicationVersionAtCreation=1,CreatedAt=Now,CreatedByAdminUserId=AdminId,Version=version };
         var created = new SubmissionAttemptEvent { Id=Guid.NewGuid(),SubmissionAttemptId=attempt.Id,ToStatus="CREATED",ActorAdminUserId=AdminId,OccurredAt=Now,CreatedAt=Now };
         db.AddRange(job,application,snapshot,attempt,created);
         if (approvedEvent) db.SubmissionAttemptEvents.Add(new(){Id=Guid.NewGuid(),SubmissionAttemptId=attempt.Id,FromStatus="CREATED",ToStatus="APPROVED",ActorAdminUserId=AdminId,OccurredAt=Now.AddTicks(10),CreatedAt=Now.AddTicks(10)});
@@ -283,6 +305,6 @@ public sealed class SubmissionExecutionFeatureTests
         public string Provider=>provider;public SubmissionAdapterCapabilities Capabilities=>new(true,false,false,false,true);public int CallCount{get;private set;}
         public bool Supports(SubmissionRequest request)=>true;
         public async Task<SubmissionResult> SubmitAsync(SubmissionRequest request,CancellationToken cancellationToken=default){CallCount++;return await submit(request,cancellationToken);}
-        public static Adapter Success()=>new(SubmissionProviders.Email,(_,_)=>Task.FromResult(new SubmissionResult(SubmissionOutcomes.Success,"external-1",null,null)));
+        public static Adapter Success()=>new(SubmissionProviders.CompanySite,(_,_)=>Task.FromResult(new SubmissionResult(SubmissionOutcomes.Success,"external-1",null,null)));
     }
 }

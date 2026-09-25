@@ -61,13 +61,26 @@ public sealed class CreateSubmissionAttemptCommandHandler(
     ICurrentUser currentUser,
     TimeProvider clock) : IRequestHandler<CreateSubmissionAttemptCommand, SubmissionAttemptResult>
 {
-    public async Task<SubmissionAttemptResult> HandleAsync(CreateSubmissionAttemptCommand request, CancellationToken cancellationToken = default)
+    public Task<SubmissionAttemptResult> HandleAsync(CreateSubmissionAttemptCommand request, CancellationToken cancellationToken = default) =>
+        HandleCoreAsync(request, false, cancellationToken);
+
+    internal Task<SubmissionAttemptResult> HandleAuthorizedEmailAsync(
+        CreateSubmissionAttemptCommand request, CancellationToken cancellationToken = default) =>
+        HandleCoreAsync(request, true, cancellationToken);
+
+    private async Task<SubmissionAttemptResult> HandleCoreAsync(
+        CreateSubmissionAttemptCommand request,
+        bool authorizedEmailWorkflow,
+        CancellationToken cancellationToken)
     {
         var adminUserId = currentUser.AdminUserId
             ?? throw new UnauthorizedException("UNAUTHORIZED", "Authentication is required.");
         var provider = request.Provider.Trim().ToUpperInvariant();
         if (!SubmissionProviders.All.Contains(provider))
             throw new ValidationException([new("provider", "The submission provider is not supported.")]);
+        if (provider == SubmissionProviders.Email && !authorizedEmailWorkflow)
+            throw new ConflictException("EMAIL_SUBMISSION_REQUIRES_ORCHESTRATION",
+                "Email submission attempts can only be created by the controlled email-application workflow.");
 
         await using var transaction = await transactionFactory.BeginAsync(request.ApplicationId, cancellationToken);
         var application = transaction.Application
