@@ -1,0 +1,55 @@
+name: Offline browser discovery PoC
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-discovery-offline
+  cancel-in-progress: false
+
+jobs:
+  offline-fixtures:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: tools/browser-job-discovery
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: .browser-cache
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.12.0
+      - name: Install isolated tool dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install Chromium for fixtures
+        run: npx playwright install --with-deps chromium
+      - name: Offline unit and workflow tests
+        run: npm test
+      - name: Real browser against local fixtures only
+        run: npm run test:browser
+      - name: Generate synthetic report
+        run: npm run simulate
+      - name: Validate and print credential-free JSON report
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { readFile } from 'node:fs/promises';
+          const report = JSON.parse(await readFile('output/report.json', 'utf8'));
+          assert.equal(report.evidenceKind, 'OFFLINE_FIXTURE_ONLY');
+          assert.equal(report.gates.allowed, false);
+          assert.equal(report.gates.liveDiscovery, 'LIVE_UNSEEDED_DISCOVERY_NOT_RUN');
+          assert.equal(report.stopCode, null);
+          assert.equal(report.gates.offline, 'OFFLINE_BROWSER_AGENT_PASS');
+          const json = JSON.stringify(report);
+          assert.doesNotMatch(json, /access_token|refresh_token|password|storageState|api[_-]?key|client_secret|BEGIN .*PRIVATE KEY/iu);
+          console.log(json);
+          NODE
+      # No traces, videos, screenshots, profiles or session artifacts are uploaded.
