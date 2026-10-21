@@ -26,3 +26,6 @@ Thumbs.db
 appsettings.*.local.json
 secrets.json
 
+# Private local provider response captures (may contain personal data)
+/tools/browser-job-discovery/.debug/
+

@@ -1,10 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { ActivityBudget, facebookAccessGate } from '../src/core.mjs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
+import { ActivityBudget, facebookAccessGate, JobPostExtractor, DiscoveryReporter, runDiscovery } from '../src/core.mjs';
 import { buildFacebookSearchUrl, canonicalFacebookPost } from '../src/discovery-contract.mjs';
 import { FacebookBrowserDiscoveryAdapter } from '../src/facebook-browser-adapter.mjs';
-import { SocialApisHubHttpAdapter, createMockSocialApisTransport, PROVIDER_SCHEMA_STATUS } from '../src/socialapis-adapter.mjs';
+import { SocialApisHubHttpAdapter, createMockSocialApisTransport, PROVIDER_SCHEMA_STATUS, SocialApisCaptureDiscoveryAdapter, SocialApisLiveDiscoveryAdapter } from '../src/socialapis-adapter.mjs';
 
 const query = 'C# .NET Angular Junior Hà Nội';
 const urls = ['https://m.facebook.com/groups/fixture.jobs/permalink/1001?ref=search',
@@ -171,7 +175,8 @@ test('no secret logs or accidental network/production write dependencies', async
   const paths = ['discovery-contract.mjs', 'facebook-browser-adapter.mjs', 'socialapis-adapter.mjs'];
   for (const path of paths) {
     const source = await readFile(new URL(`../src/${path}`, import.meta.url), 'utf8');
-    assert.doesNotMatch(source, /console\.|process\.env|\bfetch\s*\(|https\.request|writeFile|Portfolio\.|neon|gemini|gmail/iu);
+    assert.doesNotMatch(source, /console\.|https\.request|writeFile|Portfolio\.|neon|gemini|gmail/iu);
+    if (path !== 'socialapis-adapter.mjs') assert.doesNotMatch(source, /process\.env|\bfetch\s*\(/u);
     const imports = [...source.matchAll(/from ['"]([^'"]+)['"]/gu)].map(match => match[1]);
     assert.ok(imports.every(value => value.startsWith('./')));
   }
@@ -179,4 +184,180 @@ test('no secret logs or accidental network/production write dependencies', async
   try { globalThis.fetch = () => { throw new Error('External network forbidden'); };
     assert.equal((await adapter.discover(query, new ActivityBudget())).length, 1);
   } finally { globalThis.fetch = oldFetch; }
+});
+
+function capturedPayload() {
+  // Observed property structure only; no real post, contact or author data.
+  const texts = ['Tuyển Fresher .NET tại Hà Nội', 'Tuyển Junior C# tại Hanoi',
+    'Hà Nội công ty tìm Fresher Lập trình viên SQL C#.NET', 'Tuyển Intern ASP.NET Core tại Hà Nội',
+    'HCM tuyển Fresher .NET. Hà Nội tuyển Intern chưa rõ stack.',
+    'Em tìm job Fresher .NET ở Hà Nội, nhờ đánh giá CV.', 'Hà Nội tuyển Fresher Java', 'Hà Nội tuyển intern Python, lương NET 12 triệu'];
+  return { data: { items: texts.map((post_text, i) => ({
+    basic_info: { post_id: String(5001 + i), post_text, post_hashtags: [],
+      url: `https://www.facebook.com/groups/fixture.jobs/permalink/${5001 + i}/` },
+    feedback_details: {}, owner_info: {}, video_details: {}
+  })), page_info: { cursor: 'SYNTHETIC_CURSOR_NEVER_FOLLOW' } }, message: 'OK', meta: { statusCode: 200 } };
+}
+async function replay(payload, budget = new ActivityBudget()) {
+  const adapter = new SocialApisCaptureDiscoveryAdapter(payload);
+  return runDiscovery({ adapter, planner: { plan: () => [adapter.query] }, extractor: new JobPostExtractor(),
+    reporter: new DiscoveryReporter({ evidenceKind: 'LOCAL_PROVIDER_CAPTURE_REPLAY' }), target: {}, budget,
+    matcher: job => adapter.classify(job) });
+}
+test('SocialAPIs capture runs through real discovery/extraction/dedup/reporting without browser or transport', async () => {
+  const oldFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = () => { assert.fail('network is forbidden during replay'); };
+    const payload = capturedPayload(); const report = await replay(payload);
+    assert.equal(report.stopCode, null); assert.equal(report.jobs.length, 8);
+    assert.equal(report.metrics.targetMatches, 4); assert.equal(report.metrics.insufficientData, 1); assert.equal(report.metrics.notMatched, 3);
+    assert.equal(report.budget.peakSessions, 0); assert.equal(report.budget.searches, 1); assert.equal(report.budget.candidates, 8);
+    assert.equal(report.evidenceKind, 'LOCAL_PROVIDER_CAPTURE_REPLAY'); assert.equal(report.gates.allowed, false);
+    assert.equal(report.gates.browserTechnical, 'UNVERIFIED'); assert.equal(report.gates.offline, 'NOT_APPLICABLE_PROVIDER_DISCOVERY');
+    for (const [i, job] of report.jobs.entries()) {
+      assert.equal(job.body, payload.data.items[i].basic_info.post_text);
+      assert.equal(job.sourceUrl, payload.data.items[i].basic_info.url);
+      assert.equal(job.publishedAt, null); assert.equal(job.published_at, null);
+      assert.equal(job.match.freshness, 'UNKNOWN'); assert.equal(job.sourceIdentity, `SOCIALAPIS:${job.id}`);
+      assert.equal(job.provenance.source, 'FACEBOOK'); assert.match(job.contentHash, /^[0-9a-f]{64}$/u);
+    }
+  } finally { globalThis.fetch = oldFetch; }
+});
+
+const liveOptions = { enabled: true, freePlanConfirmed: true, noCashConfirmed: true };
+async function withLiveKey(run) {
+  const previous = process.env.SOCIALAPIS_API_KEY;
+  process.env.SOCIALAPIS_API_KEY = 'synthetic-live-transport-test-key';
+  try { return await run(); } finally {
+    if (previous === undefined) delete process.env.SOCIALAPIS_API_KEY; else process.env.SOCIALAPIS_API_KEY = previous;
+  }
+}
+test('live adapter gates, missing key and all invalid budgets reject before transport', async () => withLiveKey(async () => {
+  let calls = 0; const transport = () => { calls++; assert.fail('must not reach transport'); };
+  for (const options of [{}, { ...liveOptions, enabled: false }, { ...liveOptions, freePlanConfirmed: false },
+    { ...liveOptions, noCashConfirmed: false }, { ...liveOptions, maxRequests: 0 }, { ...liveOptions, maxRequests: 2 },
+    { ...liveOptions, maxCredits: 0 }, { ...liveOptions, maxCredits: 2 }, { ...liveOptions, timeoutMs: 20_001 }]) {
+    const adapter = new SocialApisLiveDiscoveryAdapter(options, transport);
+    await assert.rejects(() => adapter.search(undefined, adapter.query, new ActivityBudget()));
+  }
+  delete process.env.SOCIALAPIS_API_KEY;
+  const adapter = new SocialApisLiveDiscoveryAdapter(liveOptions, transport);
+  await assert.rejects(() => adapter.search(undefined, adapter.query, new ActivityBudget()), /SOCIALAPIS_API_KEY_REQUIRED/u);
+  assert.equal(calls, 0);
+}));
+test('mock live transport executes the real pipeline once, keeps separate credits, and never follows cursor/redirect', async () => withLiveKey(async () => {
+  const calls = [];
+  const adapter = new SocialApisLiveDiscoveryAdapter(liveOptions, async (url, options) => {
+    calls.push({ url, options });
+    return new Response(JSON.stringify(capturedPayload()), { status: 200,
+      headers: { 'X-SocialAPIs-Credits-Deducted': '1', 'X-SocialAPIs-Credits-Used': '6' } });
+  });
+  const report = await runDiscovery({ adapter, planner: { plan: () => [adapter.query] }, extractor: new JobPostExtractor(),
+    reporter: new DiscoveryReporter({ evidenceKind: 'MOCK_PROVIDER_RESPONSE' }), target: {}, budget: new ActivityBudget(), matcher: job => adapter.classify(job) });
+  assert.equal(report.stopCode, null); assert.equal(report.jobs.length, 8); assert.equal(report.metrics.targetMatches, 4);
+  assert.equal(report.metrics.insufficientData, 1); assert.equal(report.metrics.notMatched, 3);
+  assert.equal(calls.length, 1); assert.equal(calls[0].options.redirect, 'manual'); assert.equal(calls[0].options.credentials, 'omit');
+  const url = new URL(calls[0].url);
+  assert.equal(url.href, 'https://api.socialapis.io/facebook/search/posts?query=tuy%E1%BB%83n+fresher+.NET+H%C3%A0+N%E1%BB%99i&recent_posts=true');
+  assert.equal(calls[0].options.headers['x-api-token'], process.env.SOCIALAPIS_API_KEY);
+  assert.equal(adapter.requestStats.creditsDeducted, 1); assert.equal(adapter.requestStats.creditsUsedAlternateHeader, 6);
+  assert.ok(report.jobs.every(job => job.evidenceKind === 'MOCK_PROVIDER_RESPONSE' && job.publishedAt === null));
+  assert.doesNotMatch(JSON.stringify(report), /synthetic-live-transport-test-key/u);
+  await assert.rejects(() => adapter.search(undefined, adapter.query, new ActivityBudget()), /REQUEST_BUDGET_EXCEEDED/u);
+  assert.equal(calls.length, 1);
+}));
+test('live HTTP/schema/credit/network/timeout failures never retry and never leak private exceptions', async () => withLiveKey(async () => {
+  for (const transport of [async () => new Response('{}', { status: 429 }), async () => new Response('{}', { status: 302 }),
+    async () => new Response('{invalid', { headers: { 'X-SocialAPIs-Credits-Deducted': '1' } }),
+    async () => new Response(JSON.stringify(capturedPayload()), { headers: { 'X-SocialAPIs-Credits-Deducted': '2' } }),
+    async () => new Response(JSON.stringify({ error: 'SYNTHETIC_PROVIDER_ERROR' }), { headers: { 'X-SocialAPIs-Credits-Deducted': '1' } }),
+    async () => new Response(JSON.stringify({ message: process.env.SOCIALAPIS_API_KEY }), { headers: { 'X-SocialAPIs-Credits-Deducted': '1' } }),
+    async () => new Response(JSON.stringify(capturedPayload())),
+    async () => { throw new Error('PRIVATE_PROVIDER_DETAIL'); }, async () => new Promise(() => {})]) {
+    let calls = 0;
+    const adapter = new SocialApisLiveDiscoveryAdapter({ ...liveOptions, timeoutMs: 10 }, (...args) => { calls++; return transport(...args); });
+    await assert.rejects(() => adapter.search(undefined, adapter.query, new ActivityBudget()), error => !error.message.includes('PRIVATE_PROVIDER_DETAIL'));
+    await assert.rejects(() => adapter.search(undefined, adapter.query, new ActivityBudget()), /REQUEST_BUDGET_EXCEEDED/u);
+    assert.equal(calls, 1);
+  }
+}));
+
+test('concurrent searches on one live adapter claim exactly one request', async () => withLiveKey(async () => {
+  let calls = 0;
+  const adapter = new SocialApisLiveDiscoveryAdapter(liveOptions, async () => {
+    calls++;
+    return new Response(JSON.stringify(capturedPayload()), { headers: { 'X-SocialAPIs-Credits-Deducted': '1' } });
+  });
+  const results = await Promise.allSettled([adapter.search(undefined, adapter.query, new ActivityBudget()), adapter.search(undefined, adapter.query, new ActivityBudget())]);
+  assert.equal(calls, 1); assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
+  assert.equal(results.find(result => result.status === 'rejected').reason.code, 'REQUEST_BUDGET_EXCEEDED');
+}));
+
+test('CLI mock-live restores state on a fresh simulated runner and refuses missing state before transport', () => {
+  const root = fileURLToPath(new URL('../.debug/', import.meta.url)); mkdirSync(root, { recursive: true });
+  const directory = mkdtempSync(join(root, 'live-integration-'));
+  const firstOutput = join(directory, 'run-one', 'state.json'); const nextOutput = join(directory, 'run-two', 'state.json');
+  const cli = fileURLToPath(new URL('../src/cli.mjs', import.meta.url));
+  const fake = 'data:text/javascript,' + encodeURIComponent(`import net from 'node:net';
+    net.Socket.prototype.connect=function(){throw new Error('NETWORK_FORBIDDEN');};
+    globalThis.fetch=async()=>new Response(${JSON.stringify(JSON.stringify(capturedPayload()))}, {headers:{'X-SocialAPIs-Credits-Deducted':'1'}});`);
+  const env = { ...process.env, SOCIALAPIS_API_KEY: 'synthetic-live-cli-test-key', SOCIALAPIS_LIVE_ENABLED: 'true',
+    SOCIALAPIS_FREE_PLAN_CONFIRMED: 'true', SOCIALAPIS_NO_CASH_CONFIRMED: 'true' };
+  const run = (output, flags) => JSON.parse(execFileSync(process.execPath, ['--import', fake, cli, '--source', 'socialapis', '--output', output, ...flags], { encoding: 'utf8', env, stdio: 'pipe' }));
+  try {
+    assert.throws(() => run(firstOutput, ['--live']), error => error.stderr.toString().includes('DISCOVERY_STATE_REQUIRED'));
+    assert.equal(run(firstOutput, ['--prepare-state', '--initialize-state']).totalCandidates, 0);
+    assert.equal(run(firstOutput, ['--live']).storage.inserted, 8);
+    // Simulate artifact restore onto an entirely new runner filesystem.
+    mkdirSync(join(directory, 'run-two'));
+    writeFileSync(nextOutput, readFileSync(firstOutput));
+    const restored = run(nextOutput, ['--live']);
+    assert.equal(restored.storage.inserted, 0); assert.equal(restored.storage.unchanged, 8);
+    assert.equal(restored.storage.totalCandidates, 8); assert.equal(restored.live.networkRequests, 1);
+    const state = JSON.parse(readFileSync(nextOutput, 'utf8'));
+    assert.equal(state.jobs.length, 8); assert.equal(state.metrics.targetMatches, 4);
+    assert.ok(state.jobs.every(job => job.published_at === null && job.sourceUrl.includes('/permalink/')));
+    assert.doesNotMatch(JSON.stringify(state), /synthetic-live-cli-test-key/u);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+test('capture preserves distinct post IDs with identical text and dedups repeat identity', async () => {
+  const payload = capturedPayload();
+  payload.data.items = [payload.data.items[0], structuredClone(payload.data.items[0]),
+    { ...structuredClone(payload.data.items[0]), basic_info: { ...payload.data.items[0].basic_info, post_id: '6001',
+      url: 'https://www.facebook.com/groups/fixture.jobs/permalink/6001/' } }];
+  const report = await replay(payload);
+  assert.equal(report.jobs.length, 2); assert.equal(report.jobs[0].contentHash, report.jobs[1].contentHash);
+  const adapter = new SocialApisCaptureDiscoveryAdapter(payload);
+  await assert.rejects(() => adapter.search(undefined, 'different query', new ActivityBudget()), /CAPTURE_QUERY_MISMATCH/u);
+  payload.data.items[0].basic_info.url = 'https://example.invalid/not-facebook';
+  assert.throws(() => new SocialApisCaptureDiscoveryAdapter(payload), /PROVIDER_POST_INVALID/u);
+  assert.throws(() => new SocialApisCaptureDiscoveryAdapter({ error: 'denied' }), /PROVIDER_ERROR/u);
+  const limited = await replay(capturedPayload(), new ActivityBudget({ candidates: 1 }));
+  assert.equal(limited.stopCode, 'CANDIDATES_BUDGET_EXCEEDED');
+});
+test('existing CLI replays twice into private local store with no duplicate inserts and no network', () => {
+  const privateDirectory = fileURLToPath(new URL('../.debug/', import.meta.url));
+  mkdirSync(privateDirectory, { recursive: true });
+  const directory = mkdtempSync(join(privateDirectory, 'integration-test-'));
+  const capture = join(directory, 'capture.json'); const output = join(directory, 'candidates.json');
+  const cli = fileURLToPath(new URL('../src/cli.mjs', import.meta.url));
+  const noNetwork = 'data:text/javascript,' + encodeURIComponent("import net from 'node:net'; globalThis.fetch=()=>{throw new Error('NETWORK_FORBIDDEN');}; net.Socket.prototype.connect=function(){throw new Error('NETWORK_FORBIDDEN');};");
+  const run = () => JSON.parse(execFileSync(process.execPath, ['--import', noNetwork, cli, '--source', 'socialapis', '--replay', capture, '--output', output], { encoding: 'utf8' }));
+  try {
+    const raw = JSON.stringify(capturedPayload()); writeFileSync(capture, raw, 'utf8');
+    const first = run(); const second = run();
+    assert.equal(first.storage.inserted, 8); assert.equal(second.storage.inserted, 0);
+    assert.equal(second.storage.updated, 0); assert.equal(second.storage.unchanged, 8);
+    assert.equal(second.storage.totalCandidates, 8); assert.equal(second.replay.processedItems, 8);
+    assert.equal(second.metrics.targetMatches, 4); assert.equal(second.metrics.insufficientData, 1); assert.equal(second.metrics.notMatched, 3);
+    assert.equal(second.replay.networkRequests, 0); assert.equal(second.replay.pagination.cursorPresent, true);
+    assert.equal(second.replay.pagination.followed, false);
+    assert.equal(JSON.parse(readFileSync(output, 'utf8')).jobs.length, 8);
+    assert.equal(readFileSync(capture, 'utf8'), raw);
+    const changed = capturedPayload(); changed.data.items[0].basic_info.post_text += ' Updated vacancy.';
+    writeFileSync(capture, JSON.stringify(changed), 'utf8');
+    assert.equal(run().storage.updated, 1); assert.equal(run().storage.inserted, 0);
+    assert.throws(() => execFileSync(process.execPath, [cli, '--source', 'socialapis', '--replay', capture, '--output', capture], { stdio: 'pipe' }),
+      error => error.stderr.toString().includes('PRIVATE_REPLAY_OUTPUT_REQUIRED'));
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });

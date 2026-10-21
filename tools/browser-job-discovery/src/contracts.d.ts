@@ -9,8 +9,8 @@ export interface ISearchPlanner {
   plan(target: { technologies: string[]; locations: string[]; seniorities: string[] }): string[];
 }
 export interface IBrowserDiscoveryAdapter {
-  search(page: import('playwright').Page, query: string, budget: IActivityBudget): Promise<string[]>;
-  read(page: import('playwright').Page, candidateUrl: string, budget: IActivityBudget): Promise<AccessiblePost>;
+  search(page: import('playwright').Page | undefined, query: string, budget: IActivityBudget): Promise<string[]>;
+  read(page: import('playwright').Page | undefined, candidateUrl: string, budget: IActivityBudget): Promise<AccessiblePost>;
 }
 export interface IActivityBudget {
   readonly limits: { searches: number; candidates: number; durationMs: number; sessions: number };
@@ -20,6 +20,10 @@ export interface IActivityBudget {
   snapshot(): Record<string, number>;
 }
 export interface AccessiblePost {
+  provider?: 'SOCIALAPIS';
+  source?: 'FACEBOOK';
+  canonicalSourceUrl?: string;
+  published_at?: string | null;
   id: string | null;
   sourceUrl: string;
   kind: string;
@@ -31,7 +35,7 @@ export interface AccessiblePost {
   publishedAt: string | null;
   relativeTime: string | null;
   hasImage: boolean;
-  evidenceKind: 'SYNTHETIC_FIXTURE' | 'USER_PROVIDED_FIXTURE';
+  evidenceKind: 'SYNTHETIC_FIXTURE' | 'USER_PROVIDED_FIXTURE' | 'LOCAL_PROVIDER_CAPTURE_REPLAY' | 'MOCK_PROVIDER_RESPONSE' | 'LIVE_PROVIDER_RESPONSE';
 }
 export interface IJobPostExtractor {
   extract(post: AccessiblePost): Record<string, unknown>;

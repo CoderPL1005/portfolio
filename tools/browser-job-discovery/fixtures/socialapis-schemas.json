@@ -1,0 +1,33 @@
+{
+  "evidence_kind": "SYNTHETIC_FIXTURE_NOT_CAPTURED_PROVIDER_RESPONSE",
+  "cases": [
+    {
+      "name": "live-observed-items-envelope-synthetic-flat-fields",
+      "expected": "LIVE_RESULTS_PARSED",
+      "expected_path": "$.data.items",
+      "payload": { "data": { "items": [{ "post_id": "4001", "text": "Synthetic flat-contract post, not one of the 8 live items", "created_time": 1726794818 }] }, "message": "SYNTHETIC_PRIVATE_MESSAGE", "meta": {} }
+    },
+    { "name": "items-empty", "expected": "EMPTY_RESULTS", "expected_path": "$.data.items", "payload": { "data": { "items": [] } } },
+    { "name": "items-invalid-not-fallback", "expected": "SCHEMA_MISMATCH", "payload": { "data": { "items": null, "results": [] } } },
+    { "name": "items-provider-error-priority", "expected": "PROVIDER_ERROR", "payload": { "success": false, "data": { "items": [] } } },
+    {
+      "name": "documented-results",
+      "expected": "LIVE_RESULTS_PARSED",
+      "payload": { "data": { "results": [{ "post_id": "1001", "text": "Synthetic recruitment text", "author": { "name": "SYNTHETIC_PRIVATE_AUTHOR", "id": "9999" }, "created_time": 1726794818 }], "page_info": { "has_next": true, "end_cursor": "SYNTHETIC_CURSOR" } } }
+    },
+    { "name": "documented-empty", "expected": "EMPTY_RESULTS", "payload": { "data": { "results": [], "page_info": { "has_next": false } } } },
+    { "name": "success-indicator", "expected": "LIVE_RESULTS_PARSED", "payload": { "success": true, "error": null, "data": { "results": [{ "post_id": "1002", "text": "Synthetic post" }] } } },
+    { "name": "provider-error-200", "expected": "PROVIDER_ERROR", "payload": { "success": false, "error_code": "SYNTHETIC_FAILURE", "message": "SYNTHETIC_PRIVATE_ERROR" } },
+    { "name": "provider-error-overrides-empty", "expected": "PROVIDER_ERROR", "payload": { "data": { "results": [], "error": { "message": "SYNTHETIC_PRIVATE_ERROR" } } } },
+    { "name": "provider-error-overrides-rows", "expected": "PROVIDER_ERROR", "payload": { "status": "error", "data": { "results": [{ "post_id": "1003", "text": "Synthetic post" }] } } },
+    { "name": "error-array", "expected": "PROVIDER_ERROR", "payload": { "errors": [{ "code": "SYNTHETIC_FAILURE" }] } },
+    { "name": "string-http-error", "expected": "PROVIDER_ERROR", "payload": { "status_code": "403" } },
+    { "name": "top-level-results-hypothesis", "expected": "SCHEMA_MISMATCH", "payload": { "results": [] } },
+    { "name": "data-array-hypothesis", "expected": "SCHEMA_MISMATCH", "payload": { "data": [] } },
+    { "name": "data-posts-hypothesis", "expected": "SCHEMA_MISMATCH", "payload": { "data": { "posts": [] } } },
+    { "name": "extra-wrapper-hypothesis", "expected": "SCHEMA_MISMATCH", "payload": { "response": { "data": { "results": [] } } } },
+    { "name": "stringified-data-hypothesis", "expected": "SCHEMA_MISMATCH", "payload": { "data": "{\"results\":[]}" } },
+    { "name": "null-results", "expected": "SCHEMA_MISMATCH", "payload": { "data": { "results": null } } },
+    { "name": "root-array-hypothesis", "expected": "SCHEMA_MISMATCH", "payload": [] }
+  ]
+}

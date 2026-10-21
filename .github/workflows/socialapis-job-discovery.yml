@@ -1,0 +1,134 @@
+name: SocialAPIs job discovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_live:
+        description: Authorize ONE SocialAPIs request (no retry/pagination)
+        type: boolean
+        default: false
+      confirm_free_no_cash:
+        description: Free credits available, no auto-top-up, GitHub storage available and spending disabled
+        type: boolean
+        default: false
+      confirm_artifact_data:
+        description: Consent to JD/contact text in downloadable artifacts of this PUBLIC repository
+        type: boolean
+        default: false
+      initialize_state:
+        description: FIRST run only - initialize empty discovery state
+        type: boolean
+        default: false
+      query:
+        description: Facebook recruitment search query
+        type: string
+        default: tuyển fresher .NET Hà Nội
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: socialapis-job-discovery-state
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    if: github.ref == 'refs/heads/main' && inputs.confirm_live && inputs.confirm_free_no_cash && inputs.confirm_artifact_data
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: tools/browser-job-discovery
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.12.0
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Offline unit and configuration tests (no provider secret)
+        run: npm test
+      - name: Check cost bounds and locate previous checkpoint
+        id: checkpoint
+        uses: actions/github-script@v7
+        env:
+          INITIALIZE_STATE: ${{ inputs.initialize_state }}
+          MAX_31_DAY_REQUESTS: ${{ vars.SOCIALAPIS_MAX_31_DAY_REQUESTS || '20' }}
+        with:
+          retries: 0
+          script: |
+            if (Number(process.env.GITHUB_RUN_ATTEMPT) !== 1) throw new Error('RERUN_DISABLED_USE_A_NEW_MANUAL_RUN');
+            const max = Number(process.env.MAX_31_DAY_REQUESTS);
+            if (!Number.isInteger(max) || max < 1 || max > 20) throw new Error('INVALID_ROLLING_REQUEST_CAP');
+            const repo = await github.rest.repos.get(context.repo);
+            if (repo.data.private) throw new Error('PUBLIC_REPOSITORY_REQUIRED_FOR_THIS_ZERO_COST_PLAN');
+            const workflow = { ...context.repo, workflow_id: 'socialapis-job-discovery.yml', branch: 'main', event: 'workflow_dispatch' };
+            const since = new Date(Date.now() - 31 * 86400_000).toISOString();
+            const recent = await github.rest.actions.listWorkflowRuns({ ...workflow, created: `>=${since}`, per_page: 100 });
+            // Count all dispatched runs, even failed/no-request runs: conservative
+            // reservation independent of provider outcomes or artifact upload.
+            const currentIncluded = recent.data.workflow_runs.some(run => run.id === context.runId);
+            if (recent.data.total_count + (currentIncluded ? 0 : 1) > max) throw new Error('ROLLING_REQUEST_CAP_EXCEEDED');
+            const history = await github.rest.actions.listWorkflowRuns({ ...workflow, per_page: 2 });
+            const previous = history.data.workflow_runs.find(run => run.id !== context.runId);
+            if (!previous) {
+              if (history.data.total_count > 1 || process.env.INITIALIZE_STATE !== 'true') throw new Error('FIRST_RUN_EXPLICIT_INITIALIZATION_REQUIRED');
+              core.setOutput('initialize', 'true'); return;
+            }
+            if (process.env.INITIALIZE_STATE === 'true') throw new Error('CANNOT_RESET_EXISTING_DISCOVERY_HISTORY');
+            if (previous.status !== 'completed') throw new Error('PREVIOUS_RUN_NOT_COMPLETED');
+            const artifacts = await github.rest.actions.listWorkflowRunArtifacts({ ...context.repo, run_id: previous.id, per_page: 100 });
+            const available = artifacts.data.artifacts.filter(item => !item.expired);
+            const state = available.find(item => item.name === 'socialapis-discovery-state')
+              ?? available.find(item => item.name === 'socialapis-discovery-checkpoint');
+            if (!state) throw new Error('CHECKPOINT_MISSING_OR_EXPIRED_RESTORE_BACKUP_BEFORE_ANY_PROVIDER_REQUEST');
+            core.setOutput('run_id', String(previous.id)); core.setOutput('artifact_name', state.name);
+            core.setOutput('initialize', 'false');
+      - name: Restore prior-run state (never runner-local cache)
+        if: steps.checkpoint.outputs.initialize != 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.checkpoint.outputs.artifact_name }}
+          run-id: ${{ steps.checkpoint.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: tools/browser-job-discovery/.debug
+      - name: Validate and prepare state before provider access
+        env:
+          INITIALIZE_STATE: ${{ steps.checkpoint.outputs.initialize }}
+        run: |
+          if [ "$INITIALIZE_STATE" = "true" ]; then
+            node src/cli.mjs --source socialapis --prepare-state --initialize-state
+          else
+            node src/cli.mjs --source socialapis --prepare-state
+          fi
+          node --input-type=module -e "import {statSync} from 'node:fs'; if(statSync('.debug/socialapis-discovery.json').size>500000) throw new Error('CHECKPOINT_CAPACITY_REACHED');"
+      - name: Persist pre-request checkpoint (failure prevents provider call)
+        uses: actions/upload-artifact@v4
+        with:
+          name: socialapis-discovery-checkpoint
+          path: tools/browser-job-discovery/.debug/socialapis-discovery.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 90
+      - name: Discover exactly one page
+        env:
+          SOCIALAPIS_API_KEY: ${{ secrets.SOCIALAPIS_API_KEY }}
+          SOCIALAPIS_LIVE_ENABLED: 'true'
+          SOCIALAPIS_FREE_PLAN_CONFIRMED: 'true'
+          SOCIALAPIS_NO_CASH_CONFIRMED: 'true'
+          SOCIALAPIS_MAX_REQUESTS: '1'
+          SOCIALAPIS_MAX_CREDITS: '1'
+          DISCOVERY_QUERY: ${{ inputs.query }}
+        run: node src/cli.mjs --source socialapis --live --query "$DISCOVERY_QUERY"
+      - name: Enforce bounded artifact size
+        run: node --input-type=module -e "import {statSync} from 'node:fs'; if(statSync('.debug/socialapis-discovery.json').size>1048576) throw new Error('ARTIFACT_SIZE_LIMIT');"
+      - name: Persist discovery state and report for next run
+        uses: actions/upload-artifact@v4
+        with:
+          name: socialapis-discovery-state
+          path: tools/browser-job-discovery/.debug/socialapis-discovery.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 90

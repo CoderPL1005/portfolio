@@ -1,8 +1,114 @@
 import { Stop } from './core.mjs';
 import { validateQuery, canonicalFacebookPost, candidateRecord, boundedOperation } from './discovery-contract.mjs';
+import { SMOKE_QUERY, normalizeSocialApisItem, parseSocialApisSearchResponse, summarizeSocialApisRows, readSocialApisResponse } from './socialapis-live-smoke.mjs';
 
 export const PROVIDER_SCHEMA_STATUS = 'PROVIDER_RESPONSE_SCHEMA_UNVERIFIED';
+// Separate, manual, one-request diagnostic; V2 discover() remains mock-only.
+export { createSocialApisLiveSmoke } from './socialapis-live-smoke.mjs';
 const mockTransports = new WeakSet();
+
+/** Reads an already captured provider response. No transport, key or browser.
+ * Implements the existing search/read port so extraction/dedup/reporting remain
+ * in runDiscovery. A capture is evidence for its one query, not fresh searches.
+ */
+export class SocialApisCaptureDiscoveryAdapter {
+  constructor(payload, { capturedQuery = SMOKE_QUERY, evidenceKind = 'LOCAL_PROVIDER_CAPTURE_REPLAY' } = {}) {
+    this.query = validateQuery(capturedQuery);
+    const parsed = parseSocialApisSearchResponse(payload);
+    if (!parsed.rows) throw new Stop(parsed.outcome);
+    if (parsed.rows.length > 200) throw new Stop('RESULT_COUNT_LIMIT_EXCEEDED');
+    this.itemCount = parsed.rows.length;
+    this.pagination = { cursor: typeof payload.data.page_info?.cursor === 'string' ? payload.data.page_info.cursor : null };
+    this.records = new Map(); this.matches = new Map();
+    for (const row of parsed.rows) {
+      const normalized = normalizeSocialApisItem(row);
+      if (!normalized?.sourceExternalId || !normalized.sourceUrl || normalized.idUrlConflict) throw new Stop('PROVIDER_POST_INVALID');
+      const summary = summarizeSocialApisRows([row]);
+      const match = summary.candidates[0];
+      if (!match) throw new Stop('PROVIDER_POST_INVALID');
+      const providerUrl = Object.hasOwn(row, 'basic_info') ? row.basic_info.url
+        : row[normalized.permalinkSourceField];
+      this.records.set(providerUrl, {
+        id: normalized.sourceExternalId, provider: 'SOCIALAPIS', source: 'FACEBOOK', sourceUrl: providerUrl,
+        canonicalSourceUrl: normalized.sourceUrl, kind: 'facebook-post', title: '', employer: '', location: '', requirements: '',
+        body: normalized.rawContent ?? '', publishedAt: normalized.publishedAt, published_at: normalized.publishedAt,
+        relativeTime: null, hasImage: false, evidenceKind
+      });
+      this.matches.set(providerUrl, { classification: match.classification,
+        locationAssignmentAmbiguous: match.location_assignment_ambiguous, freshness: normalized.publishedAt ? 'UNVERIFIED' : 'UNKNOWN',
+        evidenceTerms: match.evidence_terms, eligibleForProductionIngestion: false });
+    }
+  }
+  async search(_page, query, budget) {
+    budget.consume('searches');
+    if (validateQuery(query) !== this.query) throw new Stop('CAPTURE_QUERY_MISMATCH');
+    return [...this.records.keys()];
+  }
+  async read(_page, url, budget) {
+    budget.consume('candidates');
+    if (!this.records.has(url)) throw new Stop('CAPTURE_POST_NOT_FOUND');
+    return structuredClone(this.records.get(url));
+  }
+  classify(job) { return structuredClone(this.matches.get(job.sourceUrl)); }
+}
+
+/** One bounded request, no retry/pagination. Billing assertions are operator
+ * attestations, not access to provider billing controls. The CLI validates the
+ * restored state before entering this adapter or exposing the key to transport.
+ */
+export class SocialApisLiveDiscoveryAdapter {
+  constructor({ enabled = false, freePlanConfirmed = false, noCashConfirmed = false,
+    maxRequests = 1, maxCredits = 1, timeoutMs = 20_000, query = SMOKE_QUERY } = {}, transport) {
+    this.options = { enabled, freePlanConfirmed, noCashConfirmed, maxRequests, maxCredits, timeoutMs };
+    this.query = validateQuery(query); this.transport = transport;
+    this.requestStats = { requestCount: 0, creditsDeducted: null, creditsUsedAlternateHeader: null };
+  }
+  async search(_page, query, budget) {
+    budget.consume('searches');
+    const { enabled, freePlanConfirmed, noCashConfirmed, maxRequests, maxCredits, timeoutMs } = this.options;
+    if (!enabled || !freePlanConfirmed || !noCashConfirmed) throw new Stop('SOCIALAPIS_LIVE_APPROVAL_REQUIRED');
+    if (maxRequests !== 1 || maxCredits !== 1 || !Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 20_000) throw new Stop('INVALID_LIVE_BUDGET');
+    const key = process.env.SOCIALAPIS_API_KEY;
+    if (typeof key !== 'string' || key.length < 16 || key.length > 512 || /[\s\p{C}]/u.test(key)) throw new Stop('SOCIALAPIS_API_KEY_REQUIRED');
+    if (validateQuery(query) !== this.query) throw new Stop('DISCOVERY_QUERY_MISMATCH');
+    if (this.requestStats.requestCount) throw new Stop('REQUEST_BUDGET_EXCEEDED');
+    this.requestStats.requestCount = 1; // Claim synchronously before any await.
+    const controller = new AbortController(); let timer;
+    try {
+      const operation = async () => {
+        const url = new URL('https://api.socialapis.io/facebook/search/posts');
+        url.searchParams.set('query', this.query); url.searchParams.set('recent_posts', 'true');
+        const response = await (this.transport ?? globalThis.fetch)(url.href, { method: 'GET',
+          headers: { 'x-api-token': key, Accept: 'application/json' }, redirect: 'manual', credentials: 'omit', signal: controller.signal });
+        if (controller.signal.aborted) throw new Stop('DISCOVERY_TIMEOUT');
+        this.requestStats.httpStatus = response.status;
+        const numeric = value => typeof value === 'string' && /^\d+(?:\.\d+)?$/u.test(value) && Number.isFinite(Number(value)) ? Number(value) : null;
+        this.requestStats.creditsDeducted = numeric(response.headers.get('X-SocialAPIs-Credits-Deducted'));
+        this.requestStats.creditsUsedAlternateHeader = numeric(response.headers.get('X-SocialAPIs-Credits-Used'));
+        if (response.status !== 200) { void response.body?.cancel().catch(() => {}); throw new Stop('PROVIDER_HTTP_REJECTED'); }
+        const raw = await readSocialApisResponse(response, controller.signal);
+        if (controller.signal.aborted) throw new Stop('DISCOVERY_TIMEOUT');
+        const payload = JSON.parse(raw);
+        if ([raw, JSON.stringify(payload)].some(value => value.includes(key) || value.includes(encodeURIComponent(key)))) throw new Stop('PROVIDER_SECRET_REFLECTION');
+        const bodyCredits = payload?.meta?.creditsCharged;
+        if (this.requestStats.creditsDeducted === null || this.requestStats.creditsDeducted > maxCredits ||
+            typeof bodyCredits === 'number' && bodyCredits > maxCredits) throw new Stop('PROVIDER_CREDIT_COST_UNVERIFIED_OR_EXCEEDED');
+        // Credits-Used remains a separate opaque usage metric, never added.
+        const adapter = new SocialApisCaptureDiscoveryAdapter(payload, { capturedQuery: this.query,
+          evidenceKind: this.transport ? 'MOCK_PROVIDER_RESPONSE' : 'LIVE_PROVIDER_RESPONSE' });
+        if (controller.signal.aborted) throw new Stop('DISCOVERY_TIMEOUT');
+        this.adapter = adapter; this.itemCount = adapter.itemCount; this.pagination = adapter.pagination;
+        return [...adapter.records.keys()];
+      };
+      return await Promise.race([operation(), new Promise((_, reject) => {
+        timer = setTimeout(() => { controller.abort(); reject(new Stop('DISCOVERY_TIMEOUT')); }, timeoutMs);
+      })]);
+    } catch (error) { throw error instanceof Stop ? error : new Stop('PROVIDER_REQUEST_FAILED'); }
+    finally { clearTimeout(timer); }
+  }
+  async read(page, url, budget) { return this.adapter.read(page, url, budget); }
+  classify(job) { return this.adapter.classify(job); }
+}
 
 // Purpose-built mock wire envelope, NOT the SocialAPIs response schema.
 // No fetch implementation exists in this V2 spike.

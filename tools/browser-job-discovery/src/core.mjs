@@ -88,9 +88,9 @@ export class JobPostExtractor {
       ...post,
       extractionStatus: post.hasImage && !post.body.trim() ? 'IMAGE_REQUIRES_EXTRACTION' : 'TEXT_EXTRACTED',
       contentHash: hash([post.title, post.employer, post.location, post.requirements, post.body].join('\n')),
-      sourceIdentity: post.id ? `fixture:${post.id}` : post.sourceUrl,
+      sourceIdentity: post.id ? `${post.provider ?? 'fixture'}:${post.id}` : post.sourceUrl,
       // Not a RawJobPosting/JobPosting write model. No guessed required fields.
-      provenance: { source: 'OFFLINE_FIXTURE', sourceUrl: post.sourceUrl, evidenceKind: post.evidenceKind }
+      provenance: { source: post.provider ? post.source : 'OFFLINE_FIXTURE', sourceUrl: post.sourceUrl, evidenceKind: post.evidenceKind }
     };
   }
 }
@@ -159,7 +159,7 @@ export function matchTarget(job, { profile = 'fullstack', today = new Date() } =
 export function deduplicate(jobs) {
   const identities = new Set(); const hashes = new Set(); const unique = []; const duplicates = [];
   for (const job of jobs) {
-    if (identities.has(job.sourceIdentity) || hashes.has(job.contentHash)) duplicates.push(job.sourceIdentity);
+    if (identities.has(job.sourceIdentity) || !job.provider && hashes.has(job.contentHash)) duplicates.push(job.sourceIdentity);
     else unique.push(job);
     identities.add(job.sourceIdentity); hashes.add(job.contentHash);
   }
@@ -168,23 +168,28 @@ export function deduplicate(jobs) {
 
 /** @implements {import('./contracts').IDiscoveryReporter} */
 export class DiscoveryReporter {
+  constructor({ evidenceKind = 'OFFLINE_FIXTURE_ONLY' } = {}) { this.evidenceKind = evidenceKind; }
   build({ jobs, duplicates, stopCode, budget, queries, blockedRequests = 0, technicalReady }) {
+    const isTarget = job => ['TARGET_MATCH', 'EXACT_ENTRY_LEVEL', 'POTENTIAL_ENTRY_LEVEL', 'STRETCH_OPPORTUNITY'].includes(job.match.classification);
     return {
-      evidenceKind: 'OFFLINE_FIXTURE_ONLY',
+      evidenceKind: this.evidenceKind,
       gates: { ...facebookAccessGate({ technicalReady }),
-        offline: technicalReady && !stopCode && jobs.some(j => j.match.classification !== 'NOT_MATCHED') ? 'OFFLINE_BROWSER_AGENT_PASS' : 'OFFLINE_BROWSER_AGENT_FAIL',
+        offline: this.evidenceKind !== 'OFFLINE_FIXTURE_ONLY' ? 'NOT_APPLICABLE_PROVIDER_DISCOVERY'
+          : technicalReady && !stopCode && jobs.some(j => j.match.classification !== 'NOT_MATCHED') ? 'OFFLINE_BROWSER_AGENT_PASS' : 'OFFLINE_BROWSER_AGENT_FAIL',
         cloud: 'CLOUD_BROWSER_RUNTIME_UNVERIFIED',
         persistentSession: 'PERSISTENT_SESSION_UNVERIFIED', zeroCost: 'ZERO_COST_UNVERIFIED' },
       stopCode, queries, budget: budget.snapshot(), blockedRequests,
       metrics: { uniquePosts: jobs.length, duplicates: duplicates.length,
-        targetMatches: jobs.filter(j => j.match.classification !== 'NOT_MATCHED').length,
+        targetMatches: jobs.filter(isTarget).length,
+        insufficientData: jobs.filter(j => j.match.classification === 'INSUFFICIENT_DATA').length,
+        notMatched: jobs.filter(j => j.match.classification === 'NOT_MATCHED').length,
         imageExtractionRequired: jobs.filter(j => j.extractionStatus === 'IMAGE_REQUIRES_EXTRACTION').length },
       duplicates, jobs
     };
   }
 }
 
-export async function runDiscovery({ sessionProvider, adapter, planner, extractor, reporter, target, budget, signal }) {
+export async function runDiscovery({ sessionProvider, adapter, planner, extractor, reporter, target, budget, signal, matcher = matchTarget }) {
   const controller = new AbortController();
   const stopExternal = () => controller.abort();
   signal?.addEventListener('abort', stopExternal, { once: true });
@@ -193,16 +198,16 @@ export async function runDiscovery({ sessionProvider, adapter, planner, extracto
   const records = []; const queries = []; let session; let stopCode = null; let technicalReady = false;
   try {
     if (controller.signal.aborted) throw new Stop('TIME_BUDGET_EXCEEDED');
-    session = await sessionProvider.open(budget, controller.signal); technicalReady = true;
+    if (sessionProvider) { session = await sessionProvider.open(budget, controller.signal); technicalReady = true; }
     const urls = new Set();
     for (const query of planner.plan(target)) {
       budget.check();
       queries.push(query);
-      for (const url of await adapter.search(session.page, query, budget)) {
+      for (const url of await adapter.search(session?.page, query, budget)) {
         if (urls.has(url)) continue;
         urls.add(url);
-        const job = extractor.extract(await adapter.read(session.page, url, budget));
-        job.match = matchTarget(job);
+        const job = extractor.extract(await adapter.read(session?.page, url, budget));
+        job.match = matcher(job);
         records.push(job);
       }
     }
@@ -215,5 +220,5 @@ export async function runDiscovery({ sessionProvider, adapter, planner, extracto
   }
   const { unique, duplicates } = deduplicate(records);
   return reporter.build({ jobs: unique, duplicates, queries, stopCode, budget,
-    blockedRequests: sessionProvider.blockedRequests ?? 0, technicalReady });
+    blockedRequests: sessionProvider?.blockedRequests ?? 0, technicalReady });
 }
