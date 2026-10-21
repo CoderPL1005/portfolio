@@ -3,6 +3,9 @@ import { resolve, relative, isAbsolute, dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { ActivityBudget, SearchPlanner, JobPostExtractor, DiscoveryReporter, runDiscovery, requireMode, Stop } from './core.mjs';
+import { structuredMetrics } from './vacancy-extraction.mjs';
+import { validateDateFilters } from './discovery-contract.mjs';
+import { buildDiscoveryYield } from './discovery-yield.mjs';
 
 // No browser URL/session/auth arguments. Select mode before importing a browser.
 const args = process.argv.slice(2);
@@ -17,12 +20,13 @@ if (args.includes('--source')) {
         if (flags.has(argument)) throw new Stop('INVALID_DISCOVERY_ARGUMENTS');
         flags.add(argument); continue;
       }
-      if (!['--source', '--replay', '--output', '--max-requests', '--max-credits', '--timeout-ms', '--query'].includes(argument) ||
+      if (!['--source', '--replay', '--output', '--max-requests', '--max-credits', '--timeout-ms', '--query', '--start-time', '--end-time'].includes(argument) ||
           !args[i + 1] || options.has(argument)) throw new Stop('INVALID_DISCOVERY_ARGUMENTS');
       options.set(argument, args[++i]);
     }
     const live = flags.has('--live'); const prepare = flags.has('--prepare-state');
     if (options.get('--source') !== 'socialapis' || Number(live) + Number(prepare) + Number(options.has('--replay')) !== 1) throw new Stop('SOCIALAPIS_MODE_REQUIRED');
+    const dateFilters = validateDateFilters({ startTime: options.get('--start-time'), endTime: options.get('--end-time') });
     const debugDirectory = fileURLToPath(new URL('../.debug/', import.meta.url));
     const capture = options.has('--replay') ? resolve(options.get('--replay')) : null;
     const output = resolve(options.get('--output') ?? resolve(debugDirectory, 'socialapis-discovery.json'));
@@ -66,23 +70,36 @@ if (args.includes('--source')) {
           maxRequests: Number(options.get('--max-requests') ?? process.env.SOCIALAPIS_MAX_REQUESTS ?? 1),
           maxCredits: Number(options.get('--max-credits') ?? process.env.SOCIALAPIS_MAX_CREDITS ?? 1),
           timeoutMs: Number(options.get('--timeout-ms') ?? 20_000),
+          ...dateFilters,
           ...(options.has('--query') ? { query: options.get('--query') } : {}) });
       }
       const report = await runDiscovery({ adapter, planner: { plan: () => [adapter.query] },
         extractor: new JobPostExtractor(), reporter: new DiscoveryReporter({ evidenceKind: live ? 'LIVE_PROVIDER_RESPONSE' : 'LOCAL_PROVIDER_CAPTURE_REPLAY' }),
         budget, target: {}, matcher: job => adapter.classify(job) });
       if (report.stopCode) throw new Stop(report.stopCode);
+      report.queryYield = buildDiscoveryYield({ jobs: report.jobs, existingJobs: existing, query: adapter.query,
+        itemStats: adapter.itemStats, requestStats: adapter.requestStats, dateFilters,
+        mode: live ? 'LIVE_PROVIDER_RESPONSE' : 'REPLAY' });
       const stored = new Map(existing.map(job => [job.sourceIdentity, job]));
-      let inserted = 0; let updated = 0; let unchanged = 0;
+      let inserted = 0; let updated = 0; let unchanged = 0; let contentUpdated = 0; let extractionRefreshed = 0; let metadataUpdated = 0;
       for (const job of report.jobs) {
         const previous = stored.get(job.sourceIdentity);
         if (!previous) inserted++;
-        else if (JSON.stringify(previous) !== JSON.stringify(job)) updated++;
+        else if (JSON.stringify(previous) !== JSON.stringify(job)) {
+          updated++;
+          if (previous.contentHash !== job.contentHash) contentUpdated++;
+          else if (previous.extractionVersion !== job.extractionVersion) extractionRefreshed++;
+          else metadataUpdated++;
+        }
         else unchanged++;
         stored.set(job.sourceIdentity, job);
       }
+      report.metricsScope = 'CURRENT_RUN';
+      report.processedSourceIdentities = report.jobs.map(job => job.sourceIdentity);
       report.jobs = [...stored.values()];
-      report.storage = { inserted, updated, unchanged, totalCandidates: report.jobs.length };
+      report.accumulatedMetrics = { scope: 'STORED_STATE_NOT_NEW_DISCOVERIES', uniquePosts: report.jobs.length,
+        ...structuredMetrics(report.jobs) };
+      report.storage = { inserted, updated, unchanged, contentUpdated, extractionRefreshed, metadataUpdated, totalCandidates: report.jobs.length };
       const execution = { processedItems: adapter.itemCount, networkRequests: adapter.requestStats?.requestCount ?? 0,
         pagination: { cursorPresent: adapter.pagination.cursor !== null, followed: false },
         permalinkExistenceVerified: false };
@@ -91,7 +108,7 @@ if (args.includes('--source')) {
       await save(report);
       // JD text/contact data remains in the ignored private file, not stdout.
       console.log(JSON.stringify({ evidenceKind: report.evidenceKind, metrics: report.metrics,
-        itemStats: report.itemStats, storage: report.storage,
+        itemStats: report.itemStats, storage: report.storage, queryYield: report.queryYield,
         ...(live ? { live: report.live, providerUsage: report.providerUsage } : { replay: report.replay }), reportWritten: true }));
     }
   } catch (error) {

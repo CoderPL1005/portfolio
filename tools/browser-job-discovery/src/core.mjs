@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
+import { extractVacancies, structuredMetrics } from './vacancy-extraction.mjs';
 
 export class Stop extends Error {
   constructor(code) { super(code); this.code = code; }
@@ -86,6 +87,7 @@ export class JobPostExtractor {
     if (post.body.length > 24_000) throw new Stop('POST_TOO_LARGE');
     return {
       ...post,
+      ...(post.provider === 'SOCIALAPIS' ? extractVacancies(post.body, post) : {}),
       extractionStatus: post.hasImage && !post.body.trim() ? 'IMAGE_REQUIRES_EXTRACTION' : 'TEXT_EXTRACTED',
       contentHash: hash([post.title, post.employer, post.location, post.requirements, post.body].join('\n')),
       sourceIdentity: post.id ? `${post.provider ?? 'fixture'}:${post.id}` : post.sourceUrl,
@@ -183,7 +185,8 @@ export class DiscoveryReporter {
         targetMatches: jobs.filter(isTarget).length,
         insufficientData: jobs.filter(j => j.match.classification === 'INSUFFICIENT_DATA').length,
         notMatched: jobs.filter(j => j.match.classification === 'NOT_MATCHED').length,
-        imageExtractionRequired: jobs.filter(j => j.extractionStatus === 'IMAGE_REQUIRES_EXTRACTION').length },
+        imageExtractionRequired: jobs.filter(j => j.extractionStatus === 'IMAGE_REQUIRES_EXTRACTION').length,
+        ...structuredMetrics(jobs) },
       duplicates, jobs
     };
   }

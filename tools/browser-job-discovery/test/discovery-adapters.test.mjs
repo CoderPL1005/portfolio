@@ -9,6 +9,9 @@ import { ActivityBudget, facebookAccessGate, JobPostExtractor, DiscoveryReporter
 import { buildFacebookSearchUrl, canonicalFacebookPost } from '../src/discovery-contract.mjs';
 import { FacebookBrowserDiscoveryAdapter } from '../src/facebook-browser-adapter.mjs';
 import { SocialApisHubHttpAdapter, createMockSocialApisTransport, PROVIDER_SCHEMA_STATUS, SocialApisCaptureDiscoveryAdapter, SocialApisLiveDiscoveryAdapter } from '../src/socialapis-adapter.mjs';
+import { summarizeSocialApisRows } from '../src/socialapis-live-smoke.mjs';
+import { validateDateFilters } from '../src/discovery-contract.mjs';
+import { buildDiscoveryYield } from '../src/discovery-yield.mjs';
 
 const query = 'C# .NET Angular Junior Hà Nội';
 const urls = ['https://m.facebook.com/groups/fixture.jobs/permalink/1001?ref=search',
@@ -204,6 +207,71 @@ async function replay(payload, budget = new ActivityBudget()) {
     reporter: new DiscoveryReporter({ evidenceKind: 'LOCAL_PROVIDER_CAPTURE_REPLAY' }), target: {}, budget,
     matcher: job => adapter.classify(job) });
 }
+
+test('Phase A capture, mocked live transport and safe smoke summary use identical vacancy matching', async () => withLiveKey(async () => {
+  const payload = capturedPayload();
+  payload.data.items[0].basic_info.post_text = 'Hà Nội\n1. QA Engineer Intern\nLương 8–12 triệu\n2. Fresher – Middle .NET Developer\nASP.NET Core, Angular\nUp to 35M\nInbox';
+  let requests = 0;
+  const capture = await replay(payload);
+  const adapter = new SocialApisLiveDiscoveryAdapter(liveOptions, async () => {
+    requests++; return new Response(JSON.stringify(payload), { headers: { 'X-SocialAPIs-Credits-Deducted': '1' } });
+  });
+  const live = await runDiscovery({ adapter, planner: { plan: () => [adapter.query] }, extractor: new JobPostExtractor(),
+    reporter: new DiscoveryReporter({ evidenceKind: 'MOCK_PROVIDER_RESPONSE' }), target: {}, budget: new ActivityBudget(), matcher: job => adapter.classify(job) });
+  const summary = summarizeSocialApisRows(payload.data.items);
+  assert.equal(requests, 1); assert.equal(live.stopCode, null);
+  for (const [i, job] of capture.jobs.entries()) {
+    assert.deepEqual(live.jobs[i].vacancies, job.vacancies);
+    assert.deepEqual(live.jobs[i].match, job.match);
+    assert.equal(live.jobs[i].contentHash, job.contentHash);
+    assert.equal(summary.candidates[i].classification, job.match.classification);
+  }
+  assert.equal(capture.jobs[0].title, null); assert.equal(capture.jobs[0].vacancies.length, 2);
+  assert.equal(capture.metrics.relevantSourcePosts, 4); assert.equal(capture.metrics.relevantVacancies, 4);
+  assert.equal(capture.metrics.unknownFreshness, 8); assert.equal(capture.metrics.structuredExtractionCoverage.withVacancies, 8);
+  assert.equal(capture.metrics.emailCoverage.withEmail, 0);
+  assert.doesNotMatch(JSON.stringify(summary), /8–12|35M|ASP.NET Core, Angular/u); // no raw JD copied into diagnostic summary
+}));
+
+test('Phase A state refresh distinguishes extraction upgrades, raw edits and accumulated historical posts', () => {
+  const root = fileURLToPath(new URL('../.debug/', import.meta.url)); mkdirSync(root, { recursive: true });
+  const directory = mkdtempSync(join(root, 'vacancy-state-'));
+  const capture = join(directory, 'capture.json'); const output = join(directory, 'state.json');
+  const cli = fileURLToPath(new URL('../src/cli.mjs', import.meta.url));
+  // A subprocess transport guard proves replay cannot reach an external socket/fetch.
+  const guard = 'data:text/javascript,' + encodeURIComponent(`import net from 'node:net';
+    net.Socket.prototype.connect=function(){throw new Error('NETWORK_FORBIDDEN');};
+    globalThis.fetch=()=>{throw new Error('FETCH_FORBIDDEN');};`);
+  const run = () => JSON.parse(execFileSync(process.execPath, ['--import', guard, cli, '--source', 'socialapis', '--replay', capture, '--output', output], { encoding: 'utf8', stdio: 'pipe' }));
+  try {
+    const payload = capturedPayload(); writeFileSync(capture, JSON.stringify(payload));
+    const firstRun = run(); assert.equal(firstRun.storage.inserted, 8);
+    assert.equal(firstRun.queryYield.newSourcePosts, 8); assert.equal(firstRun.queryYield.newRelevantSourcePosts, 4);
+    assert.equal(firstRun.queryYield.requestCount, 0); assert.equal(firstRun.queryYield.relevantVacanciesPerCredit, null);
+    const old = JSON.parse(readFileSync(output, 'utf8')); const historical = structuredClone(old.jobs.slice(1));
+    const originalHash = old.jobs[0].contentHash;
+    delete old.jobs[0].extractionVersion; delete old.jobs[0].vacancies;
+    writeFileSync(output, JSON.stringify(old));
+    payload.data.items = payload.data.items.slice(0, 1); writeFileSync(capture, JSON.stringify(payload));
+    const refresh = run();
+    assert.equal(refresh.storage.extractionRefreshed, 1); assert.equal(refresh.storage.contentUpdated, 0);
+    assert.equal(refresh.storage.updated, 1); assert.equal(refresh.storage.inserted, 0);
+    assert.equal(refresh.queryYield.newSourcePosts, 0); assert.equal(refresh.queryYield.existingSourcePosts, 1);
+    assert.equal(refresh.queryYield.newRelevantVacancies, 0);
+    const refreshed = JSON.parse(readFileSync(output, 'utf8'));
+    assert.equal(refreshed.jobs[0].contentHash, originalHash);
+    assert.deepEqual(refreshed.jobs.slice(1), historical);
+    assert.equal(refreshed.metricsScope, 'CURRENT_RUN'); assert.equal(refreshed.metrics.uniquePosts, 1);
+    assert.equal(refreshed.accumulatedMetrics.uniquePosts, 8);
+    assert.deepEqual(refreshed.processedSourceIdentities, ['SOCIALAPIS:5001']);
+    assert.equal(run().storage.unchanged, 1);
+    payload.data.items[0].basic_info.post_text += '\nYêu cầu: SQL Server';
+    writeFileSync(capture, JSON.stringify(payload));
+    const changed = run(); assert.equal(changed.storage.contentUpdated, 1); assert.equal(changed.storage.extractionRefreshed, 0);
+    assert.equal(changed.queryYield.newSourcePosts, 0); assert.equal(changed.queryYield.newRelevantSourcePosts, 0);
+    assert.equal(changed.storage.totalCandidates, 8); assert.equal(run().storage.unchanged, 1);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
 test('SocialAPIs capture runs through real discovery/extraction/dedup/reporting without browser or transport', async () => {
   const oldFetch = globalThis.fetch;
   try {
@@ -225,6 +293,128 @@ test('SocialAPIs capture runs through real discovery/extraction/dedup/reporting 
 });
 
 const liveOptions = { enabled: true, freePlanConfirmed: true, noCashConfirmed: true };
+
+for (const filters of [{}, { startTime: '2026-10-01', endTime: '2026-10-07' },
+  { startTime: '2024-02-29' }, { endTime: '2026-10-07' }, { startTime: '2000-02-29', endTime: '2000-02-29' }]) {
+  test(`B.0 mock live date filters preserve URL and unknown publication: ${JSON.stringify(filters)}`, async () => withLiveKey(async () => {
+    let calls = 0; let requested;
+    const adapter = new SocialApisLiveDiscoveryAdapter({ ...liveOptions, ...filters }, async url => {
+      calls++; requested = new URL(url);
+      return new Response(JSON.stringify(mixedPayload()), { headers: { 'X-SocialAPIs-Credits-Deducted': '1', 'X-SocialAPIs-Credits-Used': '6' } });
+    });
+    const report = await runDiscovery({ adapter, planner: { plan: () => [adapter.query] }, extractor: new JobPostExtractor(),
+      reporter: new DiscoveryReporter({ evidenceKind: 'MOCK_PROVIDER_RESPONSE' }), target: {}, budget: new ActivityBudget(), matcher: job => adapter.classify(job) });
+    assert.equal(report.stopCode, null); assert.equal(calls, 1); assert.equal(requested.searchParams.get('recent_posts'), 'true');
+    assert.equal(requested.searchParams.get('start_time'), filters.startTime ?? null);
+    assert.equal(requested.searchParams.get('end_time'), filters.endTime ?? null);
+    if (!Object.keys(filters).length) assert.equal(requested.href, 'https://api.socialapis.io/facebook/search/posts?query=tuy%E1%BB%83n+fresher+.NET+H%C3%A0+N%E1%BB%99i&recent_posts=true');
+    assert.equal(requested.searchParams.size, 2 + Object.keys(filters).length);
+    assert.equal(report.itemStats.outcome, 'PARTIAL_SUCCESS'); assert.deepEqual(report.itemStats.rejectionReasons, mixedReasons);
+    assert.ok(report.jobs.every(job => job.publishedAt === null && job.published_at === null && job.match.freshness === 'UNKNOWN'));
+    const yieldReport = buildDiscoveryYield({ jobs: report.jobs, query: adapter.query, requestStats: adapter.requestStats,
+      itemStats: adapter.itemStats, dateFilters: adapter.dateFilters, mode: 'MOCK_TRANSPORT' });
+    assert.equal(yieldReport.creditsDeducted, 1); assert.equal(yieldReport.creditsUsedAlternateHeader, 6);
+    assert.equal(yieldReport.verifiedRecentRelevantVacancies, 0); assert.equal(yieldReport.freshnessUnknownCount, 2);
+    assert.equal(yieldReport.requestMetadata.providerDateFilterBehavior, 'UNVERIFIED');
+    assert.equal(yieldReport.requestMetadata.providerSearchPerformed, false);
+    await assert.rejects(() => adapter.search(undefined, adapter.query, new ActivityBudget()), /REQUEST_BUDGET_EXCEEDED/u);
+    assert.equal(calls, 1);
+  }));
+}
+
+for (const invalid of ['2026-2-01', '2026-02-30', '2025-02-29', '1900-02-29', '2026-04-31',
+  '2026-00-10', '2026-13-01', '2026-01-00', '0000-01-01', '2026-01-01T00:00:00Z', '', ' 2026-01-01', '2026-01-01\n', '2026-01-01\t', 20260101]) {
+  test(`B.0 invalid calendar input is rejected before transport: ${JSON.stringify(invalid)}`, () => {
+    let calls = 0;
+    for (const side of ['startTime', 'endTime']) assert.throws(() => new SocialApisLiveDiscoveryAdapter({ ...liveOptions, [side]: invalid }, () => { calls++; }), /INVALID_DATE_FILTER/u);
+    assert.equal(calls, 0);
+  });
+}
+test('B.0 inverted range is rejected before transport; omitted filters stay optional', () => {
+  let calls = 0;
+  assert.throws(() => new SocialApisLiveDiscoveryAdapter({ ...liveOptions, startTime: '2026-10-08', endTime: '2026-10-07' }, () => { calls++; }), /INVALID_DATE_RANGE/u);
+  assert.equal(calls, 0); assert.deepEqual(validateDateFilters(), { startTime: null, endTime: null });
+});
+
+test('B.0 a provider timestamp stays UNVERIFIED even inside the requested window; fractional actual credits are used', async () => withLiveKey(async () => {
+  const adapter = new SocialApisLiveDiscoveryAdapter({ ...liveOptions, startTime: '2026-10-01', endTime: '2026-10-07' }, async () =>
+    new Response(JSON.stringify({ data: { results: [{ post_id: '5001', text: 'Hiring Junior .NET Developer in Hanoi',
+      created_time: Date.parse('2026-10-05T00:00:00Z') / 1000, url: 'https://www.facebook.com/fixture/posts/5001' }] } }),
+    { headers: { 'X-SocialAPIs-Credits-Deducted': '0.5', 'X-SocialAPIs-Credits-Used': '6' } }));
+  const report = await runDiscovery({ adapter, planner: { plan: () => [adapter.query] }, extractor: new JobPostExtractor(),
+    reporter: new DiscoveryReporter({ evidenceKind: 'MOCK_PROVIDER_RESPONSE' }), target: {}, budget: new ActivityBudget(), matcher: job => adapter.classify(job) });
+  assert.equal(report.stopCode, null); assert.equal(report.jobs[0].publishedAt, '2026-10-05T00:00:00.000Z');
+  assert.equal(report.jobs[0].match.freshness, 'UNVERIFIED');
+  const metrics = buildDiscoveryYield({ jobs: report.jobs, query: adapter.query, itemStats: adapter.itemStats,
+    requestStats: adapter.requestStats, dateFilters: adapter.dateFilters, mode: 'MOCK_TRANSPORT', now: new Date('2026-10-07T00:00:00Z') });
+  assert.equal(metrics.requestMetadata.publicationDates.timestampPresentUnverified, 1);
+  assert.equal(metrics.verifiedRecentRelevantVacancies, 0); assert.equal(metrics.relevantVacanciesPerCredit, 2);
+  assert.equal(metrics.creditsDeducted, 0.5); assert.equal(metrics.creditsUsedAlternateHeader, 6);
+}));
+
+test('B.0 yield separates distinct posts, vacancies, registry duplicates, timestamps and shared contacts', async () => {
+  const payload = capturedPayload(); payload.data.items = payload.data.items.slice(0, 1);
+  payload.data.items[0].basic_info.post_text = 'Hanoi\n1. Junior .NET Developer\n2. Intern C# Developer\nEmail: jobs@example.invalid';
+  const report = await replay(payload); const job = report.jobs[0];
+  const options = { jobs: report.jobs, query: 'synthetic-query', itemStats: { totalItems: 3, acceptedItems: 2, rejectedItems: 1 },
+    requestStats: { requestCount: 1, creditsDeducted: 0.5, creditsUsedAlternateHeader: 6 },
+    dateFilters: { startTime: '2026-10-01', endTime: '2026-10-07' }, mode: 'MOCK_TRANSPORT', now: new Date('2026-10-07T00:00:00Z') };
+  const first = buildDiscoveryYield(options);
+  assert.equal(first.newSourcePosts, 1); assert.equal(first.relevantSourcePosts, 1); assert.equal(first.newRelevantSourcePosts, 1);
+  assert.equal(first.relevantVacancies, 2); assert.equal(first.newRelevantVacancies, 2);
+  assert.equal(first.duplicateRate, 0.5); assert.equal(first.relevantVacanciesWithContactEmail, 2);
+  assert.equal(first.relevantVacanciesPerCredit, 4); assert.equal(first.newRelevantVacanciesPerCredit, 4);
+  assert.equal(first.verifiedRecentVacanciesPerCredit, 0); assert.equal(first.creditsUsedAlternateHeader, 6);
+  assert.equal(first.verifiedRecentRelevantVacancies, 0); assert.equal(first.freshnessUnknownCount, 1);
+  assert.equal(first.requestMetadata.publicationDates.unknown, 1);
+  const second = buildDiscoveryYield({ ...options, existingJobs: [job, { sourceIdentity: 'SOCIALAPIS:historical' }] });
+  assert.equal(second.newSourcePosts, 0); assert.equal(second.existingSourcePosts, 1); assert.equal(second.duplicateRate, 1);
+  assert.equal(second.newRelevantSourcePosts, 0); assert.equal(second.newRelevantVacancies, 0); assert.equal(second.relevantSourcePosts, 1);
+  for (const cost of [null, 0]) {
+    const unknown = buildDiscoveryYield({ ...options, requestStats: { creditsDeducted: cost } });
+    assert.equal(unknown.relevantVacanciesPerCredit, null); assert.equal(unknown.newRelevantVacanciesPerCredit, null);
+    assert.equal(unknown.verifiedRecentVacanciesPerCredit, null);
+  }
+  const timestamped = { ...job, publishedAt: '2026-10-06T00:00:00Z', match: { ...job.match, freshness: 'UNVERIFIED' } };
+  assert.equal(buildDiscoveryYield({ ...options, jobs: [timestamped] }).verifiedRecentRelevantVacancies, 0);
+  const verified = { ...timestamped, match: { ...job.match, freshness: 'RECENT_7D' } };
+  assert.equal(buildDiscoveryYield({ ...options, jobs: [verified] }).verifiedRecentRelevantVacancies, 2);
+  assert.equal(buildDiscoveryYield({ ...options, jobs: [{ ...verified, publishedAt: '2026-10-08T00:00:00Z' }] }).verifiedRecentRelevantVacancies, 0);
+  const privateToRole = structuredClone(job); privateToRole.postSections.sharedFooter = null;
+  privateToRole.vacancies[0].contactEmail = privateToRole.contactEmail;
+  assert.equal(buildDiscoveryYield({ ...options, jobs: [privateToRole] }).relevantVacanciesWithContactEmail, 1);
+  const empty = buildDiscoveryYield({ jobs: [], query: 'synthetic-query' });
+  assert.equal(empty.newSourcePosts, 0); assert.equal(empty.duplicateRate, null); assert.equal(empty.relevantVacanciesPerCredit, null);
+});
+
+test('B.0 CLI forwards dates to actual live adapter under a mock, preserves state, and validates before IO', () => {
+  const root = fileURLToPath(new URL('../.debug/', import.meta.url)); mkdirSync(root, { recursive: true });
+  const directory = mkdtempSync(join(root, 'b0-cli-')); const output = join(directory, 'state.json');
+  const cli = fileURLToPath(new URL('../src/cli.mjs', import.meta.url));
+  const mock = 'data:text/javascript,' + encodeURIComponent(`import assert from 'node:assert/strict'; import net from 'node:net';
+    net.Socket.prototype.connect=function(){throw new Error('NETWORK_FORBIDDEN');}; let calls=0;
+    globalThis.fetch=async input=>{ assert.equal(++calls,1); const url=new URL(input);
+      assert.equal(url.searchParams.get('start_time'),'2026-10-01'); assert.equal(url.searchParams.get('end_time'),'2026-10-07');
+      return new Response(${JSON.stringify(JSON.stringify(capturedPayload()))},{headers:{'X-SocialAPIs-Credits-Deducted':'1','X-SocialAPIs-Credits-Used':'6'}}); };`);
+  const env = { ...process.env, SOCIALAPIS_API_KEY: 'synthetic-b0-cli-key-not-real', SOCIALAPIS_LIVE_ENABLED: 'true',
+    SOCIALAPIS_FREE_PLAN_CONFIRMED: 'true', SOCIALAPIS_NO_CASH_CONFIRMED: 'true' };
+  const run = extra => JSON.parse(execFileSync(process.execPath, ['--import', mock, cli, '--source', 'socialapis', '--output', output, ...extra], { encoding: 'utf8', env, stdio: 'pipe' }));
+  try {
+    run(['--prepare-state', '--initialize-state']);
+    const args = ['--live', '--start-time', '2026-10-01', '--end-time', '2026-10-07'];
+    const first = run(args); assert.equal(first.queryYield.newSourcePosts, 8); assert.equal(first.queryYield.newRelevantVacancies, 4);
+    assert.equal(first.queryYield.freshnessUnknownCount, 8); assert.equal(first.queryYield.verifiedRecentRelevantVacancies, 0);
+    assert.equal(first.queryYield.requestMetadata.startTime, '2026-10-01');
+    assert.equal(first.queryYield.requestMetadata.providerDateFilterBehavior, 'UNVERIFIED');
+    const second = run(args); assert.equal(second.queryYield.newSourcePosts, 0); assert.equal(second.queryYield.existingSourcePosts, 8);
+    assert.equal(second.queryYield.newRelevantVacanciesPerCredit, 0); assert.equal(second.storage.unchanged, 8);
+    const unchanged = readFileSync(output, 'utf8');
+    assert.throws(() => run(['--live', '--start-time', '2026-02-30']), error => error.stderr.toString().includes('INVALID_DATE_FILTER'));
+    assert.equal(readFileSync(output, 'utf8'), unchanged);
+    const state = JSON.parse(unchanged); assert.ok(state.jobs.every(j => j.publishedAt === null && j.match.freshness === 'UNKNOWN'));
+    assert.doesNotMatch(unchanged, /synthetic-b0-cli-key-not-real/u);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
 async function withLiveKey(run) {
   const previous = process.env.SOCIALAPIS_API_KEY;
   process.env.SOCIALAPIS_API_KEY = 'synthetic-live-transport-test-key';
@@ -359,7 +549,8 @@ test('mixed batch rejects malformed items individually and preserves later valid
   assert.deepEqual(report.itemStats, { totalItems: 9, acceptedItems: 2, rejectedItems: 7,
     rejectionReasons: mixedReasons, outcome: 'PARTIAL_SUCCESS' });
   assert.equal(report.budget.candidates, 2);
-  assert.doesNotMatch(JSON.stringify(report), /PRIVATE_INVALID_URL|9999/u);
+  // Wall-clock decimals can contain "9999"; they are not rejected provider data.
+  assert.doesNotMatch(JSON.stringify(report, (key, value) => key === 'elapsedMs' ? 0 : value), /PRIVATE_INVALID_URL|9999/u);
   assert.equal(report.jobs[0].body, mixedPayload().data.items[0].basic_info.post_text);
   // Already-supported Page and story.php variants remain valid alongside Group
   // permalinks; no new URL grammar is introduced for partial recovery.

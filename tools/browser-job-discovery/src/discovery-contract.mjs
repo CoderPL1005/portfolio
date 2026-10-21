@@ -1,5 +1,20 @@
 import { Stop } from './core.mjs';
 
+export function validateDateFilters({ startTime, endTime } = {}) {
+  const validate = value => {
+    if (value === undefined || value === null) return null;
+    if (typeof value !== 'string' || value.length !== 10 || !/^\d{4}-\d{2}-\d{2}$/u.test(value)) throw new Stop('INVALID_DATE_FILTER');
+    const [year, month, day] = value.split('-').map(Number);
+    const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+    const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    if (year < 1 || month < 1 || month > 12 || day < 1 || day > days[month - 1]) throw new Stop('INVALID_DATE_FILTER');
+    return value;
+  };
+  const start = validate(startTime); const end = validate(endTime);
+  if (start && end && start > end) throw new Stop('INVALID_DATE_RANGE');
+  return { startTime: start, endTime: end };
+}
+
 export function validateQuery(query) {
   if (typeof query !== 'string' || !query.trim() || query.length > 300 || /[\p{C}]/u.test(query)) throw new Stop('INVALID_QUERY');
   return query.normalize('NFC').trim();

@@ -23,6 +23,14 @@ on:
         description: Facebook recruitment search query
         type: string
         default: tuyển fresher .NET Hà Nội
+      start_time:
+        description: Optional publication start date YYYY-MM-DD
+        type: string
+        default: ''
+      end_time:
+        description: Optional publication end date YYYY-MM-DD
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -55,13 +63,13 @@ jobs:
         uses: actions/github-script@v7
         env:
           INITIALIZE_STATE: ${{ inputs.initialize_state }}
-          MAX_31_DAY_REQUESTS: ${{ vars.SOCIALAPIS_MAX_31_DAY_REQUESTS || '20' }}
+          MAX_31_DAY_REQUESTS: ${{ vars.SOCIALAPIS_MAX_31_DAY_REQUESTS }}
         with:
           retries: 0
           script: |
             if (Number(process.env.GITHUB_RUN_ATTEMPT) !== 1) throw new Error('RERUN_DISABLED_USE_A_NEW_MANUAL_RUN');
+            if (!/^[12]$/.test(process.env.MAX_31_DAY_REQUESTS ?? '')) throw new Error('INVALID_ROLLING_REQUEST_CAP');
             const max = Number(process.env.MAX_31_DAY_REQUESTS);
-            if (!Number.isInteger(max) || max < 1 || max > 20) throw new Error('INVALID_ROLLING_REQUEST_CAP');
             const repo = await github.rest.repos.get(context.repo);
             if (repo.data.private) throw new Error('PUBLIC_REPOSITORY_REQUIRED_FOR_THIS_ZERO_COST_PLAN');
             const workflow = { ...context.repo, workflow_id: 'socialapis-job-discovery.yml', branch: 'main', event: 'workflow_dispatch' };
@@ -121,7 +129,18 @@ jobs:
           SOCIALAPIS_MAX_REQUESTS: '1'
           SOCIALAPIS_MAX_CREDITS: '1'
           DISCOVERY_QUERY: ${{ inputs.query }}
-        run: node src/cli.mjs --source socialapis --live --query "$DISCOVERY_QUERY"
+          DISCOVERY_START_TIME: ${{ inputs.start_time }}
+          DISCOVERY_END_TIME: ${{ inputs.end_time }}
+        shell: bash
+        run: |
+          args=(src/cli.mjs --source socialapis --live --query "$DISCOVERY_QUERY")
+          if [ -n "$DISCOVERY_START_TIME" ]; then
+            args+=(--start-time "$DISCOVERY_START_TIME")
+          fi
+          if [ -n "$DISCOVERY_END_TIME" ]; then
+            args+=(--end-time "$DISCOVERY_END_TIME")
+          fi
+          node "${args[@]}"
       - name: Enforce bounded artifact size
         run: node --input-type=module -e "import {statSync} from 'node:fs'; if(statSync('.debug/socialapis-discovery.json').size>1048576) throw new Error('ARTIFACT_SIZE_LIMIT');"
       - name: Persist discovery state and report for next run

@@ -1,4 +1,5 @@
 import { canonicalFacebookPost } from './discovery-contract.mjs';
+import { extractVacancies } from './vacancy-extraction.mjs';
 import { closeSync, lstatSync, mkdirSync, openSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -214,18 +215,8 @@ export function summarizeSocialApisRows(rows) {
     if (postId) ids.add(postId);
     if (normalized.sourceUrl) urls.add(normalized.sourceUrl);
     const text = normalized.rawContent?.normalize('NFC') ?? '';
-    const terms = {
-      technology: [...new Set([...text.matchAll(/(?:^|[^\p{L}\p{N}])(asp\.net(?: core)?|\.net|c#)(?=$|[^\p{L}\p{N}])/giu)].map(match => match[1]))],
-      seniority: [...new Set(text.match(/\b(?:intern(?:ship)?|fresher|junior)\b|thực tập/giu) ?? [])],
-      location: [...new Set(text.match(/hà nội|ha noi|hanoi/giu) ?? [])],
-      recruitment: [...new Set(text.match(/tuyển(?: dụng)?|\b(?:hiring|recruitment|vacanc(?:y|ies))\b|tìm\s+(?:intern|fresher|junior)\s+(?:lập trình viên|developer)/giu) ?? [])]
-    };
-    const recruitment = terms.recruitment.length > 0;
-    // A multi-city roundup does not prove the .NET vacancy belongs to Hanoi.
-    // Preserve it for review rather than joining technology from HCM to Hanoi.
-    const locationAmbiguous = terms.location.length > 0 && /hồ chí minh|ho chi minh|\bhcm\b|sài gòn|sai gon/iu.test(text);
-    const matched = recruitment && terms.technology.length > 0 && terms.seniority.length > 0 && terms.location.length > 0 && !locationAmbiguous;
-    const classification = matched ? 'TARGET_MATCH' : !text || recruitment && terms.technology.length > 0 ? 'INSUFFICIENT_DATA' : 'NOT_MATCHED';
+    const extracted = extractVacancies(text, { sourceUrl: normalized.sourceUrl, publishedAt: normalized.publishedAt });
+    const { evidenceTerms: terms, recruitment, locationAssignmentAmbiguous: locationAmbiguous, classification } = extracted.structuredMatch;
     candidates.push({ post_id: postId, canonical_post_url: normalized.sourceUrl,
       permalink_status: normalized.sourceUrl ? 'CANDIDATE' : 'MISSING',
       permalink_field: normalized.permalinkSourceField, permalink_syntax_valid: normalized.sourceUrl !== null, permalink_existence_verified: false,

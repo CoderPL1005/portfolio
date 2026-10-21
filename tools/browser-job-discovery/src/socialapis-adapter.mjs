@@ -1,5 +1,5 @@
 import { Stop } from './core.mjs';
-import { validateQuery, canonicalFacebookPost, candidateRecord, boundedOperation } from './discovery-contract.mjs';
+import { validateQuery, validateDateFilters, canonicalFacebookPost, candidateRecord, boundedOperation } from './discovery-contract.mjs';
 import { SMOKE_QUERY, normalizeSocialApisItem, parseSocialApisSearchResponse, summarizeSocialApisRows, readSocialApisResponse } from './socialapis-live-smoke.mjs';
 
 export const PROVIDER_SCHEMA_STATUS = 'PROVIDER_RESPONSE_SCHEMA_UNVERIFIED';
@@ -71,7 +71,7 @@ export class SocialApisCaptureDiscoveryAdapter {
     if (!this.records.has(url)) throw new Stop('CAPTURE_POST_NOT_FOUND');
     return structuredClone(this.records.get(url));
   }
-  classify(job) { return structuredClone(this.matches.get(job.sourceUrl)); }
+  classify(job) { return structuredClone(job.structuredMatch ?? this.matches.get(job.sourceUrl)); }
 }
 
 /** One bounded request, no retry/pagination. Billing assertions are operator
@@ -80,9 +80,10 @@ export class SocialApisCaptureDiscoveryAdapter {
  */
 export class SocialApisLiveDiscoveryAdapter {
   constructor({ enabled = false, freePlanConfirmed = false, noCashConfirmed = false,
-    maxRequests = 1, maxCredits = 1, timeoutMs = 20_000, query = SMOKE_QUERY } = {}, transport) {
+    maxRequests = 1, maxCredits = 1, timeoutMs = 20_000, query = SMOKE_QUERY, startTime, endTime } = {}, transport) {
     this.options = { enabled, freePlanConfirmed, noCashConfirmed, maxRequests, maxCredits, timeoutMs };
     this.query = validateQuery(query); this.transport = transport;
+    this.dateFilters = Object.freeze(validateDateFilters({ startTime, endTime }));
     this.requestStats = { requestCount: 0, creditsDeducted: null, creditsUsedAlternateHeader: null };
   }
   async search(_page, query, budget) {
@@ -100,6 +101,8 @@ export class SocialApisLiveDiscoveryAdapter {
       const operation = async () => {
         const url = new URL('https://api.socialapis.io/facebook/search/posts');
         url.searchParams.set('query', this.query); url.searchParams.set('recent_posts', 'true');
+        if (this.dateFilters.startTime) url.searchParams.set('start_time', this.dateFilters.startTime);
+        if (this.dateFilters.endTime) url.searchParams.set('end_time', this.dateFilters.endTime);
         const response = await (this.transport ?? globalThis.fetch)(url.href, { method: 'GET',
           headers: { 'x-api-token': key, Accept: 'application/json' }, redirect: 'manual', credentials: 'omit', signal: controller.signal });
         if (controller.signal.aborted) throw new Stop('DISCOVERY_TIMEOUT');
