@@ -219,6 +219,8 @@ export async function runDiscovery({ sessionProvider, adapter, planner, extracto
     await session?.close();
   }
   const { unique, duplicates } = deduplicate(records);
-  return reporter.build({ jobs: unique, duplicates, queries, stopCode, budget,
+  const report = reporter.build({ jobs: unique, duplicates, queries, stopCode, budget,
     blockedRequests: sessionProvider?.blockedRequests ?? 0, technicalReady });
+  if (adapter.itemStats) report.itemStats = structuredClone(adapter.itemStats);
+  return report;
 }

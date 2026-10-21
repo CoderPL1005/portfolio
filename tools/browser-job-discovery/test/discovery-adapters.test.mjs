@@ -199,7 +199,7 @@ function capturedPayload() {
   })), page_info: { cursor: 'SYNTHETIC_CURSOR_NEVER_FOLLOW' } }, message: 'OK', meta: { statusCode: 200 } };
 }
 async function replay(payload, budget = new ActivityBudget()) {
-  const adapter = new SocialApisCaptureDiscoveryAdapter(payload);
+  const adapter = new SocialApisCaptureDiscoveryAdapter(payload, { budget });
   return runDiscovery({ adapter, planner: { plan: () => [adapter.query] }, extractor: new JobPostExtractor(),
     reporter: new DiscoveryReporter({ evidenceKind: 'LOCAL_PROVIDER_CAPTURE_REPLAY' }), target: {}, budget,
     matcher: job => adapter.classify(job) });
@@ -330,10 +330,96 @@ test('capture preserves distinct post IDs with identical text and dedups repeat 
   const adapter = new SocialApisCaptureDiscoveryAdapter(payload);
   await assert.rejects(() => adapter.search(undefined, 'different query', new ActivityBudget()), /CAPTURE_QUERY_MISMATCH/u);
   payload.data.items[0].basic_info.url = 'https://example.invalid/not-facebook';
-  assert.throws(() => new SocialApisCaptureDiscoveryAdapter(payload), /PROVIDER_POST_INVALID/u);
+  const rejected = new SocialApisCaptureDiscoveryAdapter(payload);
+  assert.equal(rejected.itemStats.rejectedItems, 1);
+  assert.deepEqual(rejected.itemStats.rejectionReasons, [{ index: 0, reason: 'POST_URL_INVALID_OR_UNSUPPORTED' }]);
+  assert.equal(rejected.records.has('https://example.invalid/not-facebook'), false);
   assert.throws(() => new SocialApisCaptureDiscoveryAdapter({ error: 'denied' }), /PROVIDER_ERROR/u);
   const limited = await replay(capturedPayload(), new ActivityBudget({ candidates: 1 }));
   assert.equal(limited.stopCode, 'CANDIDATES_BUDGET_EXCEEDED');
+});
+
+function mixedPayload() {
+  const payload = capturedPayload(); const first = payload.data.items[0];
+  const changed = fields => ({ ...first, basic_info: { ...first.basic_info, ...fields } });
+  payload.data.items = [first, null, changed({ post_id: undefined }), changed({ post_id: 123 }),
+    changed({ url: undefined }), changed({ url: 'https://example.invalid/PRIVATE_INVALID_URL' }),
+    changed({ post_id: '9999' }), changed({ post_text: 'x'.repeat(24_001) }), payload.data.items[1]];
+  return payload;
+}
+const mixedReasons = [
+  { index: 1, reason: 'ITEM_NOT_OBJECT' }, { index: 2, reason: 'POST_ID_MISSING' },
+  { index: 3, reason: 'POST_ID_INVALID' }, { index: 4, reason: 'POST_URL_MISSING' },
+  { index: 5, reason: 'POST_URL_INVALID_OR_UNSUPPORTED' }, { index: 6, reason: 'POST_ID_URL_MISMATCH' },
+  { index: 7, reason: 'POST_TEXT_TOO_LARGE' }
+];
+test('mixed batch rejects malformed items individually and preserves later valid posts with exact reasons', async () => {
+  const report = await replay(mixedPayload());
+  assert.equal(report.stopCode, null); assert.deepEqual(report.jobs.map(job => job.id), ['5001', '5002']);
+  assert.deepEqual(report.itemStats, { totalItems: 9, acceptedItems: 2, rejectedItems: 7,
+    rejectionReasons: mixedReasons, outcome: 'PARTIAL_SUCCESS' });
+  assert.equal(report.budget.candidates, 2);
+  assert.doesNotMatch(JSON.stringify(report), /PRIVATE_INVALID_URL|9999/u);
+  assert.equal(report.jobs[0].body, mixedPayload().data.items[0].basic_info.post_text);
+  // Already-supported Page and story.php variants remain valid alongside Group
+  // permalinks; no new URL grammar is introduced for partial recovery.
+  const variants = capturedPayload();
+  variants.data.items[0].basic_info.url = 'https://www.facebook.com/fixture.page/posts/5001';
+  variants.data.items[1] = { post_id: '5002', text: 'Tuyển Junior C# tại Hà Nội',
+    url: 'https://m.facebook.com/story.php?story_fbid=5002&id=9000' };
+  const variantReport = await replay(variants);
+  assert.equal(variantReport.stopCode, null); assert.equal(variantReport.itemStats.acceptedItems, 8);
+  assert.equal(variantReport.itemStats.rejectedItems, 0);
+});
+test('mock live mixed batch uses exactly the same strict per-item normalization and recovery', async () => withLiveKey(async () => {
+  let calls = 0;
+  const adapter = new SocialApisLiveDiscoveryAdapter(liveOptions, async () => {
+    calls++; return new Response(JSON.stringify(mixedPayload()), { headers: { 'X-SocialAPIs-Credits-Deducted': '1' } });
+  });
+  const report = await runDiscovery({ adapter, planner: { plan: () => [adapter.query] }, extractor: new JobPostExtractor(),
+    reporter: new DiscoveryReporter({ evidenceKind: 'MOCK_PROVIDER_RESPONSE' }), target: {}, budget: new ActivityBudget(), matcher: job => adapter.classify(job) });
+  assert.equal(calls, 1); assert.equal(report.stopCode, null); assert.equal(report.jobs.length, 2);
+  assert.equal(report.itemStats.outcome, 'PARTIAL_SUCCESS'); assert.deepEqual(report.itemStats.rejectionReasons, mixedReasons);
+}));
+test('all-invalid is an explicit failure, empty results are distinct, and response errors remain fatal', async () => {
+  const invalid = capturedPayload(); invalid.data.items = [null, { basic_info: { post_id: '5001', url: 'https://example.invalid/no' } }];
+  const report = await replay(invalid);
+  assert.equal(report.stopCode, 'NO_VALID_PROVIDER_ITEMS'); assert.equal(report.jobs.length, 0);
+  assert.equal(report.itemStats.outcome, 'NO_VALID_ITEMS'); assert.equal(report.itemStats.acceptedItems, 0);
+  assert.equal(report.itemStats.rejectedItems, 2);
+  const empty = await replay({ data: { items: [] } });
+  assert.equal(empty.stopCode, null); assert.equal(empty.itemStats.outcome, 'EMPTY_RESULTS');
+  assert.throws(() => new SocialApisCaptureDiscoveryAdapter({ data: { items: {} } }), /SCHEMA_MISMATCH/u);
+  assert.throws(() => new SocialApisCaptureDiscoveryAdapter({ error: 'PRIVATE_ERROR', data: { items: [] } }), /PROVIDER_ERROR/u);
+  const oversized = capturedPayload(); oversized.data.items = Array(201).fill(null);
+  assert.throws(() => new SocialApisCaptureDiscoveryAdapter(oversized), /RESULT_COUNT_LIMIT_EXCEEDED/u);
+  let now = 0; const budget = new ActivityBudget({ durationMs: 1 }, () => now); now = 1;
+  assert.throws(() => new SocialApisCaptureDiscoveryAdapter(mixedPayload(), { budget }), /TIME_BUDGET_EXCEEDED/u);
+  const capped = await replay(mixedPayload(), new ActivityBudget({ candidates: 1 }));
+  assert.equal(capped.stopCode, 'CANDIDATES_BUDGET_EXCEEDED'); assert.equal(capped.budget.candidates, 1);
+});
+test('mixed replay persists valid candidates only; all-invalid failure preserves checkpoint byte-for-byte', () => {
+  const root = fileURLToPath(new URL('../.debug/', import.meta.url)); mkdirSync(root, { recursive: true });
+  const directory = mkdtempSync(join(root, 'partial-integration-'));
+  const capture = join(directory, 'capture.json'); const output = join(directory, 'state.json');
+  const cli = fileURLToPath(new URL('../src/cli.mjs', import.meta.url));
+  const noNetwork = 'data:text/javascript,' + encodeURIComponent("import net from 'node:net'; globalThis.fetch=()=>{throw new Error('NETWORK_FORBIDDEN');}; net.Socket.prototype.connect=function(){throw new Error('NETWORK_FORBIDDEN');};");
+  const run = () => execFileSync(process.execPath, ['--import', noNetwork, cli, '--source', 'socialapis', '--replay', capture, '--output', output], { encoding: 'utf8', stdio: 'pipe' });
+  try {
+    writeFileSync(capture, JSON.stringify(mixedPayload()), 'utf8');
+    const result = JSON.parse(run()); assert.equal(result.itemStats.rejectedItems, 7);
+    const persisted = readFileSync(output, 'utf8'); const state = JSON.parse(persisted);
+    assert.deepEqual(state.jobs.map(job => job.id), ['5001', '5002']);
+    assert.equal(state.itemStats.acceptedItems, 2); assert.doesNotMatch(persisted, /PRIVATE_INVALID_URL/u);
+    assert.equal(JSON.parse(run()).storage.inserted, 0);
+    const beforeFailure = readFileSync(output, 'utf8');
+    writeFileSync(capture, JSON.stringify({ data: { items: [null] } }), 'utf8');
+    assert.throws(run, error => {
+      assert.equal(error.status, 1); assert.match(error.stderr.toString(), /NO_VALID_PROVIDER_ITEMS/u);
+      assert.equal(JSON.parse(error.stdout).itemStats.outcome, 'NO_VALID_ITEMS'); return true;
+    });
+    assert.equal(readFileSync(output, 'utf8'), beforeFailure);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 test('existing CLI replays twice into private local store with no duplicate inserts and no network', () => {
   const privateDirectory = fileURLToPath(new URL('../.debug/', import.meta.url));

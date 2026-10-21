@@ -52,11 +52,12 @@ if (args.includes('--source')) {
       await save({ evidenceKind: 'SOCIALAPIS_DISCOVERY_STATE', jobs: existing });
       console.log(JSON.stringify({ statePrepared: true, totalCandidates: existing.length, networkRequests: 0 }));
     } else {
+      const budget = new ActivityBudget();
       const { SocialApisCaptureDiscoveryAdapter, SocialApisLiveDiscoveryAdapter } = await import('./socialapis-adapter.mjs');
       if (capture) {
         requireMode('offline');
         if ((await stat(capture)).size > 1_048_576) throw new Stop('RESPONSE_TOO_LARGE');
-        adapter = new SocialApisCaptureDiscoveryAdapter(JSON.parse(await readFile(capture, 'utf8')));
+        adapter = new SocialApisCaptureDiscoveryAdapter(JSON.parse(await readFile(capture, 'utf8')), { budget });
       } else {
         // Reserve a local checkpoint before the possible external side effect.
         await save({ evidenceKind: 'SOCIALAPIS_DISCOVERY_STATE', jobs: existing });
@@ -69,7 +70,7 @@ if (args.includes('--source')) {
       }
       const report = await runDiscovery({ adapter, planner: { plan: () => [adapter.query] },
         extractor: new JobPostExtractor(), reporter: new DiscoveryReporter({ evidenceKind: live ? 'LIVE_PROVIDER_RESPONSE' : 'LOCAL_PROVIDER_CAPTURE_REPLAY' }),
-        budget: new ActivityBudget(), target: {}, matcher: job => adapter.classify(job) });
+        budget, target: {}, matcher: job => adapter.classify(job) });
       if (report.stopCode) throw new Stop(report.stopCode);
       const stored = new Map(existing.map(job => [job.sourceIdentity, job]));
       let inserted = 0; let updated = 0; let unchanged = 0;
@@ -90,10 +91,11 @@ if (args.includes('--source')) {
       await save(report);
       // JD text/contact data remains in the ignored private file, not stdout.
       console.log(JSON.stringify({ evidenceKind: report.evidenceKind, metrics: report.metrics,
-        storage: report.storage, ...(live ? { live: report.live, providerUsage: report.providerUsage } : { replay: report.replay }), reportWritten: true }));
+        itemStats: report.itemStats, storage: report.storage,
+        ...(live ? { live: report.live, providerUsage: report.providerUsage } : { replay: report.replay }), reportWritten: true }));
     }
   } catch (error) {
-    if (adapter?.requestStats) console.log(JSON.stringify({ providerUsage: adapter.requestStats }));
+    if (adapter?.requestStats || adapter?.itemStats) console.log(JSON.stringify({ providerUsage: adapter.requestStats, itemStats: adapter.itemStats }));
     console.error(error instanceof Stop ? error.code : 'DISCOVERY_RUN_FAILED'); process.exitCode = 1;
   }
 } else if (args.length && !(args.length === 2 && args[0] === '--output')) {

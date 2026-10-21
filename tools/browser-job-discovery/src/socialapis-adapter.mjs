@@ -12,20 +12,38 @@ const mockTransports = new WeakSet();
  * in runDiscovery. A capture is evidence for its one query, not fresh searches.
  */
 export class SocialApisCaptureDiscoveryAdapter {
-  constructor(payload, { capturedQuery = SMOKE_QUERY, evidenceKind = 'LOCAL_PROVIDER_CAPTURE_REPLAY' } = {}) {
+  constructor(payload, { capturedQuery = SMOKE_QUERY, evidenceKind = 'LOCAL_PROVIDER_CAPTURE_REPLAY', budget } = {}) {
     this.query = validateQuery(capturedQuery);
     const parsed = parseSocialApisSearchResponse(payload);
     if (!parsed.rows) throw new Stop(parsed.outcome);
     if (parsed.rows.length > 200) throw new Stop('RESULT_COUNT_LIMIT_EXCEEDED');
     this.itemCount = parsed.rows.length;
+    this.itemStats = { totalItems: parsed.rows.length, acceptedItems: 0, rejectedItems: 0, rejectionReasons: [], outcome: 'EMPTY_RESULTS' };
     this.pagination = { cursor: typeof payload.data.page_info?.cursor === 'string' ? payload.data.page_info.cursor : null };
     this.records = new Map(); this.matches = new Map();
-    for (const row of parsed.rows) {
+    for (const [index, row] of parsed.rows.entries()) {
+      budget?.check();
+      const reject = reason => {
+        this.itemStats.rejectedItems++;
+        this.itemStats.rejectionReasons.push({ index, reason });
+      };
+      if (!row || typeof row !== 'object' || Array.isArray(row)) { reject('ITEM_NOT_OBJECT'); continue; }
       const normalized = normalizeSocialApisItem(row);
-      if (!normalized?.sourceExternalId || !normalized.sourceUrl || normalized.idUrlConflict) throw new Stop('PROVIDER_POST_INVALID');
+      if (!normalized?.sourceExternalId) {
+        const id = Object.hasOwn(row, 'basic_info') ? row.basic_info?.post_id : row.post_id;
+        reject(id === undefined || id === null || id === '' ? 'POST_ID_MISSING' : 'POST_ID_INVALID'); continue;
+      }
+      if (normalized.idUrlConflict) { reject('POST_ID_URL_MISMATCH'); continue; }
+      if (!normalized.sourceUrl) {
+        const urls = Object.hasOwn(row, 'basic_info') ? [row.basic_info?.url] : [row.permalink, row.url, row.post_url, row.post_link];
+        reject(urls.some(url => url !== undefined && url !== null && url !== '') ? 'POST_URL_INVALID_OR_UNSUPPORTED' : 'POST_URL_MISSING'); continue;
+      }
+      // Same per-post limit as JobPostExtractor; an oversized post must not
+      // abort extraction of other validated records later in the batch.
+      if ((normalized.rawContent?.length ?? 0) > 24_000) { reject('POST_TEXT_TOO_LARGE'); continue; }
       const summary = summarizeSocialApisRows([row]);
       const match = summary.candidates[0];
-      if (!match) throw new Stop('PROVIDER_POST_INVALID');
+      if (!match) { reject('POST_MAPPING_INVALID'); continue; }
       const providerUrl = Object.hasOwn(row, 'basic_info') ? row.basic_info.url
         : row[normalized.permalinkSourceField];
       this.records.set(providerUrl, {
@@ -37,11 +55,15 @@ export class SocialApisCaptureDiscoveryAdapter {
       this.matches.set(providerUrl, { classification: match.classification,
         locationAssignmentAmbiguous: match.location_assignment_ambiguous, freshness: normalized.publishedAt ? 'UNVERIFIED' : 'UNKNOWN',
         evidenceTerms: match.evidence_terms, eligibleForProductionIngestion: false });
+      this.itemStats.acceptedItems++;
     }
+    this.itemStats.outcome = this.itemStats.acceptedItems ? (this.itemStats.rejectedItems ? 'PARTIAL_SUCCESS' : 'SUCCESS')
+      : this.itemStats.totalItems ? 'NO_VALID_ITEMS' : 'EMPTY_RESULTS';
   }
   async search(_page, query, budget) {
     budget.consume('searches');
     if (validateQuery(query) !== this.query) throw new Stop('CAPTURE_QUERY_MISMATCH');
+    if (this.itemStats.outcome === 'NO_VALID_ITEMS') throw new Stop('NO_VALID_PROVIDER_ITEMS');
     return [...this.records.keys()];
   }
   async read(_page, url, budget) {
@@ -95,9 +117,10 @@ export class SocialApisLiveDiscoveryAdapter {
             typeof bodyCredits === 'number' && bodyCredits > maxCredits) throw new Stop('PROVIDER_CREDIT_COST_UNVERIFIED_OR_EXCEEDED');
         // Credits-Used remains a separate opaque usage metric, never added.
         const adapter = new SocialApisCaptureDiscoveryAdapter(payload, { capturedQuery: this.query,
-          evidenceKind: this.transport ? 'MOCK_PROVIDER_RESPONSE' : 'LIVE_PROVIDER_RESPONSE' });
+          evidenceKind: this.transport ? 'MOCK_PROVIDER_RESPONSE' : 'LIVE_PROVIDER_RESPONSE', budget });
         if (controller.signal.aborted) throw new Stop('DISCOVERY_TIMEOUT');
-        this.adapter = adapter; this.itemCount = adapter.itemCount; this.pagination = adapter.pagination;
+        this.adapter = adapter; this.itemCount = adapter.itemCount; this.pagination = adapter.pagination; this.itemStats = adapter.itemStats;
+        if (this.itemStats.outcome === 'NO_VALID_ITEMS') throw new Stop('NO_VALID_PROVIDER_ITEMS');
         return [...adapter.records.keys()];
       };
       return await Promise.race([operation(), new Promise((_, reject) => {
