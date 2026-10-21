@@ -58,27 +58,18 @@ jobs:
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Offline unit and configuration tests (no provider secret)
         run: npm test
-      - name: Check cost bounds and locate previous checkpoint
+      - name: Validate development safeguards and locate previous checkpoint
         id: checkpoint
         uses: actions/github-script@v7
         env:
           INITIALIZE_STATE: ${{ inputs.initialize_state }}
-          MAX_31_DAY_REQUESTS: ${{ vars.SOCIALAPIS_MAX_31_DAY_REQUESTS }}
         with:
           retries: 0
           script: |
             if (Number(process.env.GITHUB_RUN_ATTEMPT) !== 1) throw new Error('RERUN_DISABLED_USE_A_NEW_MANUAL_RUN');
-            if (!/^[12]$/.test(process.env.MAX_31_DAY_REQUESTS ?? '')) throw new Error('INVALID_ROLLING_REQUEST_CAP');
-            const max = Number(process.env.MAX_31_DAY_REQUESTS);
             const repo = await github.rest.repos.get(context.repo);
             if (repo.data.private) throw new Error('PUBLIC_REPOSITORY_REQUIRED_FOR_THIS_ZERO_COST_PLAN');
             const workflow = { ...context.repo, workflow_id: 'socialapis-job-discovery.yml', branch: 'main', event: 'workflow_dispatch' };
-            const since = new Date(Date.now() - 31 * 86400_000).toISOString();
-            const recent = await github.rest.actions.listWorkflowRuns({ ...workflow, created: `>=${since}`, per_page: 100 });
-            // Count all dispatched runs, even failed/no-request runs: conservative
-            // reservation independent of provider outcomes or artifact upload.
-            const currentIncluded = recent.data.workflow_runs.some(run => run.id === context.runId);
-            if (recent.data.total_count + (currentIncluded ? 0 : 1) > max) throw new Error('ROLLING_REQUEST_CAP_EXCEEDED');
             const history = await github.rest.actions.listWorkflowRuns({ ...workflow, per_page: 2 });
             const previous = history.data.workflow_runs.find(run => run.id !== context.runId);
             if (!previous) {

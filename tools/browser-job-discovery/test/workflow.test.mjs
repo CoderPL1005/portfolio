@@ -72,47 +72,53 @@ test('SocialAPIs workflow is manual/standard/read-only, restores and checkpoints
   assert.equal(steps.find(step => step.id === 'checkpoint').with.retries, 0);
 });
 
-test('actual checkpoint script fails closed for lost state, reset, rerun and quota; selects prior artifact', async () => {
+test('development checkpoint script has no dispatch quota and fails closed for lost state, reset or rerun', async () => {
   const script = discoveryWorkflow.jobs.discover.steps.find(step => step.id === 'checkpoint').with.script;
   const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
   const execute = new AsyncFunction('github', 'context', 'core', script);
   const previousEnv = Object.fromEntries(['GITHUB_RUN_ATTEMPT', 'MAX_31_DAY_REQUESTS', 'INITIALIZE_STATE'].map(key => [key, process.env[key]]));
-  let repoChecks = 0;
-  async function check({ prior = true, artifact = true, initialize = false, count = 2, attempt = '1', resetCap = '2', expired = false, currentIncluded = true } = {}) {
-    repoChecks = 0;
+  async function check({ prior = true, artifact = true, initialize = false, count = 2, attempt = '1', expired = false,
+    artifactName = 'socialapis-discovery-state', conclusion = 'success', status = 'completed', privateRepo = false } = {}) {
     process.env.GITHUB_RUN_ATTEMPT = attempt;
-    if (resetCap === undefined) delete process.env.MAX_31_DAY_REQUESTS; else process.env.MAX_31_DAY_REQUESTS = resetCap;
     process.env.INITIALIZE_STATE = String(initialize);
     const outputs = {};
-    const github = { rest: { repos: { get: async () => { repoChecks++; return { data: { private: false } }; } }, actions: {
-      listWorkflowRuns: async params => params.created ? { data: { total_count: count, workflow_runs: [{ id: currentIncluded ? 200 : 199, conclusion: 'failure' }] } } : { data: {
-        total_count: prior ? 2 : 1, workflow_runs: [{ id: 200 }, ...(prior ? [{ id: 100, status: 'completed' }] : [])] } },
-      listWorkflowRunArtifacts: async () => ({ data: { artifacts: artifact ? [{ name: 'socialapis-discovery-state', expired }] : [] } })
+    const github = { rest: { repos: { get: async () => ({ data: { private: privateRepo } }) }, actions: {
+      listWorkflowRuns: async params => {
+        assert.equal(params.created, undefined); assert.equal(params.per_page, 2);
+        assert.equal(params.event, 'workflow_dispatch'); assert.equal(params.branch, 'main');
+        return { data: { total_count: count, workflow_runs: [{ id: 200 }, ...(prior ? [{ id: 100, status, conclusion }] : [])] } };
+      },
+      listWorkflowRunArtifacts: async params => {
+        assert.equal(params.run_id, 100);
+        return { data: { artifacts: artifact ? [{ name: artifactName, expired }] : [] } };
+      }
     } } };
     await execute(github, { repo: { owner: 'fixture', repo: 'fixture' }, runId: 200 }, { setOutput: (key, value) => { outputs[key] = value; } });
     return outputs;
   }
   try {
     assert.equal((await check()).run_id, '100'); assert.equal((await check()).artifact_name, 'socialapis-discovery-state');
-    assert.equal((await check({ prior: false, initialize: true })).initialize, 'true');
+    assert.equal((await check({ prior: false, count: 1, initialize: true })).initialize, 'true');
     await assert.rejects(() => check({ prior: false }), /FIRST_RUN_EXPLICIT_INITIALIZATION_REQUIRED/u);
     await assert.rejects(() => check({ artifact: false }), /CHECKPOINT_MISSING_OR_EXPIRED/u);
     await assert.rejects(() => check({ expired: true }), /CHECKPOINT_MISSING_OR_EXPIRED/u);
     await assert.rejects(() => check({ initialize: true }), /CANNOT_RESET_EXISTING_DISCOVERY_HISTORY/u);
-    await assert.rejects(() => check({ count: 21 }), /ROLLING_REQUEST_CAP_EXCEEDED/u);
     await assert.rejects(() => check({ attempt: '2' }), /RERUN_DISABLED/u);
-    await assert.rejects(() => check({ resetCap: '1000' }), /INVALID_ROLLING_REQUEST_CAP/u);
-    for (const invalid of ['', ' ', '0', '-1', '1.5', '2.0', '02', '2e0', 'NaN', '3', '20', '2\n']) {
-      await assert.rejects(() => check({ resetCap: invalid }), /INVALID_ROLLING_REQUEST_CAP/u);
-      assert.equal(repoChecks, 0);
-    }
-    // Explicitly delete the variable: an absent setting must not fall back.
+    await assert.rejects(() => check({ privateRepo: true }), /PUBLIC_REPOSITORY_REQUIRED/u);
+    await assert.rejects(() => check({ status: 'in_progress' }), /PREVIOUS_RUN_NOT_COMPLETED/u);
+    await assert.rejects(() => check({ prior: false, initialize: true, count: 100 }), /FIRST_RUN_EXPLICIT_INITIALIZATION_REQUIRED/u);
+    // The old setting is ignored even when missing or invalid, and historical
+    // dispatch count is used only to prevent accidental empty initialization.
     delete process.env.MAX_31_DAY_REQUESTS;
-    const forbidden = () => assert.fail('invalid configuration reached a GitHub API');
-    await assert.rejects(() => execute({ rest: { repos: { get: forbidden } } }, {}, {}), /INVALID_ROLLING_REQUEST_CAP/u);
-    await assert.rejects(() => check({ count: 3 }), /ROLLING_REQUEST_CAP_EXCEEDED/u);
-    await assert.rejects(() => check({ count: 2, currentIncluded: false }), /ROLLING_REQUEST_CAP_EXCEEDED/u);
-    assert.equal((await check({ count: 1, resetCap: '1' })).run_id, '100');
+    assert.equal((await check({ count: 10000 })).run_id, '100');
+    for (const ignored of ['', 'garbage', '0', '2', '200']) {
+      process.env.MAX_31_DAY_REQUESTS = ignored;
+      assert.equal((await check({ count: 10000 })).run_id, '100');
+    }
+    assert.equal((await check({ conclusion: 'failure', artifactName: 'socialapis-discovery-checkpoint' })).artifact_name,
+      'socialapis-discovery-checkpoint');
+    assert.equal((await check({ conclusion: 'failure' })).artifact_name, 'socialapis-discovery-state');
+    await assert.rejects(() => check({ conclusion: 'failure', artifact: false }), /CHECKPOINT_MISSING_OR_EXPIRED/u);
   } finally {
     for (const [key, value] of Object.entries(previousEnv)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
   }
@@ -122,7 +128,7 @@ const liveStep = discoveryWorkflow.jobs.discover.steps.find(step => step.name ==
 const bash = process.platform === 'win32' ? join(process.env.ProgramFiles ?? 'C:\\Program Files', 'Git', 'bin', 'bash.exe') : 'bash';
 const toolDirectory = fileURLToPath(new URL('../', import.meta.url));
 
-test('B.1 date inputs are optional/env-only and cap has no implicit fallback', () => {
+test('B.1 date inputs remain optional/env-only and development workflow has no calendar dispatch quota', () => {
   const inputs = discoveryWorkflow.on.workflow_dispatch.inputs;
   for (const name of ['start_time', 'end_time']) {
     assert.equal(inputs[name].type, 'string'); assert.equal(inputs[name].default, '');
@@ -130,8 +136,7 @@ test('B.1 date inputs are optional/env-only and cap has no implicit fallback', (
   assert.equal(inputs.query.default, 'tuyển fresher .NET Hà Nội');
   assert.equal(liveStep.env.DISCOVERY_START_TIME, '${{ inputs.start_time }}');
   assert.equal(liveStep.env.DISCOVERY_END_TIME, '${{ inputs.end_time }}');
-  assert.equal(discoveryWorkflow.jobs.discover.steps.find(step => step.id === 'checkpoint').env.MAX_31_DAY_REQUESTS,
-    '${{ vars.SOCIALAPIS_MAX_31_DAY_REQUESTS }}');
+  assert.doesNotMatch(JSON.stringify(discoveryWorkflow), /MAX_31_DAY_REQUESTS|ROLLING_REQUEST_CAP|INVALID_ROLLING_REQUEST_CAP|31\s*\*\s*86400|vars\./u);
   assert.equal(liveStep.shell, 'bash'); assert.doesNotMatch(liveStep.run, /\$\{\{|\b(?:for|while|until|curl|wget)\b/gu);
 });
 
@@ -181,6 +186,46 @@ test('B.1 actual workflow Bash reaches CLI validation and persists the existing 
     run('2026-10-18', '2026-10-21');
     const again = JSON.parse(readFileSync(output, 'utf8'));
     assert.equal(again.queryYield.newSourcePosts, 0); assert.equal(again.storage.unchanged, 1);
+  } finally {
+    assert.ok(resolve(directory).startsWith(root + sep)); rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('development insufficient-credit or unknown-cost responses stop after one mock request and preserve historical jobs', () => {
+  const root = resolve(toolDirectory, '.debug'); mkdirSync(root, { recursive: true });
+  const directory = mkdtempSync(join(root, 'development-credit-')); const output = join(directory, 'state.json');
+  const counter = join(directory, 'calls.txt'); const cli = join(toolDirectory, 'src', 'cli.mjs');
+  const historical = [{ provider: 'SOCIALAPIS', id: '98765', sourceIdentity: 'SOCIALAPIS:98765',
+    body: 'SYNTHETIC_EXISTING_POST', contentHash: 'a'.repeat(64), publishedAt: null }];
+  const cases = [
+    { status: 402, payload: { error: { code: 'INSUFFICIENT_CREDITS' } }, headers: {}, code: 'PROVIDER_HTTP_REJECTED' },
+    { status: 200, payload: { error: { code: 'INSUFFICIENT_CREDITS' }, data: { items: [] } },
+      headers: { 'X-SocialAPIs-Credits-Deducted': '0' }, code: 'PROVIDER_ERROR' },
+    { status: 200, payload: { data: { items: [] } }, headers: { 'X-SocialAPIs-Credits-Used': '6' },
+      code: 'PROVIDER_CREDIT_COST_UNVERIFIED_OR_EXCEEDED' }
+  ];
+  try {
+    for (const fixture of cases) {
+      writeFileSync(output, JSON.stringify({ evidenceKind: 'SOCIALAPIS_DISCOVERY_STATE', jobs: historical }));
+      writeFileSync(counter, '');
+      const fake = 'data:text/javascript,' + encodeURIComponent(`import net from 'node:net'; import {appendFileSync} from 'node:fs';
+        net.Socket.prototype.connect=function(){throw new Error('NETWORK_FORBIDDEN');};
+        globalThis.fetch=async()=>{appendFileSync(process.env.TEST_CALL_COUNTER,'x');
+          return new Response(${JSON.stringify(JSON.stringify(fixture.payload))},{status:${fixture.status},headers:${JSON.stringify(fixture.headers)}});};`);
+      assert.throws(() => execFileSync(process.execPath, ['--import', fake, cli, '--source', 'socialapis', '--live', '--output', output], {
+        cwd: toolDirectory, encoding: 'utf8', stdio: 'pipe', env: { ...process.env, ...liveStep.env,
+          TEST_CALL_COUNTER: counter, SOCIALAPIS_API_KEY: 'synthetic-development-credit-key' }
+      }), error => {
+        assert.ok(error.stderr.toString().includes(fixture.code));
+        const usage = JSON.parse(error.stdout.toString()).providerUsage;
+        assert.equal(usage.requestCount, 1);
+        assert.equal(usage.creditsDeducted, fixture.headers['X-SocialAPIs-Credits-Deducted'] === '0' ? 0 : null);
+        assert.doesNotMatch(error.stdout.toString() + error.stderr.toString(), /synthetic-development-credit-key|SYNTHETIC_EXISTING_POST/u);
+        return true;
+      });
+      assert.equal(readFileSync(counter, 'utf8'), 'x');
+      assert.deepEqual(JSON.parse(readFileSync(output, 'utf8')), { evidenceKind: 'SOCIALAPIS_DISCOVERY_STATE', jobs: historical });
+    }
   } finally {
     assert.ok(resolve(directory).startsWith(root + sep)); rmSync(directory, { recursive: true, force: true });
   }
