@@ -39,7 +39,7 @@ export async function paginationCli(args) {
     beginExecution(state, { ...resolved,
       startTime: process.env.DISCOVERY_START_TIME || undefined, endTime: process.env.DISCOVERY_END_TIME || undefined,
       maxRequests: process.env.DISCOVERY_MAX_REQUESTS ?? '1', maxCredits: process.env.DISCOVERY_MAX_CREDITS ?? '1' }, process.env.GITHUB_RUN_ID ?? 'local', { resumeContinuation });
-    if(resolved.profile?.technologyProfile)state.queryPlan={version:'facebook-query-v1',candidates:planFacebookQueries(resolved.profile.technologyProfile,state.discoveryYieldHistory??[])};
+    if(resolved.profile?.technologyProfile)state.queryPlan={version:'facebook-query-v1',candidates:planFacebookQueries(resolved.profile.technologyProfile,state.discoveryYieldHistory??[],resolved.targetJobPreferences)};
     console.log(JSON.stringify({ maximumHttpRequests: state.orchestration.config.maxRequests,
       maximumPermittedDeductedCredits: state.orchestration.config.maxCredits,
       maximumContractCreditExposure: Math.min(state.orchestration.config.maxRequests, state.orchestration.config.maxCredits),

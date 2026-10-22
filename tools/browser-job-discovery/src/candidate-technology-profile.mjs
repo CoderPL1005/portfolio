@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { Stop } from './core.mjs';
+import { targetJobPreferences, preferencesFingerprint } from './target-job-preferences.mjs';
 
 export const fold = value => value.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().trim();
 export const locationIdentity = value => fold(value).replace(/\bha noi\b/gu,'hanoi').replace(/\b(?:ho chi minh|sai gon|saigon)\b/gu,'hcm');
@@ -78,14 +79,15 @@ export function normalizeQuery(query) {
   for (const [canonical] of [...spellings].sort((a,b)=>b[0].length-a[0].length)) result=result.replace(technologyPattern(canonical,'giu'),canonical);
   return locationIdentity(result).replace(/\s+/gu,' ');
 }
-export function queryYield(history, query, profileFingerprint) {
-  const rows=history.filter(h=>h.profileFingerprint===profileFingerprint && h.normalizedQueryIdentity===normalizeQuery(query));
+export function queryYield(history, query, profileFingerprint, targetFingerprint) {
+  const rows=history.filter(h=>h.profileFingerprint===profileFingerprint && h.targetPreferencesFingerprint===targetFingerprint && h.normalizedQueryIdentity===normalizeQuery(query));
   const known=rows.filter(h=>typeof h.creditsDeducted==='number' && h.creditsDeducted>0);
   const credits=known.reduce((s,h)=>s+h.creditsDeducted,0);
   return { measuredPages:rows.length, depthSurveyed:Math.max(0,...rows.map(h=>h.pageNumber??0)),
     score:credits ? known.reduce((s,h)=>s+(h.newRelevantOpportunities??0),0)/credits : null };
 }
-export function planFacebookQueries(profile, history=[]) {
+export function planFacebookQueries(profile, history=[], targetPreferences) {
+  if (targetPreferences) return planBackendQueries(profile,history,targetJobPreferences(targetPreferences));
   const result=new Map();
   const used=profile.technologies.filter(t=>t.level==='USED').sort((a,b)=>
     Number(b.evidence.some(e=>e.kind==='EXPERIENCE'))-Number(a.evidence.some(e=>e.kind==='EXPERIENCE')) || (a.name<b.name?-1:1));
@@ -104,21 +106,44 @@ export function planFacebookQueries(profile, history=[]) {
     .sort((a,b)=>b.rankingValue-a.rankingValue || b.evidencePriority-a.evidencePriority || (a.identity<b.identity?-1:1));
 }
 
+function planBackendQueries(profile,history,prefs) {
+  const result=new Map(), targetFingerprint=preferencesFingerprint(prefs);
+  const add=(query,name=null) => {
+    const identity=normalizeQuery(query); if(result.has(identity))return;
+    const evidence=profile.technologies.find(t=>name && fold(t.name)===fold(name));
+    result.set(identity,{query,identity,technologyId:evidence?.technologyId??null,
+      evidenceLevel:evidence?.level??'UNVERIFIED',profileFingerprint:profile.fingerprint,
+      targetPreferencesFingerprint:targetFingerprint,...queryYield(history,query,profile.fingerprint,targetFingerprint)});
+  };
+  // Round-robin GROUPS before technologies/levels/locations. A catalogue full of
+  // supporting USED tools cannot crowd out an explicitly accepted backend stack.
+  const width=Math.max(...prefs.stackGroups.map(g=>g.technologies.length));
+  outer: for(const level of prefs.seniorities) for(const location of prefs.locations) for(let i=0;i<width;i++) for(const group of prefs.stackGroups) {
+    if(result.size>=31)break outer;
+    const name=group.technologies[i]; if(name)add(`${name} Backend ${level} ${location}`,name);
+  }
+  add(`Backend Developer ${prefs.seniorities[0]} ${prefs.locations[0]}`);
+  return [...result.values()].map((c,index)=>({...c,explorationOrder:index,rankingValue:c.score??0.25,
+    rankingBasis:c.score===null?'UNMEASURED_EXPLORATION_PRIOR':'OBSERVED_NEW_RELEVANT_OPPORTUNITIES_PER_CREDIT'}))
+    .sort((a,b)=>b.rankingValue-a.rankingValue || a.explorationOrder-b.explorationOrder);
+}
+
 // Called only from init; resolving the same snapshot is stable across resumes.
 export function resolveDiscoveryPolicy(policy, query, history=[], {resume=false, previous}={}) {
+  const targetPreferences=policy.targetJobPreferences ? targetJobPreferences(policy.targetJobPreferences) : undefined;
   if (policy.planQueries!==undefined && typeof policy.planQueries!=='boolean') throw new Stop('INVALID_QUERY_PLANNER_FLAG');
   if (!policy.portfolioSnapshot) {
     if (policy.planQueries) throw new Stop('PORTFOLIO_SNAPSHOT_REQUIRED_FOR_QUERY_PLANNER');
-    return {...policy,query}; // Existing explicit operator profile stays compatible.
+    return {...policy,...(targetPreferences?{targetJobPreferences:targetPreferences}:{}),query}; // Existing explicit operator profile stays compatible.
   }
-  const technologyProfile=buildCandidateTechnologyProfile(policy.portfolioSnapshot,policy.profile??{});
+  const technologyProfile=buildCandidateTechnologyProfile(policy.portfolioSnapshot,targetPreferences ?? policy.profile??{});
   const profile={technologies:technologyProfile.technologies.filter(t=>t.level==='USED').map(t=>t.name),
     locations:technologyProfile.locations,seniorities:technologyProfile.seniorities, technologyProfile};
-  const candidates=planFacebookQueries(technologyProfile,history);
+  const candidates=planFacebookQueries(technologyProfile,history,targetPreferences);
   // Never rerank/replace an in-progress query during continuation.
   const fixed=resume || previous && !previous.stopReason;
   if(!query?.trim() && !fixed && !policy.planQueries)throw new Stop('QUERY_REQUIRED_OR_ENABLE_PLANNER');
-  return { ...policy, profile, query:query?.trim() || (fixed ? previous?.config.query : candidates[0]?.query),
+  return { ...policy, ...(targetPreferences?{targetJobPreferences:targetPreferences}:{}), profile, query:query?.trim() || (fixed ? previous?.config.query : candidates[0]?.query),
     rotatingQuery:policy.rotatingQuery ?? (policy.planQueries ? fixed ? previous?.config.rotatingQuery : candidates[1]?.query : null),
-    adaptiveQueries:policy.adaptiveQueries ?? (policy.planQueries ? fixed ? previous?.config.adaptiveQueries : candidates.slice(2).map(c=>c.query) : []) };
+    adaptiveQueries:policy.adaptiveQueries ?? (policy.planQueries ? fixed ? previous?.config.adaptiveQueries : candidates.slice(2,targetPreferences?18:undefined).map(c=>c.query) : []) };
 }

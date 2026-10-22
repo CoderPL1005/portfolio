@@ -5,6 +5,8 @@ import { SocialApisLiveDiscoveryAdapter } from './socialapis-adapter.mjs';
 import { classifyCandidateProfile } from './profile-matching.mjs';
 import { fingerprint, normalizeQuery, queryYield } from './candidate-technology-profile.mjs';
 import { opportunityIds, buildContentRegistry, nearDuplicateCandidates } from './content-opportunities.mjs';
+import { targetJobPreferences, preferencesFingerprint } from './target-job-preferences.mjs';
+import { classifyBackendProfile, rankBackendOpportunities } from './backend-matching.mjs';
 
 const digest = text => createHash('sha256').update(text).digest('hex');
 const fold = text => text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
@@ -76,16 +78,18 @@ export function configuration(input) {
         stable(safe.locations)!==stable(profile.locations) || stable(safe.seniorities)!==stable(profile.seniorities) ||
         stable(safe.technologies.filter(t=>t.level==='USED').map(t=>t.name))!==stable(profile.technologies) || recorded!==fingerprint(safe)) throw new Stop('INVALID_TECHNOLOGY_PROFILE');
   }
+  if(input.targetJobPreferences && !profile.technologyProfile)throw new Stop('PORTFOLIO_TECHNOLOGY_PROFILE_REQUIRED_FOR_BACKEND_TARGET');
   if (input.adaptiveQueries && (!Array.isArray(input.adaptiveQueries) || input.adaptiveQueries.length > 16)) throw new Stop('INVALID_ADAPTIVE_POOL');
   return { query: validateQuery(input.query), ...validateDateFilters(input), maxRequests, maxCredits, target, minMarginal,
+    ...(input.targetJobPreferences ? {targetJobPreferences:targetJobPreferences(input.targetJobPreferences)} : {}),
     rotatingQuery: input.rotatingQuery ? validateQuery(input.rotatingQuery) : null,
     adaptiveQueries: [...new Set((input.adaptiveQueries ?? []).map(validateQuery))].sort(), profile,
     mode: input.mode ?? 'development' };
 }
 // Future Portfolio integration supplies this profile, not another technology DB.
 // Existing extraction evidence is reused; UNKNOWN publication dates stay UNKNOWN.
-export function classifyProfile(job, profile) {
-  return classifyCandidateProfile(job,profile);
+export function classifyProfile(job, profile, targetPreferences) {
+  return targetPreferences ? classifyBackendProfile(job,profile,targetPreferences) : classifyCandidateProfile(job,profile);
 }
 export function beginExecution(state, input, workflowRunId, { productionGuard, resumeContinuation = false, now = new Date() } = {}) {
   const config = configuration(input);
@@ -121,6 +125,10 @@ export function beginExecution(state, input, workflowRunId, { productionGuard, r
     opportunityMode: 'CONTENT_V1', initialOpportunityIds:[...new Set(state.jobs.flatMap(opportunityIds))], newRelevantOpportunityIds:[],
     plan: { allocation: 'CORE', query: config.query, pageNumber: 1, cursor: null, cursorHash: null },
     usedCursorHashes: [], usedQueries: [config.query], storage: { inserted: 0, updated: 0, unchanged: 0 } };
+  // Derived recommendations are evaluated under THIS policy, never reused from
+  // a previous target. Historical jobs, identities and the ledger stay intact.
+  if(config.targetJobPreferences)state.rankedOpportunities=rankBackendOpportunities(state.jobs,config.profile,config.targetJobPreferences,config.target);
+  else delete state.rankedOpportunities;
   return state;
 }
 export function workflowMetrics(state) {
@@ -200,7 +208,8 @@ function chooseNext(state, page, nextCursor, secret, now) {
   if (run.continuation) {
     const corePages=run.pages.filter(p=>p.allocation==='CORE');
     const alternative=config.rotatingQuery && !run.usedQueries.includes(config.rotatingQuery) ? config.rotatingQuery : null;
-    const measured=alternative && config.profile.technologyProfile ? queryYield(state.discoveryYieldHistory,alternative,config.profile.technologyProfile.fingerprint) : null;
+    const targetFingerprint=config.targetJobPreferences ? preferencesFingerprint(config.targetJobPreferences) : undefined;
+    const measured=alternative && config.profile.technologyProfile ? queryYield(state.discoveryYieldHistory,alternative,config.profile.technologyProfile.fingerprint,targetFingerprint) : null;
     if (page.allocation==='CORE' && corePages.length>=2 && corePages.slice(-2).every(p=>p.newRelevantOpportunities===0) && measured?.score>0) {
       run.deferredCore=true;run.usedQueries.push(alternative);run.plan={allocation:'ROTATING',query:alternative,pageNumber:1,cursor:null,cursorHash:null};
       page.allocationDecision='MEASURED_ROTATING_YIELD_PREFERRED_CORE_CURSOR_RETAINED';return;
@@ -212,11 +221,12 @@ function chooseNext(state, page, nextCursor, secret, now) {
   if (config.rotatingQuery && !run.usedQueries.includes(config.rotatingQuery)) { query = config.rotatingQuery; allocation = 'ROTATING'; }
   else {
     const profileFingerprint=config.profile.technologyProfile?.fingerprint;
-    const hasYield = q => profileFingerprint ? queryYield(state.discoveryYieldHistory,q,profileFingerprint).score!==null
+    const targetFingerprint=config.targetJobPreferences ? preferencesFingerprint(config.targetJobPreferences) : undefined;
+    const hasYield = q => profileFingerprint ? queryYield(state.discoveryYieldHistory,q,profileFingerprint,targetFingerprint).score!==null
       : state.discoveryYieldHistory.some(p => p.query === q && typeof p.creditsDeducted === 'number' && p.creditsDeducted > 0);
     const candidates = config.adaptiveQueries.filter(q => !run.usedQueries.includes(q) && hasYield(q));
     const score = q => {
-      if (profileFingerprint) return queryYield(state.discoveryYieldHistory,q,profileFingerprint).score??-1;
+      if (profileFingerprint) return queryYield(state.discoveryYieldHistory,q,profileFingerprint,targetFingerprint).score??-1;
       const history = state.discoveryYieldHistory.filter(p => p.query === q && typeof p.creditsDeducted === 'number' && p.creditsDeducted > 0);
       return history.length ? history.reduce((s, p) => s + p.newRelevantVacancies, 0) / history.reduce((s, p) => s + p.creditsDeducted, 0) : -1;
     };
@@ -252,7 +262,7 @@ export async function performPage(state, { transport, now = new Date(), receipt,
       budget.check();
       const raw = adapter.adapter.records.get(url);
       if (ids.has(raw.id)) continue; ids.add(raw.id);
-      jobs.push(classifyProfile(new JobPostExtractor().extract(structuredClone(raw)), run.config.profile));
+      jobs.push(classifyProfile(new JobPostExtractor().extract(structuredClone(raw)), run.config.profile, run.config.targetJobPreferences));
     }
     const stored = new Map(state.jobs.map(j => [j.sourceIdentity, j]));
     const historicalJobs=[...stored.values()]; const priorOpportunities=new Set(historicalJobs.flatMap(opportunityIds));
@@ -283,6 +293,7 @@ export async function performPage(state, { transport, now = new Date(), receipt,
     const page = { ...attempt, ...adapter.itemStats, actualRequests: adapter.requestStats.requestCount,
       normalizedQueryIdentity:normalizeQuery(attempt.query), profileVersion:run.config.profile.technologyProfile?.version??'legacy-operator-profile',
       profileFingerprint:run.config.profile.technologyProfile?.fingerprint??fingerprint(run.config.profile),
+      ...(run.config.targetJobPreferences ? {targetPreferencesFingerprint:preferencesFingerprint(run.config.targetJobPreferences)} : {}),
       uniqueSourcePosts:jobs.length, canonicalOpportunities:responseOpportunities.size, newlyDiscoveredOpportunities:newOpportunities.length,
       opportunityIds:[...responseOpportunities],
       newRelevantOpportunities:[...relevantOpportunities].filter(id=>!priorOpportunities.has(id)).length,
@@ -298,6 +309,7 @@ export async function performPage(state, { transport, now = new Date(), receipt,
       storage: Object.fromEntries(Object.keys(run.storage).map(key => [key, run.storage[key] - beforeStorage[key]])),
       relevantVacancyKeys: jobs.flatMap(j => j.vacancies.flatMap((v,index) => v.match.classification === 'TARGET_MATCH' ? [`${j.sourceIdentity}:${index}`] : [])),
       relevantVacancies: jobs.reduce((sum, j) => sum + j.vacancies.filter(v => v.match.classification === 'TARGET_MATCH').length, 0),
+      fallbackVacancies: jobs.reduce((sum,j) => sum+j.vacancies.filter(v=>v.match.classification==='FALLBACK_MATCH').length,0),
       newRelevantVacancies: run.newRelevantKeys.length - previousNew, freshnessUnknown: jobs.filter(j => j.match.freshness === 'UNKNOWN').length,
       freshnessUnverified:jobs.filter(j=>j.publishedAt!==null).length,
       freshnessUnknownVacancies: jobs.reduce((sum,j) => sum+j.vacancies.filter(v => v.match.freshness === 'UNKNOWN').length,0),
@@ -307,8 +319,10 @@ export async function performPage(state, { transport, now = new Date(), receipt,
     state.jobs = [...stored.values()]; Object.assign(attempt, { actualRequests: page.actualRequests, creditsDeducted: page.creditsDeducted, outcome: 'COMPLETED_UNCONFIRMED' });
     page.newRelevantOpportunitiesPerCredit=page.creditsDeducted>0 ? page.newRelevantOpportunities/page.creditsDeducted : null;
     state.contentRegistry=buildContentRegistry(state.jobs);
+    if(run.config.targetJobPreferences)state.rankedOpportunities=rankBackendOpportunities(state.jobs,run.config.profile,run.config.targetJobPreferences,run.config.target);
     run.pages.push(page); state.discoveryYieldHistory.push({ query: page.query, normalizedQueryIdentity:page.normalizedQueryIdentity,
       profileFingerprint:page.profileFingerprint,pageNumber:page.pageNumber,newRelevantOpportunities:page.newRelevantOpportunities,
+      ...(page.targetPreferencesFingerprint ? {targetPreferencesFingerprint:page.targetPreferencesFingerprint} : {}),
       startTime:page.startTime,endTime:page.endTime,
       duplicateRepostRatio:page.duplicateRepostRatio,actualRequests:page.actualRequests,
       newRelevantVacancies: page.newRelevantVacancies, creditsDeducted: page.creditsDeducted });

@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "primaryRole": "BACKEND",
+  "allowFullStack": true,
+  "stackGroups": [
+    { "preference": "PREFERRED", "technologies": [".NET", "ASP.NET Core", "C#"] },
+    { "preference": "ACCEPTED", "technologies": ["Python", "FastAPI"] }
+  ],
+  "seniorities": ["Fresher", "Intern"],
+  "locations": ["Hà Nội"],
+  "preferredExperienceMax": 1,
+  "fallbackExperienceMax": 2
+}
