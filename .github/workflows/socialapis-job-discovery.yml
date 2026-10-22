@@ -24,9 +24,9 @@ on:
         type: boolean
         default: false
       query:
-        description: Facebook recruitment query (operator supplied, no production profile default)
+        description: Optional query override; leave empty with policy.planQueries and Portfolio snapshot
         type: string
-        required: true
+        required: false
       start_time:
         description: Optional publication start date YYYY-MM-DD
         type: string
@@ -44,7 +44,7 @@ on:
         type: string
         default: '1'
       policy:
-        description: JSON profile {technologies,locations,seniorities}, target=5, minMarginal=1, optional rotatingQuery/adaptiveQueries
+        description: JSON legacy profile or portfolioSnapshot plus profile preferences; planQueries=true enables evidence-based planner; target=5
         type: string
         required: true
 

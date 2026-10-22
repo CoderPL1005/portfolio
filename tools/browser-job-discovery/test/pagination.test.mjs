@@ -9,7 +9,7 @@ const key = 'synthetic-pagination-test-key';
 const profile = { technologies: ['.NET', 'ASP.NET Core'], locations: ['Hanoi', 'Hà Nội'], seniorities: ['Junior', 'Fresher', 'Intern'] };
 const config = { query: 'C# .NET tuyển dụng Hà Nội', profile, maxRequests: 6, maxCredits: 6, target: 20 };
 const now = new Date('2026-10-22T03:00:00Z');
-const item = (id, body = 'Hiring Junior .NET Developer\nLocation: Hanoi\nRequirements: ASP.NET Core') => ({ basic_info: {
+const item = (id, body = `Hiring Junior .NET Developer\nLocation: Hanoi\nRequirements: ASP.NET Core\nJob reference: ${id}`) => ({ basic_info: {
   post_id: id, post_text: body, url: `https://www.facebook.com/fixture/posts/${id}` }, owner_info: {}, feedback_details: {}, video_details: {} });
 const payload = (ids, cursor = null) => ({ data: { items: ids.map(id => typeof id === 'string' ? item(id) : id), page_info: { cursor } } });
 function state(options = {}, previous = { evidenceKind: 'SOCIALAPIS_DISCOVERY_STATE', jobs: [] }, runId = '100') {

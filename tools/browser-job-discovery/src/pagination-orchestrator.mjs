@@ -2,6 +2,9 @@ import { createHash, randomBytes, createCipheriv, createDecipheriv } from 'node:
 import { Stop, ActivityBudget, JobPostExtractor } from './core.mjs';
 import { validateDateFilters, validateQuery } from './discovery-contract.mjs';
 import { SocialApisLiveDiscoveryAdapter } from './socialapis-adapter.mjs';
+import { classifyCandidateProfile } from './profile-matching.mjs';
+import { fingerprint, normalizeQuery, queryYield } from './candidate-technology-profile.mjs';
+import { opportunityIds, buildContentRegistry, nearDuplicateCandidates } from './content-opportunities.mjs';
 
 const digest = text => createHash('sha256').update(text).digest('hex');
 const fold = text => text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
@@ -24,7 +27,7 @@ function validateContinuation(run, config, now) {
   if (!Number.isFinite(Date.parse(continuation.expiresAt)) || !Number.isFinite(Date.parse(continuation.savedAt)) ||
       Date.parse(continuation.expiresAt) - Date.parse(continuation.savedAt) !== CONTINUATION_TTL_MS ||
       now.getTime() < Date.parse(continuation.savedAt) || now.getTime() >= Date.parse(continuation.expiresAt)) throw new Stop('CONTINUATION_EXPIRED');
-  const plan = continuation.plan; const last = run.pages.at(-1);
+  const plan = continuation.plan; const last = run.pages.filter(p=>p.allocation==='CORE').at(-1);
   const base64 = (text, length) => typeof text === 'string' && text.length <= 24000 &&
     Buffer.from(text, 'base64').toString('base64') === text && (length ? Buffer.from(text, 'base64').length === length : text.length > 0);
   if (!plan || plan.allocation !== 'CORE' || plan.query !== config.query || !Number.isInteger(plan.pageNumber) || plan.pageNumber < 2 || plan.pageNumber > 4 ||
@@ -33,7 +36,7 @@ function validateContinuation(run, config, now) {
       run.pages.some(p => (p.inputCursorFingerprint ?? p.inputCursor) === plan.cursorHash) ||
       run.usedCursorHashes.filter(hash => hash === plan.cursorHash).length !== 1 ||
       !base64(plan.cursor?.iv, 12) || !base64(plan.cursor?.tag, 16) || !base64(plan.cursor?.data) ||
-      stable(run.plan) !== stable(plan)) throw new Stop('CONTINUATION_INVALID');
+      !run.deferredCore && stable(run.plan) !== stable(plan)) throw new Stop('CONTINUATION_INVALID');
   if (run.pages.some(p => p.outcome !== 'CONFIRMED' || !/^[1-9]\d*$/u.test(String(p.artifactReceipt ?? '')) ||
       p.actualRequests !== 1 || !Number.isFinite(p.creditsDeducted) || p.creditsDeducted < 0 || p.creditsDeducted > 1)) throw new Stop('PERSISTENCE_CONFIRMATION_REQUIRED');
 }
@@ -65,6 +68,14 @@ export function configuration(input) {
   const profile = input.profile;
   if (!profile || !['technologies', 'locations', 'seniorities'].every(key => Array.isArray(profile[key]) && profile[key].length > 0 && profile[key].length <= 100 &&
     profile[key].every(value => typeof value === 'string' && value.trim() && value.length <= 100 && !/[\p{C}]/u.test(value)))) throw new Stop('CANDIDATE_PROFILE_REQUIRED');
+  if (profile.technologyProfile) {
+    const { fingerprint: recorded, ...safe }=profile.technologyProfile;
+    if (safe.version!=='portfolio-technology-v1' || safe.source!=='OPERATOR_SUPPLIED_PUBLIC_EXPORT_NOT_LIVE_VERIFIED' ||
+        !Array.isArray(safe.technologies) || safe.technologies.length>100 ||
+        safe.technologies.some(t=>typeof t.name!=='string' || !t.name.trim() || t.name.length>100 || /[\p{C}]/u.test(t.name) || !['USED','LEARNING','EXPLORING'].includes(t.level) || !Array.isArray(t.evidence)) ||
+        stable(safe.locations)!==stable(profile.locations) || stable(safe.seniorities)!==stable(profile.seniorities) ||
+        stable(safe.technologies.filter(t=>t.level==='USED').map(t=>t.name))!==stable(profile.technologies) || recorded!==fingerprint(safe)) throw new Stop('INVALID_TECHNOLOGY_PROFILE');
+  }
   if (input.adaptiveQueries && (!Array.isArray(input.adaptiveQueries) || input.adaptiveQueries.length > 16)) throw new Stop('INVALID_ADAPTIVE_POOL');
   return { query: validateQuery(input.query), ...validateDateFilters(input), maxRequests, maxCredits, target, minMarginal,
     rotatingQuery: input.rotatingQuery ? validateQuery(input.rotatingQuery) : null,
@@ -74,17 +85,7 @@ export function configuration(input) {
 // Future Portfolio integration supplies this profile, not another technology DB.
 // Existing extraction evidence is reused; UNKNOWN publication dates stay UNKNOWN.
 export function classifyProfile(job, profile) {
-  for (const vacancy of job.vacancies) {
-    const technology = (vacancy.primaryTechnologies ?? []).some(t => profile.technologies.some(value => fold(t) === fold(value)));
-    const level = vacancy.seniority.some(t => profile.seniorities.some(value => fold(t) === fold(value)));
-    const place = profile.locations.some(value => fold(vacancy.location ?? '').includes(fold(value))) ||
-      vacancy.match.locationVerified && profile.locations.some(value => ['hanoi', 'ha noi'].includes(fold(value).trim()));
-    const excluded = ['ROLE_MISMATCH', 'CANDIDATE_SEEKING_WORK', 'RECRUITMENT_UNVERIFIED'].includes(vacancy.match.reason);
-    vacancy.match = { ...vacancy.match, classification: !excluded && technology && level && place ? 'TARGET_MATCH' : 'NOT_MATCHED', profileMatched: !excluded && technology && level && place };
-  }
-  job.structuredMatch = { ...job.structuredMatch, classification: job.vacancies.some(v => v.match.profileMatched) ? 'TARGET_MATCH' : 'NOT_MATCHED' };
-  job.match = { ...job.structuredMatch };
-  return job;
+  return classifyCandidateProfile(job,profile);
 }
 export function beginExecution(state, input, workflowRunId, { productionGuard, resumeContinuation = false, now = new Date() } = {}) {
   const config = configuration(input);
@@ -102,6 +103,7 @@ export function beginExecution(state, input, workflowRunId, { productionGuard, r
     previous.config = config; previous.configHash = digest(JSON.stringify(config));
     previous.workflowRunId = workflowRunId; previous.stopReason = null; previous.status = 'RUNNING';
     previous.plan = structuredClone(previous.continuation.plan);
+    previous.deferredCore = false;
     return state;
   }
   if (previous && !previous.stopReason) {
@@ -116,6 +118,7 @@ export function beginExecution(state, input, workflowRunId, { productionGuard, r
   state.orchestration = { schemaVersion: 3, logicalExecutionId: `${workflowRunId}-${randomBytes(8).toString('hex')}`,
     config, configHash: digest(JSON.stringify(config)), workflowRunId, phase: 'READY', status: 'RUNNING', stopReason: null, continuation: null,
     initialIdentities: state.jobs.map(j => j.sourceIdentity), pages: [], newRelevantKeys: [], relevantKeys: [],
+    opportunityMode: 'CONTENT_V1', initialOpportunityIds:[...new Set(state.jobs.flatMap(opportunityIds))], newRelevantOpportunityIds:[],
     plan: { allocation: 'CORE', query: config.query, pageNumber: 1, cursor: null, cursorHash: null },
     usedCursorHashes: [], usedQueries: [config.query], storage: { inserted: 0, updated: 0, unchanged: 0 } };
   return state;
@@ -126,10 +129,21 @@ export function workflowMetrics(state) {
   const pages = run.pages.filter(p => p.workflowRunId === run.workflowRunId);
   const known = attempts.reduce((sum, p) => sum + (p.creditsDeducted ?? 0), 0);
   const knownRequests = attempts.reduce((sum, p) => sum + (p.actualRequests ?? 0), 0);
+  const scopedOpportunities=new Set(pages.flatMap(p=>p.opportunityIds??[]));
   const logicalAttempts = [...run.pages]; const pending = state.requestLedger[run.attemptIndex];
   if (pending && ['CLAIMED','IN_FLIGHT'].includes(run.phase) && !run.pages.some(p => p.workflowRunId === pending.workflowRunId && p.query === pending.query && p.allocation === pending.allocation && p.pageNumber === pending.pageNumber)) logicalAttempts.push(pending);
   return { workflowRunId: run.workflowRunId, logicalExecutionId: run.logicalExecutionId,
     status: run.status, continuationAvailable: !!run.continuation && !['CLAIMED','IN_FLIGHT'].includes(run.phase),
+    profileVersion:run.config.profile.technologyProfile?.version??'legacy-operator-profile',
+    profileFingerprint:run.config.profile.technologyProfile?.fingerprint??fingerprint(run.config.profile),
+    canonicalOpportunities:scopedOpportunities.size,newlyDiscoveredOpportunities:pages.reduce((s,p)=>s+(p.newlyDiscoveredOpportunities??0),0),
+    newRelevantOpportunities:pages.reduce((s,p)=>s+(p.newRelevantOpportunities??0),0),
+    newRelevantOpportunitiesPerCredit:known>0 && attempts.every(p=>p.creditsDeducted!==null) ? pages.reduce((s,p)=>s+(p.newRelevantOpportunities??0),0)/known : null,
+    freshnessUnknown:pages.reduce((s,p)=>s+(p.freshnessUnknown??0),0),freshnessUnverified:pages.reduce((s,p)=>s+(p.freshnessUnverified??0),0),
+    queryDepths:[...new Set(pages.map(p=>p.normalizedQueryIdentity??normalizeQuery(p.query)))].map(identity=>({normalizedQueryFingerprint:fingerprint(identity),
+      pagesSurveyed:pages.filter(p=>(p.normalizedQueryIdentity??normalizeQuery(p.query))===identity).length,
+      maximumPageNumber:Math.max(...pages.filter(p=>(p.normalizedQueryIdentity??normalizeQuery(p.query))===identity).map(p=>p.pageNumber)),
+      conclusion:'OBSERVED_DEPTH_ONLY_NOT_PROOF_OF_NO_FURTHER_RESULTS'})),
     actualRequests: attempts.some(p => p.actualRequests === null) ? null : knownRequests,
     knownActualRequests: knownRequests, reservedAttempts: attempts.length, uncertainAttempts: attempts.filter(p => p.actualRequests === null).length,
     totalDeductedCredits: attempts.some(p => p.creditsDeducted === null) ? null : known, knownDeductedCredits: known,
@@ -139,6 +153,7 @@ export function workflowMetrics(state) {
     storage: { inserted: pages.reduce((sum,p) => sum+p.storage.inserted,0), updated: pages.reduce((sum,p) => sum+p.storage.updated,0),
       unchanged: pages.reduce((sum,p) => sum+p.storage.unchanged,0), totalCandidates: state.jobs.length },
     logicalExecution: { completedPages: run.pages.length, uniqueRelevantVacancies: run.relevantKeys.length, newRelevantVacancies: run.newRelevantKeys.length,
+      newRelevantOpportunities:run.newRelevantOpportunityIds?.length??null,
       actualRequests: logicalAttempts.some(p => p.actualRequests === null) ? null : logicalAttempts.reduce((sum,p) => sum+(p.actualRequests ?? 0),0),
       creditsDeducted: logicalAttempts.some(p => p.creditsDeducted === null) ? null : logicalAttempts.reduce((sum,p) => sum+(p.creditsDeducted ?? 0),0) } };
 }
@@ -163,8 +178,10 @@ export function claimPage(state, now = new Date(), { productionGuard } = {}) {
 }
 function chooseNext(state, page, nextCursor, secret, now) {
   const run = state.orchestration; const config = run.config;
-  run.continuation = null; page.continuationAvailable = false;
-  if (run.newRelevantKeys.length >= config.target) { stopExecution(run, 'SUFFICIENT_NEW_VACANCIES'); return; }
+  if (page.allocation==='CORE' || !run.deferredCore) run.continuation = null;
+  page.continuationAvailable = !!run.continuation;
+  const targetCount=run.opportunityMode==='CONTENT_V1' ? run.newRelevantOpportunityIds.length : run.newRelevantKeys.length;
+  if (targetCount >= config.target) { run.continuation=null;page.continuationAvailable=false;stopExecution(run, 'SUFFICIENT_NEW_VACANCIES'); return; }
   let coreStop = null;
   if (!nextCursor) coreStop = 'NO_CURSOR';
   else if (run.usedCursorHashes.includes(digest(nextCursor))) coreStop = 'REPEATED_CURSOR';
@@ -180,13 +197,26 @@ function chooseNext(state, page, nextCursor, secret, now) {
   // Persist the next core plan BEFORE stopping for this workflow's budget.
   if (currentAttempts(state).length >= config.maxRequests) { stopExecution(run, 'REQUEST_BUDGET'); return; }
   if (currentAttempts(state).reduce((sum,p) => sum+(p.creditsDeducted ?? 0),0)+1 > config.maxCredits) { stopExecution(run, 'CREDIT_BUDGET'); return; }
-  if (run.continuation) return;
+  if (run.continuation) {
+    const corePages=run.pages.filter(p=>p.allocation==='CORE');
+    const alternative=config.rotatingQuery && !run.usedQueries.includes(config.rotatingQuery) ? config.rotatingQuery : null;
+    const measured=alternative && config.profile.technologyProfile ? queryYield(state.discoveryYieldHistory,alternative,config.profile.technologyProfile.fingerprint) : null;
+    if (page.allocation==='CORE' && corePages.length>=2 && corePages.slice(-2).every(p=>p.newRelevantOpportunities===0) && measured?.score>0) {
+      run.deferredCore=true;run.usedQueries.push(alternative);run.plan={allocation:'ROTATING',query:alternative,pageNumber:1,cursor:null,cursorHash:null};
+      page.allocationDecision='MEASURED_ROTATING_YIELD_PREFERRED_CORE_CURSOR_RETAINED';return;
+    }
+    if (run.deferredCore) {run.plan=structuredClone(run.continuation.plan);run.deferredCore=false;}
+    return;
+  }
   let query = null; let allocation = null;
   if (config.rotatingQuery && !run.usedQueries.includes(config.rotatingQuery)) { query = config.rotatingQuery; allocation = 'ROTATING'; }
   else {
-    const hasYield = q => state.discoveryYieldHistory.some(p => p.query === q && typeof p.creditsDeducted === 'number' && p.creditsDeducted > 0);
+    const profileFingerprint=config.profile.technologyProfile?.fingerprint;
+    const hasYield = q => profileFingerprint ? queryYield(state.discoveryYieldHistory,q,profileFingerprint).score!==null
+      : state.discoveryYieldHistory.some(p => p.query === q && typeof p.creditsDeducted === 'number' && p.creditsDeducted > 0);
     const candidates = config.adaptiveQueries.filter(q => !run.usedQueries.includes(q) && hasYield(q));
     const score = q => {
+      if (profileFingerprint) return queryYield(state.discoveryYieldHistory,q,profileFingerprint).score??-1;
       const history = state.discoveryYieldHistory.filter(p => p.query === q && typeof p.creditsDeducted === 'number' && p.creditsDeducted > 0);
       return history.length ? history.reduce((s, p) => s + p.newRelevantVacancies, 0) / history.reduce((s, p) => s + p.creditsDeducted, 0) : -1;
     };
@@ -225,6 +255,13 @@ export async function performPage(state, { transport, now = new Date(), receipt,
       jobs.push(classifyProfile(new JobPostExtractor().extract(structuredClone(raw)), run.config.profile));
     }
     const stored = new Map(state.jobs.map(j => [j.sourceIdentity, j]));
+    const historicalJobs=[...stored.values()]; const priorOpportunities=new Set(historicalJobs.flatMap(opportunityIds));
+    const relevantOpportunities=new Set(jobs.flatMap(j=>opportunityIds(j).filter((_id,index)=>j.vacancies[index].match.classification==='TARGET_MATCH')));
+    const responseOpportunities=new Set(jobs.flatMap(opportunityIds));
+    const newOpportunities=[...responseOpportunities].filter(id=>!priorOpportunities.has(id));
+    run.newRelevantOpportunityIds??=[];
+    run.initialOpportunityIds??=[...new Set(historicalJobs.filter(j=>run.initialIdentities.includes(j.sourceIdentity)).flatMap(opportunityIds))];
+    for(const id of relevantOpportunities) if(!run.initialOpportunityIds.includes(id) && !run.newRelevantOpportunityIds.includes(id))run.newRelevantOpportunityIds.push(id);
     const beforeStorage = { ...run.storage };
     const beforeIds = new Set(stored.keys()); const inserted = [];
     for (const job of jobs) {
@@ -244,6 +281,14 @@ export async function performPage(state, { transport, now = new Date(), receipt,
     const next = adapter.pagination.cursor;
     const validNext = adapter.pagination.hasNext !== false && typeof next === 'string' && next.trim() && next.length <= 4096 && !/[\p{C}]/u.test(next) ? next : null;
     const page = { ...attempt, ...adapter.itemStats, actualRequests: adapter.requestStats.requestCount,
+      normalizedQueryIdentity:normalizeQuery(attempt.query), profileVersion:run.config.profile.technologyProfile?.version??'legacy-operator-profile',
+      profileFingerprint:run.config.profile.technologyProfile?.fingerprint??fingerprint(run.config.profile),
+      uniqueSourcePosts:jobs.length, canonicalOpportunities:responseOpportunities.size, newlyDiscoveredOpportunities:newOpportunities.length,
+      opportunityIds:[...responseOpportunities],
+      newRelevantOpportunities:[...relevantOpportunities].filter(id=>!priorOpportunities.has(id)).length,
+      relevantOpportunityIds:[...relevantOpportunities],
+      duplicateRepostRatio:responseOpportunities.size ? 1-newOpportunities.length/jobs.reduce((s,j)=>s+j.vacancies.length,0) : 0,
+      nearDuplicateCandidates:nearDuplicateCandidates(jobs,historicalJobs),
       httpStatus: adapter.requestStats.httpStatus,
       creditsDeducted: adapter.requestStats.creditsDeducted, creditsUsedAlternateHeader: adapter.requestStats.creditsUsedAlternateHeader,
       returnedPostIds: jobs.map(j => j.id), newlyInsertedIds: inserted, nextCursorPresent: !!validNext,
@@ -254,12 +299,19 @@ export async function performPage(state, { transport, now = new Date(), receipt,
       relevantVacancyKeys: jobs.flatMap(j => j.vacancies.flatMap((v,index) => v.match.classification === 'TARGET_MATCH' ? [`${j.sourceIdentity}:${index}`] : [])),
       relevantVacancies: jobs.reduce((sum, j) => sum + j.vacancies.filter(v => v.match.classification === 'TARGET_MATCH').length, 0),
       newRelevantVacancies: run.newRelevantKeys.length - previousNew, freshnessUnknown: jobs.filter(j => j.match.freshness === 'UNKNOWN').length,
+      freshnessUnverified:jobs.filter(j=>j.publishedAt!==null).length,
       freshnessUnknownVacancies: jobs.reduce((sum,j) => sum+j.vacancies.filter(v => v.match.freshness === 'UNKNOWN').length,0),
       verifiedRecentVacancies: 0, providerDateFilterBehavior: 'UNVERIFIED',
       overlap: jobs.filter(j => beforeIds.has(j.sourceIdentity) && run.pages.some(p => p.returnedPostIds.includes(j.id))).length,
       outcome: 'COMPLETED_UNCONFIRMED' };
     state.jobs = [...stored.values()]; Object.assign(attempt, { actualRequests: page.actualRequests, creditsDeducted: page.creditsDeducted, outcome: 'COMPLETED_UNCONFIRMED' });
-    run.pages.push(page); state.discoveryYieldHistory.push({ query: page.query, newRelevantVacancies: page.newRelevantVacancies, creditsDeducted: page.creditsDeducted });
+    page.newRelevantOpportunitiesPerCredit=page.creditsDeducted>0 ? page.newRelevantOpportunities/page.creditsDeducted : null;
+    state.contentRegistry=buildContentRegistry(state.jobs);
+    run.pages.push(page); state.discoveryYieldHistory.push({ query: page.query, normalizedQueryIdentity:page.normalizedQueryIdentity,
+      profileFingerprint:page.profileFingerprint,pageNumber:page.pageNumber,newRelevantOpportunities:page.newRelevantOpportunities,
+      startTime:page.startTime,endTime:page.endTime,
+      duplicateRepostRatio:page.duplicateRepostRatio,actualRequests:page.actualRequests,
+      newRelevantVacancies: page.newRelevantVacancies, creditsDeducted: page.creditsDeducted });
     state.discoveryYieldHistory = state.discoveryYieldHistory.slice(-100);
     chooseNext(state, page, validNext, secret, now); run.phase = 'COMPLETED_UNCONFIRMED';
   } catch (error) {

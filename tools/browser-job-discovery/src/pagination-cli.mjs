@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { resolve, relative, isAbsolute } from 'node:path';
 import { Stop } from './core.mjs';
 import { beginExecution, claimPage, performPage, acknowledgePersistence, workflowMetrics } from './pagination-orchestrator.mjs';
+import { resolveDiscoveryPolicy, planFacebookQueries } from './candidate-technology-profile.mjs';
 
 // Existing CLI entrypoint; action commands make the artifact/HTTP boundary explicit.
 export async function paginationCli(args) {
@@ -34,9 +35,11 @@ export async function paginationCli(args) {
     if (policy.mode && policy.mode !== 'development') throw new Stop('MONTHLY_FREE_BALANCE_UNVERIFIED_SCHEDULE_DISABLED');
     const resumeContinuation = process.env.RESUME_CONTINUATION === 'true';
     if (resumeContinuation && process.env.INITIALIZE_STATE === 'true') throw new Stop('CANNOT_INITIALIZE_WHILE_RESUMING');
-    beginExecution(state, { ...policy, query: process.env.DISCOVERY_QUERY,
+    const resolved=resolveDiscoveryPolicy(policy,process.env.DISCOVERY_QUERY,state.discoveryYieldHistory??[],{resume:resumeContinuation,previous:state.orchestration});
+    beginExecution(state, { ...resolved,
       startTime: process.env.DISCOVERY_START_TIME || undefined, endTime: process.env.DISCOVERY_END_TIME || undefined,
       maxRequests: process.env.DISCOVERY_MAX_REQUESTS ?? '1', maxCredits: process.env.DISCOVERY_MAX_CREDITS ?? '1' }, process.env.GITHUB_RUN_ID ?? 'local', { resumeContinuation });
+    if(resolved.profile?.technologyProfile)state.queryPlan={version:'facebook-query-v1',candidates:planFacebookQueries(resolved.profile.technologyProfile,state.discoveryYieldHistory??[])};
     console.log(JSON.stringify({ maximumHttpRequests: state.orchestration.config.maxRequests,
       maximumPermittedDeductedCredits: state.orchestration.config.maxCredits,
       maximumContractCreditExposure: Math.min(state.orchestration.config.maxRequests, state.orchestration.config.maxCredits),

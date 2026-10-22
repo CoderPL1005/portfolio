@@ -42,7 +42,7 @@ test('manual workflow explicitly consents to up to six requests, scoped key and 
   }
   assert.equal(inputs.max_requests.default, '1'); assert.equal(inputs.max_credits.default, '1'); assert.equal(inputs.policy.required, true);
   assert.equal(inputs.resume_continuation.default, false);
-  assert.equal(inputs.query.default, undefined); assert.equal(inputs.query.required, true);
+  assert.equal(inputs.query.default, undefined); assert.equal(inputs.query.required, false);
   assert.ok(Object.keys(inputs).length <= 25);
   assert.equal(job.steps.find(s => s.uses?.startsWith('actions/setup-node')).with['node-version'], '22.12.0');
   assert.doesNotMatch(workflowText + actionText, /MAX_31_DAY_REQUESTS|ROLLING_REQUEST_CAP|vars\.|schedule:|curl |wget |continue-on-error|retry:/u);
@@ -220,4 +220,23 @@ test('actual CLI resumes a budget-stopped page-2 checkpoint at page 3 with new p
     assert.throws(()=>invoke('init',{...resumed,GITHUB_RUN_ID:'202',DISCOVERY_QUERY:'different query'}),e=>e.stderr.toString().includes('CONTINUATION_POLICY_MISMATCH'));
     assert.equal(readFileSync(t.output,'utf8'),before);
   } finally { t.dispose(); }
+});
+
+test('existing CLI plans from a controlled Portfolio snapshot and uses that profile in actual extraction/matching',()=>{
+  const t=temp(),uid=n=>`00000000-0000-0000-0000-${String(n).padStart(12,'0')}`;
+  const policy={planQueries:true,target:1,profile:{locations:['Hanoi'],seniorities:['Junior']},portfolioSnapshot:{schemaVersion:1,source:'PORTFOLIO_PUBLIC_API_EXPORT',
+    technologies:[{id:uid(1),name:'CSharp',category:'Backend'}],skills:[{id:uid(2),name:'C#',technologyId:uid(1),experienceLevel:'USED'}],experiences:[],projects:[],privateExtra:'DO_NOT_PERSIST'}};
+  const env={DISCOVERY_STATE_FILE:t.output,INITIALIZE_STATE:'true',GITHUB_RUN_ID:'300',DISCOVERY_QUERY:'',DISCOVERY_POLICY:JSON.stringify(policy),
+    GITHUB_OUTPUT:join(t.local,'outputs.txt'),ARTIFACT_RECEIPT:'123',SOCIALAPIS_API_KEY:'synthetic-profile-planner-key',SOCIALAPIS_LIVE_ENABLED:'true',
+    SOCIALAPIS_FREE_PLAN_CONFIRMED:'true',SOCIALAPIS_NO_CASH_CONFIRMED:'true',SOCIALAPIS_PUBLIC_ARTIFACT_CONSENT:'true'};
+  try{
+    invoke('init',env);const s=JSON.parse(readFileSync(t.output,'utf8'));assert.match(s.orchestration.config.query,/C#/u);
+    assert.ok(s.queryPlan.candidates.length);assert.doesNotMatch(JSON.stringify(s),/DO_NOT_PERSIST|CSharp.*privateExtra/u);
+    const wire={data:{items:[{basic_info:{post_id:'6101',post_text:'Hiring Junior C# Developer in Hanoi',url:'https://facebook.com/fixture/posts/6101'}}]}};
+    const fake=`import assert from 'node:assert/strict';globalThis.fetch=async input=>{assert.equal(new URL(input).searchParams.get('query'),${JSON.stringify(s.orchestration.config.query)});return new Response(${JSON.stringify(JSON.stringify(wire))},{headers:{'X-SocialAPIs-Credits-Deducted':'1'}});};`;
+    invoke('claim',env);invoke('page',env,fake);invoke('ack',env);
+    const after=JSON.parse(readFileSync(t.output,'utf8'));assert.equal(after.orchestration.stopReason,'SUFFICIENT_NEW_VACANCIES');
+    assert.equal(after.jobs[0].match.classification,'TARGET_MATCH');assert.equal(after.workflowMetrics.actualRequests,1);
+    assert.equal(after.orchestration.pages[0].profileVersion,'portfolio-technology-v1');
+  }finally{t.dispose();}
 });

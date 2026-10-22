@@ -5,7 +5,7 @@
   "type": "module",
   "engines": { "node": ">=22.12.0" },
   "scripts": {
-    "test": "node --test test/core.test.mjs test/workflow.test.mjs test/discovery-adapters.test.mjs test/socialapis-live-smoke.test.mjs test/pagination.test.mjs",
+    "test": "node --test test/core.test.mjs test/workflow.test.mjs test/discovery-adapters.test.mjs test/socialapis-live-smoke.test.mjs test/pagination.test.mjs test/query-optimization.test.mjs",
     "test:browser": "node --test test/browser.test.mjs test/facebook-adapter.browser.test.mjs",
     "simulate": "node src/cli.mjs"
   },
