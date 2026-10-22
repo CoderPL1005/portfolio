@@ -26,6 +26,66 @@ const text=(title='Fresher .NET Backend Developer',requirements='Build REST APIs
 const extract=(body,id)=>new JobPostExtractor().extract(raw(body,id));
 const match=(body,p=profile(),preferences=prefs)=>classifyProfile(extract(body),p,preferences).vacancies[0].match;
 
+// Mirrors the real Portfolio shape: no standalone .NET record. Python/FastAPI
+// have project evidence; the snapshot is synthetic, not private production data.
+function ecosystemSnapshot() {
+  return {schemaVersion:1,source:'PORTFOLIO_PUBLIC_API_EXPORT',
+    technologies:['C#','ASP.NET Core','Python','FastAPI','SQL Server'].map((name,i)=>({id:uid(i+1),name,category:i<4?'Backend':'Supporting'})),
+    skills:[{id:uid(11),name:'C#',technologyId:uid(1),experienceLevel:'USED'},
+      {id:uid(12),name:'ASP.NET Core',technologyId:uid(2),experienceLevel:'USED'},
+      {id:uid(13),name:'Python',technologyId:uid(3),experienceLevel:'LEARNING'},
+      {id:uid(14),name:'SQL Server',technologyId:uid(5),experienceLevel:'USED'}],experiences:[],
+    projects:[{id:uid(21),status:'COMPLETED',technologies:[{id:uid(3)},{id:uid(4)}]}]};
+}
+
+for(const title of ['Fresher .NET Backend Developer','Fresher C#.NET Backend Developer','Fresher ASP.NET Core Backend Developer','Fresher Python Backend Developer'])
+  test(`real-shaped Portfolio without .NET record: ${title}`,()=>{
+    const input=ecosystemSnapshot(),before=structuredClone(input),p=profile(input);
+    assert.equal(p.technologyProfile.technologies.some(t=>t.name==='.NET'),false);
+    assert.equal(match(text(title,'Build REST APIs; 0–1 years experience'),p).classification,'TARGET_MATCH');
+    assert.deepEqual(input,before);
+  });
+
+test('compound C#.NET is one ecosystem expression, but C# USED alone never proves generic .NET',()=>{
+  const input=ecosystemSnapshot();input.skills=input.skills.filter(s=>s.name!=='C#');
+  assert.equal(match(text('Fresher C#.NET Backend Developer','Build REST APIs'),profile(input)).classification,'TARGET_MATCH');
+  assert.equal(match(text('Fresher Backend Developer','Build REST APIs using C# and .NET'),profile(input)).classification,'POTENTIAL_MATCH');
+  for(const level of ['LEARNING','EXPLORING']) {
+    const limited=ecosystemSnapshot();limited.skills.find(s=>s.name==='ASP.NET Core').experienceLevel=level;
+    const p=profile(limited);
+    for(const title of ['Fresher .NET Backend Developer','Fresher C#.NET Backend Developer','Fresher ASP.NET Core Backend Developer'])
+      assert.equal(match(text(title,'Build REST APIs'),p).classification,'POTENTIAL_MATCH');
+  }
+  const csharpOnly=ecosystemSnapshot();csharpOnly.skills=csharpOnly.skills.filter(s=>s.name!=='ASP.NET Core');
+  assert.equal(match(text('Fresher .NET Backend Developer','Build REST APIs'),profile(csharpOnly)).classification,'POTENTIAL_MATCH');
+});
+
+test('generic .NET compatibility is one-way and does not grant another specific framework',()=>{
+  const input=ecosystemSnapshot();input.skills.find(s=>s.name==='ASP.NET Core').experienceLevel='EXPLORING';
+  input.technologies.push({id:uid(6),name:'.NET',category:'Backend'});
+  input.skills.push({id:uid(16),name:'.NET',technologyId:uid(6),experienceLevel:'USED'});
+  assert.equal(match(text('Fresher ASP.NET Core Backend Developer','Build REST APIs'),profile(input)).classification,'POTENTIAL_MATCH');
+  const frameworkPreferences={...prefs,stackGroups:[...prefs.stackGroups,{preference:'ACCEPTED',technologies:['ASP.NET MVC']}]};
+  assert.equal(match(text('Fresher ASP.NET MVC Backend Developer','Build REST APIs'),profile(ecosystemSnapshot()),frameworkPreferences).classification,'POTENTIAL_MATCH');
+});
+
+test('NET salary/employer/supporting tools cannot become demonstrated .NET; Python/FastAPI levels remain independent',()=>{
+  const p=profile(ecosystemSnapshot());
+  const generic=match(text('Fresher Backend Developer','SQL Server and Docker; salary NET; NET PARTNERS'),p);
+  assert.notEqual(generic.classification,'TARGET_MATCH');assert.deepEqual(generic.demonstratedTechnologyHits,[]);
+  assert.equal(match(text('Intern Python FastAPI Backend Developer','Build REST APIs using Python and FastAPI'),p).classification,'TARGET_MATCH');
+  const input=ecosystemSnapshot();input.projects=[];
+  const developing=match(text('Fresher Python Backend Developer','Build REST APIs using Python'),profile(input));
+  assert.equal(developing.classification,'POTENTIAL_MATCH');assert.deepEqual(developing.developingTechnologyHits,['Python']);
+});
+
+test('legacy mode without targetJobPreferences retains its original matching behavior',()=>{
+  const p=profile(ecosystemSnapshot());
+  for(const [title,classification] of [['Fresher .NET Backend Developer','NOT_MATCHED'],['Fresher C#.NET Backend Developer','TARGET_MATCH'],
+    ['Fresher ASP.NET Core Backend Developer','TARGET_MATCH'],['Fresher Python Backend Developer','TARGET_MATCH']])
+    assert.equal(classifyProfile(extract(text(title,'Build REST APIs')),p).match.classification,classification);
+});
+
 for(const [name,title,requirements,expected] of [
   ['dotnet fresher','Fresher .NET Backend Developer','Build REST APIs using .NET; 0–1 years experience','TARGET_MATCH'],
   ['csharp intern','Intern C# Backend Engineer','Build REST APIs using C#; no experience required','TARGET_MATCH'],
@@ -112,19 +172,30 @@ test('policy resolver uses target preferences, preserves portfolio proof, and fi
   assert.equal(queryYield(history,q.query,q.profileFingerprint,preferencesFingerprint(prefs)).score,5);
 });
 
-test('set-level fallback is eligible only when the distinct target opportunity count is insufficient',()=>{
+test('set-level fallback is eligible only with zero distinct primary opportunities, independently of discovery target',()=>{
   const primary=extract(text(),'41101'),fallback=extract(text('Fresher Python Backend Developer','Python; 2 years experience'),'41102');
   const enough=rankBackendOpportunities([fallback,primary],profile(),prefs,1);
   assert.equal(enough[0].classification,'TARGET_MATCH');assert.equal(enough.find(v=>v.classification==='FALLBACK_MATCH').fallbackEligible,false);
   const scarce=rankBackendOpportunities([fallback,primary],profile(),prefs,2);
-  assert.equal(scarce.find(v=>v.classification==='FALLBACK_MATCH').fallbackEligible,true);
+  assert.equal(scarce.find(v=>v.classification==='FALLBACK_MATCH').fallbackEligible,false);
+  const none=rankBackendOpportunities([fallback],profile(),prefs,5);
+  assert.equal(none[0].classification,'FALLBACK_MATCH');assert.equal(none[0].fallbackEligible,true);assert.equal(none[0].recommendationTier,1);
+  for(let count=1;count<=4;count++) {
+    const primaries=Array.from({length:count},(_,i)=>extract(text('Fresher .NET Backend Developer',`Build REST APIs using .NET; reference ${i}`),String(41500+i)));
+    const results=rankBackendOpportunities([fallback,...primaries],profile(),prefs,5);
+    const deferred=results.find(v=>v.classification==='FALLBACK_MATCH');
+    assert.equal(deferred.fallbackEligible,false);assert.equal(deferred.recommendationTier,4);
+    assert.equal(results.filter(v=>v.classification==='TARGET_MATCH').length,count);
+  }
   const rawHistory=raw(text(),'41103');
   assert.doesNotThrow(()=>rankBackendOpportunities([rawHistory],profile(),prefs,1));
   assert.equal(rawHistory.vacancies,undefined); // Re-evaluation never rewrites history.
   const repost=structuredClone(primary);repost.id='41104';repost.sourceIdentity='SOCIALAPIS:41104';
   const dedup=rankBackendOpportunities([primary,repost,fallback],profile(),prefs,2);
   assert.equal(dedup.filter(v=>v.classification==='TARGET_MATCH').length,1);
-  assert.equal(dedup.find(v=>v.classification==='FALLBACK_MATCH').fallbackEligible,true);
+  assert.equal(dedup.find(v=>v.classification==='FALLBACK_MATCH').fallbackEligible,false);
+  assert.deepEqual(primary.publishedAt,null);assert.equal(primary.structuredMatch.freshness,'UNKNOWN');
+  assert.equal(dedup.length,2); // Fallback remains in registry/derived view.
 });
 
 test('backend mode requires Portfolio proof and changing preferences cannot reuse a previous continuation',async()=>{

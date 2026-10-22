@@ -11,6 +11,21 @@ const fullstack = /full[- ]?stack/iu;
 const frontend = /front[- ]?end|\b(?:react|angular|vue)\b/iu;
 const technologyIdentity = name => fold(canonicalTechnology(name) ?? name);
 
+// C#.NET is a compound ecosystem spelling, not two independent requirements.
+// Keep this interpretation local to Backend matching, not the Portfolio data.
+const stackSearchText = text => text.replace(/(?<![\p{L}\p{N}])c#\s*\.net\b/giu,'.NET');
+function requestedTechnologies(text, allowed) {
+  let remaining=stackSearchText(text);
+  const hits=new Set();
+  // Prefer the specific token over overlapping broad names. A separately stated
+  // generic .NET requirement elsewhere in the JD is still evaluated separately.
+  for(const name of [...allowed].sort((a,b)=>b.length-a.length))
+    remaining=remaining.replace(technologyPattern(name,'giu'),match=>{hits.add(name);return ' '.repeat(match.length);});
+  return allowed.filter(name=>hits.has(name));
+}
+const evidenceSupports = (evidence, requested) => technologyIdentity(evidence)===technologyIdentity(requested) ||
+  technologyIdentity(requested)==='.net' && technologyIdentity(evidence)==='asp.net core';
+
 function requiredExperience(v, mandatory) {
   // Reuse the existing mandatory-experience parser (ranges are masked before
   // bare durations). Optional statements were removed before this boundary.
@@ -35,9 +50,11 @@ export function classifyBackendProfile(job, profile, input) {
     const titleStack = title.split(/[();]|[.!?](?=\s)/u).filter(clause => !optional.test(clause)).join('\n');
     const roleText = [titleStack,mandatory].join('\n');
     const body = [v.evidence.body,job.postSections?.introduction,job.postSections?.sharedFooter].filter(Boolean).join('\n');
-    const requested = allowed.filter(name => technologyPattern(name).test(roleText));
-    const demonstrated = requested.filter(name => used.some(t => technologyIdentity(t) === technologyIdentity(name)));
-    const learning = requested.filter(name => developing.some(t => technologyIdentity(t) === technologyIdentity(name)));
+    const requested = requestedTechnologies(roleText,allowed);
+    // Directional compatibility: specific ASP.NET Core usage supports generic
+    // .NET, never the reverse; C# alone does not grant generic .NET evidence.
+    const demonstrated = requested.filter(name => used.some(t => evidenceSupports(t,name)));
+    const learning = requested.filter(name => developing.some(t => evidenceSupports(t,name)));
     const unverified = requested.filter(name => !demonstrated.includes(name));
     // A matching optional C# or supporting SQL/Docker never rescues a Java role.
     // Lexical role-stack signals, not proficiency claims or a new catalogue.
@@ -46,7 +63,7 @@ export function classifyBackendProfile(job, profile, input) {
     const supporting = /^(?:sql(?: server)?|docker|git|aws|azure|ef core|typescript|angular|react)$/iu;
     // Extractor may emit ASP.NET and .NET for the same ASP.NET Core token.
     // Suppressing that overlapping lexical hit does not grant framework evidence.
-    const competing = knownStack.filter(name => !supporting.test(name) && technologyPattern(name).test(titleStack) && !allowed.some(a => technologyPattern(name).test(a)));
+    const competing = knownStack.filter(name => !supporting.test(name) && technologyPattern(name).test(stackSearchText(titleStack)) && !allowed.some(a => technologyPattern(name).test(a)));
     const incompatibleMandatory = explicitStack.filter(name => !allowed.some(a => technologyIdentity(a) === technologyIdentity(name)));
     const isFullStack = fullstack.test(title);
     const backendResponsibilities = backend.test(mandatory) || /(?:build|develop|implement|xây dựng|phát triển|thiết kế).*(?:rest\s*apis?|server|api|backend|back-end)/iu.test(mandatory);
@@ -84,7 +101,7 @@ export function classifyBackendProfile(job, profile, input) {
 }
 
 // Set-level recommendation. Fallback never inflates primary yield/stop counters.
-export function rankBackendOpportunities(jobs, profile, prefs, target) {
+export function rankBackendOpportunities(jobs, profile, prefs, _target) {
   const opportunities = new Map();
   for (const stored of jobs) {
     const copy=structuredClone(stored);
@@ -97,7 +114,8 @@ export function rankBackendOpportunities(jobs, profile, prefs, target) {
   }
   const primary = [...opportunities.values()].filter(v => v.classification === 'TARGET_MATCH').length;
   return [...opportunities.values()].map(v => {
-    const fallbackEligible=v.classification==='FALLBACK_MATCH' && primary < target;
+    // Discovery's yield target is not permission to offer a two-year fallback.
+    const fallbackEligible=v.classification==='FALLBACK_MATCH' && primary === 0;
     const recommendationTier=v.classification==='TARGET_MATCH'?0 : fallbackEligible?1 :
       v.classification==='POTENTIAL_MATCH'?2 : v.classification==='INSUFFICIENT_DATA'?3 : v.classification==='FALLBACK_MATCH'?4 : 5;
     return {...v,fallbackEligible,recommendationTier};
