@@ -5,6 +5,38 @@ import { SocialApisLiveDiscoveryAdapter } from './socialapis-adapter.mjs';
 
 const digest = text => createHash('sha256').update(text).digest('hex');
 const fold = text => text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+const CONTINUATION_TTL_MS = 24 * 60 * 60 * 1000; // Local safety bound, not a provider validity guarantee.
+const stable = value => JSON.stringify(value, (_key, v) => v && typeof v === 'object' && !Array.isArray(v)
+  ? Object.fromEntries(Object.keys(v).sort().map(k => [k, v[k]])) : v);
+const compatiblePolicy = config => { const { maxRequests, maxCredits, ...policy } = config; return stable(policy); };
+const currentAttempts = state => state.requestLedger.filter(p => p.workflowRunId === state.orchestration.workflowRunId);
+const validCursor = value => typeof value === 'string' && !!value.trim() && value.length <= 4096 && !/[\p{C}]/u.test(value);
+function stopExecution(run, reason) {
+  run.stopReason = reason;
+  run.status = ['REQUEST_BUDGET', 'CREDIT_BUDGET', 'DAILY_REQUEST_BUDGET'].includes(reason) && run.continuation
+    ? 'STOPPED_RESUMABLE' : 'STOPPED_TERMINAL';
+}
+function validateContinuation(run, config, now) {
+  if (run.schemaVersion !== 3) throw new Stop('LEGACY_CONTINUATION_CURSOR_UNAVAILABLE');
+  const continuation = run.continuation;
+  if (!continuation || run.status === 'STOPPED_TERMINAL') throw new Stop('CONTINUATION_UNAVAILABLE');
+  if (compatiblePolicy(run.config) !== compatiblePolicy(config)) throw new Stop('CONTINUATION_POLICY_MISMATCH');
+  if (!Number.isFinite(Date.parse(continuation.expiresAt)) || !Number.isFinite(Date.parse(continuation.savedAt)) ||
+      Date.parse(continuation.expiresAt) - Date.parse(continuation.savedAt) !== CONTINUATION_TTL_MS ||
+      now.getTime() < Date.parse(continuation.savedAt) || now.getTime() >= Date.parse(continuation.expiresAt)) throw new Stop('CONTINUATION_EXPIRED');
+  const plan = continuation.plan; const last = run.pages.at(-1);
+  const base64 = (text, length) => typeof text === 'string' && text.length <= 24000 &&
+    Buffer.from(text, 'base64').toString('base64') === text && (length ? Buffer.from(text, 'base64').length === length : text.length > 0);
+  if (!plan || plan.allocation !== 'CORE' || plan.query !== config.query || !Number.isInteger(plan.pageNumber) || plan.pageNumber < 2 || plan.pageNumber > 4 ||
+      last?.allocation !== 'CORE' || last.pageNumber + 1 !== plan.pageNumber || !last.nextCursorPresent ||
+      !/^[a-f0-9]{64}$/u.test(plan.cursorHash ?? '') || last.nextCursorFingerprint !== plan.cursorHash ||
+      run.pages.some(p => (p.inputCursorFingerprint ?? p.inputCursor) === plan.cursorHash) ||
+      run.usedCursorHashes.filter(hash => hash === plan.cursorHash).length !== 1 ||
+      !base64(plan.cursor?.iv, 12) || !base64(plan.cursor?.tag, 16) || !base64(plan.cursor?.data) ||
+      stable(run.plan) !== stable(plan)) throw new Stop('CONTINUATION_INVALID');
+  if (run.pages.some(p => p.outcome !== 'CONFIRMED' || !/^[1-9]\d*$/u.test(String(p.artifactReceipt ?? '')) ||
+      p.actualRequests !== 1 || !Number.isFinite(p.creditsDeducted) || p.creditsDeducted < 0 || p.creditsDeducted > 1)) throw new Stop('PERSISTENCE_CONFIRMATION_REQUIRED');
+}
 export function calendarDay(now = new Date()) {
   const parts = new Intl.DateTimeFormat('en', { timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now);
   return ['year', 'month', 'day'].map(type => parts.find(p => p.type === type).value).join('-');
@@ -54,7 +86,7 @@ export function classifyProfile(job, profile) {
   job.match = { ...job.structuredMatch };
   return job;
 }
-export function beginExecution(state, input, workflowRunId, { productionGuard } = {}) {
+export function beginExecution(state, input, workflowRunId, { productionGuard, resumeContinuation = false, now = new Date() } = {}) {
   const config = configuration(input);
   if (config.mode !== 'development' && config.mode !== 'production') throw new Stop('INVALID_MODE');
   if (config.mode === 'production' && (typeof productionGuard !== 'function' || productionGuard() !== true)) throw new Stop('MONTHLY_FREE_BALANCE_UNVERIFIED_SCHEDULE_DISABLED');
@@ -63,14 +95,26 @@ export function beginExecution(state, input, workflowRunId, { productionGuard } 
   const previous = state.orchestration;
   if (['CLAIMED', 'IN_FLIGHT'].includes(previous?.phase)) throw new Stop('AMBIGUOUS_PAGE_NO_AUTOMATIC_REFETCH');
   if (previous?.phase === 'COMPLETED_UNCONFIRMED') throw new Stop('PERSISTENCE_CONFIRMATION_REQUIRED');
+  if (resumeContinuation) {
+    if (!previous) throw new Stop('LEGACY_CONTINUATION_CURSOR_UNAVAILABLE');
+    validateContinuation(previous, config, now);
+    if (previous.workflowRunId === workflowRunId) throw new Stop('RESUME_REQUIRES_NEW_WORKFLOW');
+    previous.config = config; previous.configHash = digest(JSON.stringify(config));
+    previous.workflowRunId = workflowRunId; previous.stopReason = null; previous.status = 'RUNNING';
+    previous.plan = structuredClone(previous.continuation.plan);
+    return state;
+  }
   if (previous && !previous.stopReason) {
+    if (previous.workflowRunId !== workflowRunId && previous.pages.length) throw new Stop('RESUME_CONTINUATION_REQUIRED');
     if (previous.configHash !== digest(JSON.stringify(config))) throw new Stop('PENDING_EXECUTION_CONFIG_MISMATCH');
     previous.workflowRunId = workflowRunId;
+    previous.logicalExecutionId ??= `legacy-${workflowRunId}`;
     return state;
   }
   state.evidenceKind = 'SOCIALAPIS_DISCOVERY_STATE'; state.requestLedger ??= [];
   state.discoveryYieldHistory ??= [];
-  state.orchestration = { config, configHash: digest(JSON.stringify(config)), workflowRunId, phase: 'READY', stopReason: null,
+  state.orchestration = { schemaVersion: 3, logicalExecutionId: `${workflowRunId}-${randomBytes(8).toString('hex')}`,
+    config, configHash: digest(JSON.stringify(config)), workflowRunId, phase: 'READY', status: 'RUNNING', stopReason: null, continuation: null,
     initialIdentities: state.jobs.map(j => j.sourceIdentity), pages: [], newRelevantKeys: [], relevantKeys: [],
     plan: { allocation: 'CORE', query: config.query, pageNumber: 1, cursor: null, cursorHash: null },
     usedCursorHashes: [], usedQueries: [config.query], storage: { inserted: 0, updated: 0, unchanged: 0 } };
@@ -82,7 +126,11 @@ export function workflowMetrics(state) {
   const pages = run.pages.filter(p => p.workflowRunId === run.workflowRunId);
   const known = attempts.reduce((sum, p) => sum + (p.creditsDeducted ?? 0), 0);
   const knownRequests = attempts.reduce((sum, p) => sum + (p.actualRequests ?? 0), 0);
-  return { actualRequests: attempts.some(p => p.actualRequests === null) ? null : knownRequests,
+  const logicalAttempts = [...run.pages]; const pending = state.requestLedger[run.attemptIndex];
+  if (pending && ['CLAIMED','IN_FLIGHT'].includes(run.phase) && !run.pages.some(p => p.workflowRunId === pending.workflowRunId && p.query === pending.query && p.allocation === pending.allocation && p.pageNumber === pending.pageNumber)) logicalAttempts.push(pending);
+  return { workflowRunId: run.workflowRunId, logicalExecutionId: run.logicalExecutionId,
+    status: run.status, continuationAvailable: !!run.continuation && !['CLAIMED','IN_FLIGHT'].includes(run.phase),
+    actualRequests: attempts.some(p => p.actualRequests === null) ? null : knownRequests,
     knownActualRequests: knownRequests, reservedAttempts: attempts.length, uncertainAttempts: attempts.filter(p => p.actualRequests === null).length,
     totalDeductedCredits: attempts.some(p => p.creditsDeducted === null) ? null : known, knownDeductedCredits: known,
     stopReason: run.stopReason, uniqueRelevantVacancies: new Set(pages.flatMap(p => p.relevantVacancyKeys)).size,
@@ -90,7 +138,9 @@ export function workflowMetrics(state) {
     overlapAcrossPages: pages.reduce((sum, p) => sum + p.overlap, 0),
     storage: { inserted: pages.reduce((sum,p) => sum+p.storage.inserted,0), updated: pages.reduce((sum,p) => sum+p.storage.updated,0),
       unchanged: pages.reduce((sum,p) => sum+p.storage.unchanged,0), totalCandidates: state.jobs.length },
-    logicalExecution: { completedPages: run.pages.length, uniqueRelevantVacancies: run.relevantKeys.length, newRelevantVacancies: run.newRelevantKeys.length } };
+    logicalExecution: { completedPages: run.pages.length, uniqueRelevantVacancies: run.relevantKeys.length, newRelevantVacancies: run.newRelevantKeys.length,
+      actualRequests: logicalAttempts.some(p => p.actualRequests === null) ? null : logicalAttempts.reduce((sum,p) => sum+(p.actualRequests ?? 0),0),
+      creditsDeducted: logicalAttempts.some(p => p.creditsDeducted === null) ? null : logicalAttempts.reduce((sum,p) => sum+(p.creditsDeducted ?? 0),0) } };
 }
 export function claimPage(state, now = new Date(), { productionGuard } = {}) {
   const run = state.orchestration; const config = run.config;
@@ -98,23 +148,23 @@ export function claimPage(state, now = new Date(), { productionGuard } = {}) {
   if (run.phase === 'COMPLETED_UNCONFIRMED') throw new Stop('PERSISTENCE_CONFIRMATION_REQUIRED');
   if (run.stopReason) return false;
   if (config.mode === 'production') {
-    if (state.requestLedger.filter(p => p.day === calendarDay(now)).length >= 6) { run.stopReason = 'DAILY_REQUEST_BUDGET'; return false; }
+    if (state.requestLedger.filter(p => p.day === calendarDay(now)).length >= 6) { stopExecution(run, 'DAILY_REQUEST_BUDGET'); return false; }
     if (typeof productionGuard !== 'function' || productionGuard() !== true) throw new Stop('MONTHLY_FREE_BALANCE_UNVERIFIED_SCHEDULE_DISABLED');
   }
-  if (run.pages.length >= config.maxRequests) { run.stopReason = 'REQUEST_BUDGET'; return false; }
-  if (run.pages.reduce((sum, p) => sum + (p.creditsDeducted ?? 0), 0) + 1 > config.maxCredits) { run.stopReason = 'CREDIT_BUDGET'; return false; }
-  const attempt = { workflowRunId: run.workflowRunId, day: calendarDay(now), allocation: run.plan.allocation,
+  if (currentAttempts(state).length >= config.maxRequests) { stopExecution(run, 'REQUEST_BUDGET'); return false; }
+  if (currentAttempts(state).reduce((sum, p) => sum + (p.creditsDeducted ?? 0), 0) + 1 > config.maxCredits) { stopExecution(run, 'CREDIT_BUDGET'); return false; }
+  const attempt = { workflowRunId: run.workflowRunId, logicalExecutionId: run.logicalExecutionId, day: calendarDay(now), allocation: run.plan.allocation,
     query: run.plan.query, pageNumber: run.plan.pageNumber, inputCursor: run.plan.cursorHash,
+    inputCursorFingerprint: run.plan.cursorHash,
     startTime: config.startTime, endTime: config.endTime,
     actualRequests: null, creditsDeducted: null, outcome: 'RESERVED_AMBIGUOUS_UNTIL_COMPLETED' };
   state.requestLedger.push(attempt); run.attemptIndex = state.requestLedger.length - 1; run.phase = 'CLAIMED';
   return true;
 }
-function chooseNext(state, page, nextCursor, secret) {
+function chooseNext(state, page, nextCursor, secret, now) {
   const run = state.orchestration; const config = run.config;
-  if (run.newRelevantKeys.length >= config.target) { run.stopReason = 'SUFFICIENT_NEW_VACANCIES'; return; }
-  if (run.pages.length >= config.maxRequests) { run.stopReason = 'REQUEST_BUDGET'; return; }
-  if (run.pages.reduce((sum, p) => sum + (p.creditsDeducted ?? 0), 0) + 1 > config.maxCredits) { run.stopReason = 'CREDIT_BUDGET'; return; }
+  run.continuation = null; page.continuationAvailable = false;
+  if (run.newRelevantKeys.length >= config.target) { stopExecution(run, 'SUFFICIENT_NEW_VACANCIES'); return; }
   let coreStop = null;
   if (!nextCursor) coreStop = 'NO_CURSOR';
   else if (run.usedCursorHashes.includes(digest(nextCursor))) coreStop = 'REPEATED_CURSOR';
@@ -124,8 +174,13 @@ function chooseNext(state, page, nextCursor, secret) {
   if (page.allocation === 'CORE' && !coreStop) {
     const hash = digest(nextCursor); run.usedCursorHashes.push(hash);
     run.plan = { ...run.plan, pageNumber: page.pageNumber + 1, cursor: seal(nextCursor, secret), cursorHash: hash };
-    return;
+    run.continuation = { plan: structuredClone(run.plan), savedAt: now.toISOString(), expiresAt: new Date(now.getTime() + CONTINUATION_TTL_MS).toISOString() };
+    page.continuationAvailable = true;
   }
+  // Persist the next core plan BEFORE stopping for this workflow's budget.
+  if (currentAttempts(state).length >= config.maxRequests) { stopExecution(run, 'REQUEST_BUDGET'); return; }
+  if (currentAttempts(state).reduce((sum,p) => sum+(p.creditsDeducted ?? 0),0)+1 > config.maxCredits) { stopExecution(run, 'CREDIT_BUDGET'); return; }
+  if (run.continuation) return;
   let query = null; let allocation = null;
   if (config.rotatingQuery && !run.usedQueries.includes(config.rotatingQuery)) { query = config.rotatingQuery; allocation = 'ROTATING'; }
   else {
@@ -138,7 +193,7 @@ function chooseNext(state, page, nextCursor, secret) {
     candidates.sort((a, b) => score(b) - score(a) || (a < b ? -1 : a > b ? 1 : 0));
     if (!run.pages.some(p => p.allocation === 'ADAPTIVE') && candidates.length) { query = candidates[0]; allocation = 'ADAPTIVE'; }
   }
-  if (!query) { run.stopReason = coreStop ?? 'ALLOCATION_COMPLETE'; return; }
+  if (!query) { stopExecution(run, coreStop ?? 'ALLOCATION_COMPLETE'); return; }
   run.usedQueries.push(query); run.plan = { allocation, query, pageNumber: 1, cursor: null, cursorHash: null };
 }
 // Caller must upload the CLAIMED state before calling this function, then upload
@@ -153,9 +208,11 @@ export async function performPage(state, { transport, now = new Date(), receipt,
   let adapter;
   try {
     cursorKey(secret); // Validate codec before any possible HTTP side effect.
+    const inputCursor = open(run.plan.cursor, secret);
+    if (run.plan.pageNumber > 1 && (!validCursor(inputCursor) || digest(inputCursor) !== run.plan.cursorHash)) throw new Stop('CONTINUATION_INVALID');
     adapter = new SocialApisLiveDiscoveryAdapter({ enabled, freePlanConfirmed, noCashConfirmed,
       query: run.plan.query, ...run.config, ...{ query: run.plan.query, maxRequests: 1, maxCredits: 1 },
-      timeoutMs, endCursor: open(run.plan.cursor, secret) }, transport);
+      timeoutMs, endCursor: inputCursor }, transport);
     const budget = new ActivityBudget();
     const urls = await adapter.search(undefined, adapter.query, budget);
     // A provider page is bounded to 200 records by the existing adapter. Extract
@@ -190,6 +247,9 @@ export async function performPage(state, { transport, now = new Date(), receipt,
       httpStatus: adapter.requestStats.httpStatus,
       creditsDeducted: adapter.requestStats.creditsDeducted, creditsUsedAlternateHeader: adapter.requestStats.creditsUsedAlternateHeader,
       returnedPostIds: jobs.map(j => j.id), newlyInsertedIds: inserted, nextCursorPresent: !!validNext,
+      nextCursorFingerprint: validNext ? digest(validNext) : null,
+      rejectionReasons: adapter.itemStats.rejectionReasons.map(r => ({ ...r, pageNumber: attempt.pageNumber })),
+      rejectionDiagnostics: adapter.rejectionDiagnostics.map(r => ({ ...r, pageNumber: attempt.pageNumber })),
       storage: Object.fromEntries(Object.keys(run.storage).map(key => [key, run.storage[key] - beforeStorage[key]])),
       relevantVacancyKeys: jobs.flatMap(j => j.vacancies.flatMap((v,index) => v.match.classification === 'TARGET_MATCH' ? [`${j.sourceIdentity}:${index}`] : [])),
       relevantVacancies: jobs.reduce((sum, j) => sum + j.vacancies.filter(v => v.match.classification === 'TARGET_MATCH').length, 0),
@@ -201,13 +261,18 @@ export async function performPage(state, { transport, now = new Date(), receipt,
     state.jobs = [...stored.values()]; Object.assign(attempt, { actualRequests: page.actualRequests, creditsDeducted: page.creditsDeducted, outcome: 'COMPLETED_UNCONFIRMED' });
     run.pages.push(page); state.discoveryYieldHistory.push({ query: page.query, newRelevantVacancies: page.newRelevantVacancies, creditsDeducted: page.creditsDeducted });
     state.discoveryYieldHistory = state.discoveryYieldHistory.slice(-100);
-    chooseNext(state, page, validNext, secret); run.phase = 'COMPLETED_UNCONFIRMED';
+    chooseNext(state, page, validNext, secret, now); run.phase = 'COMPLETED_UNCONFIRMED';
   } catch (error) {
     attempt.actualRequests = adapter?.requestStats.requestCount ?? 0;
     attempt.creditsDeducted = adapter?.requestStats.creditsDeducted ?? null;
     attempt.outcome = 'FAILED_OR_AMBIGUOUS'; run.stopReason = error instanceof Stop ? error.code : 'PAGE_FAILED';
+    if (adapter?.itemStats) {
+      attempt.itemStats = adapter.itemStats;
+      attempt.rejectionDiagnostics = (adapter.rejectionDiagnostics ?? []).map(r => ({ ...r, pageNumber: attempt.pageNumber }));
+    }
     // Remain CLAIMED even for a known provider failure: no automatic refetch.
     run.phase = 'CLAIMED';
+    run.status = 'STOPPED_TERMINAL';
   }
   state.workflowMetrics = workflowMetrics(state);
   return state;

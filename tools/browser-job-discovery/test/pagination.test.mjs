@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { beginExecution, claimPage, performPage, acknowledgePersistence, calendarDay, configuration, workflowMetrics } from '../src/pagination-orchestrator.mjs';
+import { SocialApisCaptureDiscoveryAdapter } from '../src/socialapis-adapter.mjs';
+import { normalizeSocialApisItem } from '../src/socialapis-live-smoke.mjs';
 
 const key = 'synthetic-pagination-test-key';
 const profile = { technologies: ['.NET', 'ASP.NET Core'], locations: ['Hanoi', 'Hà Nội'], seniorities: ['Junior', 'Fresher', 'Intern'] };
@@ -10,8 +12,8 @@ const now = new Date('2026-10-22T03:00:00Z');
 const item = (id, body = 'Hiring Junior .NET Developer\nLocation: Hanoi\nRequirements: ASP.NET Core') => ({ basic_info: {
   post_id: id, post_text: body, url: `https://www.facebook.com/fixture/posts/${id}` }, owner_info: {}, feedback_details: {}, video_details: {} });
 const payload = (ids, cursor = null) => ({ data: { items: ids.map(id => typeof id === 'string' ? item(id) : id), page_info: { cursor } } });
-function state(options = {}, previous = { evidenceKind: 'SOCIALAPIS_DISCOVERY_STATE', jobs: [] }) {
-  return beginExecution(structuredClone(previous), { ...config, ...options }, '100');
+function state(options = {}, previous = { evidenceKind: 'SOCIALAPIS_DISCOVERY_STATE', jobs: [] }, runId = '100') {
+  return beginExecution(structuredClone(previous), { ...config, ...options }, runId);
 }
 async function page(s, body, { cost = '1', status = 200, transport, consent = true } = {}) {
   assert.equal(claimPage(s, now), true);
@@ -56,7 +58,7 @@ test('three repeated page-1 calls are NOT pages 1-3: source identities and new v
   const paginated = state({ maxRequests: 3 });
   for (const [id,cursor] of [['1101','next-1'], ['1102','next-2'], ['1103',null]]) await page(paginated, payload([id], cursor));
   let repeated = { evidenceKind: 'SOCIALAPIS_DISCOVERY_STATE', jobs: [] };
-  for (let i=0;i<3;i++) { repeated = state({ maxRequests: 1 }, repeated); await page(repeated, payload(['1101'], 'next-1')); }
+  for (let i=0;i<3;i++) { repeated = state({ maxRequests: 1 }, repeated, String(100+i)); await page(repeated, payload(['1101'], 'next-1')); }
   assert.equal(paginated.jobs.length, 3); assert.equal(repeated.jobs.length, 1);
   assert.equal(paginated.orchestration.newRelevantKeys.length, 3); assert.equal(repeated.orchestration.newRelevantKeys.length, 0);
 });
@@ -155,7 +157,7 @@ test('claim and result receipts are mandatory, crashes cannot silently re-fetch 
   const completed = state(); await page(completed, payload(['1701'], 'next'));
   completed.orchestration.phase = 'COMPLETED_UNCONFIRMED';
   assert.throws(() => beginExecution(completed, config, 'new'), /PERSISTENCE_CONFIRMATION_REQUIRED/u);
-  acknowledgePersistence(completed, '999'); beginExecution(completed, config, 'new');
+  acknowledgePersistence(completed, '999'); beginExecution(completed, config, 'new', { resumeContinuation: true, now });
   assert.equal(completed.orchestration.plan.pageNumber, 2); assert.equal(completed.jobs.length, 1);
   assert.throws(() => acknowledgePersistence(completed, ''), /DURABLE_RESULT_RECEIPT_REQUIRED/u);
   assert.throws(() => beginExecution(completed, { ...config, query: 'changed' }, 'new'), /CONFIG_MISMATCH/u);
@@ -247,4 +249,135 @@ test('explicit provider has_next=false and invalid cursor never start a second p
   }
   const s=state(); const body=payload(['2302'],'present-but-terminal'); body.data.page_info.has_next=false;
   await page(s,body); assert.equal(s.orchestration.stopReason,'NO_CURSOR');
+});
+
+async function twoPageCheckpoint(options = {}) {
+  const s = state({ maxRequests: 2, maxCredits: 2, ...options });
+  await page(s, payload(['3001'], 'cursor-page-2'));
+  await page(s, payload(['3002'], 'cursor-page-3'));
+  return JSON.parse(JSON.stringify(s)); // Exercise the actual serialized checkpoint.
+}
+const resume = (s, options = {}, flags = {}) => beginExecution(s, { ...s.orchestration.config, ...options }, '101',
+  { resumeContinuation: true, now, ...flags });
+
+test('request-budget checkpoint stores encrypted page 3 and next workflow resumes without repeating pages 1-2', async () => {
+  const s = await twoPageCheckpoint(); const oldJobs = structuredClone(s.jobs); const oldLedger = structuredClone(s.requestLedger);
+  const logicalId = s.orchestration.logicalExecutionId;
+  assert.equal(s.orchestration.status, 'STOPPED_RESUMABLE'); assert.equal(s.orchestration.continuation.plan.pageNumber, 3);
+  assert.equal(s.orchestration.pages[1].continuationAvailable, true);
+  assert.doesNotMatch(JSON.stringify(s), /cursor-page-/u);
+  resume(s); assert.equal(s.orchestration.status, 'RUNNING'); assert.equal(s.orchestration.logicalExecutionId, logicalId);
+  assert.equal(workflowMetrics(s).actualRequests, 0); assert.equal(workflowMetrics(s).logicalExecution.actualRequests, 2);
+  assert.deepEqual(s.jobs, oldJobs); assert.deepEqual(s.requestLedger, oldLedger);
+  const third = await page(s, payload(['3001','3003'], 'cursor-page-4'));
+  assert.equal(third.requests[0].url.searchParams.get('end_cursor'), 'cursor-page-3');
+  assert.equal(third.calls, 1); assert.equal(s.jobs.length, 3); assert.deepEqual(s.orchestration.pages[2].newlyInsertedIds, ['3003']);
+  await page(s, payload(['3004'], 'cursor-page-5'));
+  assert.deepEqual(s.orchestration.pages.map(p => p.pageNumber), [1,2,3,4]);
+  const metrics = workflowMetrics(s);
+  assert.equal(metrics.actualRequests, 2); assert.equal(metrics.totalDeductedCredits, 2);
+  assert.equal(metrics.logicalExecution.actualRequests, 4); assert.equal(metrics.logicalExecution.creditsDeducted, 4);
+  assert.equal(metrics.workflowRunId, '101'); assert.equal(metrics.logicalExecutionId, logicalId);
+  assert.equal(s.orchestration.status, 'STOPPED_TERMINAL'); assert.equal(metrics.continuationAvailable, false);
+  assert.throws(() => beginExecution(s, s.orchestration.config, '102', { resumeContinuation: true, now }), /CONTINUATION_UNAVAILABLE/u);
+  assert.equal(claimPage(s, now), false);
+});
+
+test('credit budget is per workflow, while four-core-page ceiling spans workflows', async () => {
+  const s = await twoPageCheckpoint({ maxRequests: 6, maxCredits: 2 });
+  assert.equal(s.orchestration.stopReason, 'CREDIT_BUDGET'); assert.equal(s.orchestration.status, 'STOPPED_RESUMABLE');
+  resume(s, { maxRequests: 1, maxCredits: 1 }); await page(s, payload(['3103'], 'fourth'));
+  assert.equal(workflowMetrics(s).actualRequests, 1); assert.equal(workflowMetrics(s).logicalExecution.creditsDeducted, 3);
+  beginExecution(s, { ...s.orchestration.config, maxRequests: 6, maxCredits: 6 }, '102', { resumeContinuation: true, now });
+  await page(s, payload(['3104'], 'must-not-be-used'));
+  assert.equal(s.orchestration.stopReason, 'CORE_BUDGET'); assert.equal(s.orchestration.status, 'STOPPED_TERMINAL');
+  assert.equal(workflowMetrics(s).actualRequests, 1); assert.equal(s.requestLedger.length, 4);
+});
+
+test('resume policy mismatch fails closed for query, dates, profile and target, without state mutation', async () => {
+  const original = await twoPageCheckpoint();
+  for (const changed of [{ query: 'other query' }, { startTime: '2026-10-01' }, { endTime: '2026-10-22' },
+    { profile: { ...profile, technologies: ['Angular'] } }, { target: 1 }, { rotatingQuery: 'other' }]) {
+    const s = structuredClone(original); const before = JSON.stringify(s);
+    assert.throws(() => resume(s, changed), /CONTINUATION_POLICY_MISMATCH/u); assert.equal(JSON.stringify(s), before);
+  }
+  assert.throws(() => resume(original, {}, { now: new Date('2026-10-23T03:00:00Z') }), /CONTINUATION_EXPIRED/u);
+  assert.throws(() => beginExecution(original, original.orchestration.config, '100', { resumeContinuation: true, now }), /RESUME_REQUIRES_NEW_WORKFLOW/u);
+});
+
+test('missing, malformed or repeated continuation cannot silently start a new query/page 1', async () => {
+  const original = await twoPageCheckpoint();
+  for (const mutate of [s => { s.orchestration.continuation = null; }, s => { s.orchestration.continuation.plan.cursor = null; },
+    s => { s.orchestration.continuation.plan.cursor.iv = 'invalid'; }, s => { s.orchestration.continuation.plan.pageNumber = 1; },
+    s => { s.orchestration.usedCursorHashes.push(s.orchestration.continuation.plan.cursorHash); },
+    s => { s.orchestration.pages[0].inputCursorFingerprint = s.orchestration.continuation.plan.cursorHash; }]) {
+    const s = structuredClone(original); mutate(s); const before = JSON.stringify(s);
+    assert.throws(() => resume(s), /CONTINUATION_(UNAVAILABLE|INVALID)/u); assert.equal(JSON.stringify(s), before);
+  }
+});
+
+test('authenticated cursor corruption fails before transport, not by refetching page 1', async () => {
+  const s = await twoPageCheckpoint();
+  s.orchestration.continuation.plan.cursor.tag = Buffer.alloc(16).toString('base64');
+  s.orchestration.plan = structuredClone(s.orchestration.continuation.plan);
+  resume(s); const result = await page(s, payload(['3203']));
+  assert.equal(result.calls, 0); assert.equal(s.orchestration.stopReason, 'CURSOR_CHECKPOINT_UNREADABLE');
+  assert.equal(s.jobs.length, 2); assert.equal(s.orchestration.phase, 'CLAIMED');
+});
+
+test('ambiguous and unconfirmed checkpoints block explicit resume', async () => {
+  const original = await twoPageCheckpoint();
+  for (const phase of ['CLAIMED','IN_FLIGHT','COMPLETED_UNCONFIRMED']) {
+    const s = structuredClone(original); s.orchestration.phase = phase;
+    assert.throws(() => resume(s), /AMBIGUOUS_PAGE|PERSISTENCE_CONFIRMATION_REQUIRED/u);
+  }
+  const s = structuredClone(original); delete s.orchestration.pages[0].artifactReceipt;
+  assert.throws(() => resume(s), /PERSISTENCE_CONFIRMATION_REQUIRED/u);
+});
+
+test('Run 7 legacy-style budget stop with page-2 input cursor is NOT a page-3 continuation', async () => {
+  const s = await twoPageCheckpoint(); delete s.orchestration.schemaVersion; delete s.orchestration.continuation;
+  delete s.orchestration.status; s.orchestration.plan.pageNumber = 2;
+  const before = JSON.stringify(s);
+  assert.throws(() => resume(s), /LEGACY_CONTINUATION_CURSOR_UNAVAILABLE/u); assert.equal(JSON.stringify(s), before);
+  assert.throws(() => beginExecution({ jobs: [] }, config, '101', { resumeContinuation: true, now }), /LEGACY_CONTINUATION_CURSOR_UNAVAILABLE/u);
+});
+
+for (const [id, url] of [
+  ['4001','https://www.facebook.com/fixture/posts/4001?ref=search'],
+  ['4001','https://m.facebook.com/groups/fixture/permalink/4001/'],
+  ['4001','https://facebook.com/groups/fixture/posts/4001'],
+  ['4001','https://facebook.com/story.php?story_fbid=4001&id=9000&ref=search'],
+  ['4001','https://facebook.com/permalink.php?id=9000&story_fbid=4001'],
+  ['pfbidFixture123','https://www.facebook.com/fixture/posts/pfbidFixture123']
+]) test(`existing supported URL/ID pair normalizes without inferring identity: ${url}`, () => {
+  const row = item(id); row.basic_info.url = url;
+  const a = new SocialApisCaptureDiscoveryAdapter(payload([row]));
+  assert.equal(a.itemStats.acceptedItems, 1); assert.equal(a.itemStats.rejectedItems, 0);
+  assert.equal(normalizeSocialApisItem(row).idUrlConflict, false);
+});
+
+test('mismatch diagnostics isolate real mismatches, opaque ID aliases and malformed IDs without logging values', async () => {
+  const different = item('4101'); different.basic_info.url = 'https://facebook.com/fixture/posts/4102?token=SENSITIVE_QUERY';
+  const opaque = item('4103'); opaque.basic_info.url = 'https://facebook.com/fixture/posts/pfbidUnverified';
+  const malformed = item('9999_8888');
+  const missing = item('4104'); delete missing.basic_info.post_id;
+  const multi = item('4105'); multi.basic_info.url = 'https://facebook.com/story.php?story_fbid=4105&story_fbid=4106&id=9000';
+  const s = state({maxRequests:1}); await page(s, payload(['4100',different,opaque,malformed,missing,multi]));
+  const p = s.orchestration.pages[0]; assert.equal(p.acceptedItems,1); assert.equal(p.rejectedItems,5);
+  assert.deepEqual(p.rejectionDiagnostics.map(d=>d.mismatchType), ['DIFFERENT_POST_IDS','DIFFERENT_ID_REPRESENTATIONS_UNVERIFIED','MALFORMED_PROVIDER_ID','MISSING_PROVIDER_ID','NOT_AN_ID_MISMATCH']);
+  assert.equal(p.rejectionDiagnostics[0].pageNumber,1); assert.equal(p.rejectionDiagnostics[0].index,1);
+  assert.equal(p.rejectionDiagnostics[0].providerIdFingerprint,createHash('sha256').update('4101').digest('hex'));
+  assert.equal(p.rejectionDiagnostics[0].urls[0].urlIdFingerprint,createHash('sha256').update('4102').digest('hex'));
+  assert.equal(p.rejectionDiagnostics[4].urls[0].ambiguousQuery,true);
+  assert.doesNotMatch(JSON.stringify(p.rejectionDiagnostics), /SENSITIVE_QUERY|https:|pfbidUnverified|Hiring|fixture\/posts/u);
+});
+
+test('all-invalid provider page keeps rejection diagnostics in durable failed attempt rather than losing evidence', async () => {
+  const s=state(); const bad=item('4201'); bad.basic_info.url='https://facebook.com/fixture/posts/4202';
+  await page(s,payload([bad]));
+  assert.equal(s.orchestration.phase,'CLAIMED'); assert.equal(s.orchestration.stopReason,'NO_VALID_PROVIDER_ITEMS');
+  const attempt=s.requestLedger.at(-1); assert.equal(attempt.itemStats.rejectedItems,1);
+  assert.equal(attempt.rejectionDiagnostics[0].pageNumber,1); assert.equal(attempt.rejectionDiagnostics[0].reason,'POST_ID_URL_MISMATCH');
+  assert.equal(s.jobs.length,0);
 });

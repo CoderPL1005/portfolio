@@ -1,6 +1,6 @@
 import { Stop } from './core.mjs';
 import { validateQuery, validateDateFilters, canonicalFacebookPost, candidateRecord, boundedOperation } from './discovery-contract.mjs';
-import { SMOKE_QUERY, normalizeSocialApisItem, parseSocialApisSearchResponse, summarizeSocialApisRows, readSocialApisResponse } from './socialapis-live-smoke.mjs';
+import { SMOKE_QUERY, normalizeSocialApisItem, diagnoseSocialApisItem, parseSocialApisSearchResponse, summarizeSocialApisRows, readSocialApisResponse } from './socialapis-live-smoke.mjs';
 
 export const PROVIDER_SCHEMA_STATUS = 'PROVIDER_RESPONSE_SCHEMA_UNVERIFIED';
 // Separate, manual, one-request diagnostic; V2 discover() remains mock-only.
@@ -18,6 +18,7 @@ export class SocialApisCaptureDiscoveryAdapter {
     if (!parsed.rows) throw new Stop(parsed.outcome);
     if (parsed.rows.length > 200) throw new Stop('RESULT_COUNT_LIMIT_EXCEEDED');
     this.itemCount = parsed.rows.length;
+    this.rejectionDiagnostics = [];
     this.itemStats = { totalItems: parsed.rows.length, acceptedItems: 0, rejectedItems: 0, rejectionReasons: [], outcome: 'EMPTY_RESULTS' };
     this.pagination = { cursor: typeof payload.data.page_info?.cursor === 'string' ? payload.data.page_info.cursor : null,
       hasNext: typeof payload.data.page_info?.has_next === 'boolean' ? payload.data.page_info.has_next : null };
@@ -27,6 +28,7 @@ export class SocialApisCaptureDiscoveryAdapter {
       const reject = reason => {
         this.itemStats.rejectedItems++;
         this.itemStats.rejectionReasons.push({ index, reason });
+        this.rejectionDiagnostics.push({ index, reason, ...diagnoseSocialApisItem(row, reason) });
       };
       if (!row || typeof row !== 'object' || Array.isArray(row)) { reject('ITEM_NOT_OBJECT'); continue; }
       const normalized = normalizeSocialApisItem(row);
@@ -127,6 +129,7 @@ export class SocialApisLiveDiscoveryAdapter {
           evidenceKind: this.transport ? 'MOCK_PROVIDER_RESPONSE' : 'LIVE_PROVIDER_RESPONSE', budget });
         if (controller.signal.aborted) throw new Stop('DISCOVERY_TIMEOUT');
         this.adapter = adapter; this.itemCount = adapter.itemCount; this.pagination = adapter.pagination; this.itemStats = adapter.itemStats;
+        this.rejectionDiagnostics = adapter.rejectionDiagnostics;
         if (this.itemStats.outcome === 'NO_VALID_ITEMS') throw new Stop('NO_VALID_PROVIDER_ITEMS');
         return [...adapter.records.keys()];
       };

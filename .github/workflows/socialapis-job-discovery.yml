@@ -19,6 +19,10 @@ on:
         description: FIRST run only - initialize empty discovery state
         type: boolean
         default: false
+      resume_continuation:
+        description: Resume saved core cursor with matching query/date/profile; never fall back to page 1
+        type: boolean
+        default: false
       query:
         description: Facebook recruitment query (operator supplied, no production profile default)
         type: string
@@ -119,6 +123,7 @@ jobs:
           DISCOVERY_MAX_REQUESTS: ${{ inputs.max_requests }}
           DISCOVERY_MAX_CREDITS: ${{ inputs.max_credits }}
           DISCOVERY_POLICY: ${{ inputs.policy }}
+          RESUME_CONTINUATION: ${{ inputs.resume_continuation }}
         run: node src/cli.mjs --orchestrate init
       - name: Persist initialized state before any HTTP
         uses: actions/upload-artifact@v4

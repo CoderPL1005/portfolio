@@ -25,15 +25,18 @@ export async function paginationCli(args) {
   }
   const receipt = process.env.ARTIFACT_RECEIPT;
   if (action === 'init') {
+    if (process.env.RESUME_CONTINUATION !== undefined && !['true','false',''].includes(process.env.RESUME_CONTINUATION)) throw new Stop('INVALID_RESUME_OPTION');
     // Downloading this exact result artifact is proof of persistence. A claim
     // artifact is NEVER acknowledged, even if the prior workflow reported PASS.
     if (state.orchestration?.phase === 'COMPLETED_UNCONFIRMED') acknowledgePersistence(state, receipt);
     const policy = JSON.parse(process.env.DISCOVERY_POLICY ?? '{}');
     // The manual runner deliberately cannot enable unattended production mode.
     if (policy.mode && policy.mode !== 'development') throw new Stop('MONTHLY_FREE_BALANCE_UNVERIFIED_SCHEDULE_DISABLED');
+    const resumeContinuation = process.env.RESUME_CONTINUATION === 'true';
+    if (resumeContinuation && process.env.INITIALIZE_STATE === 'true') throw new Stop('CANNOT_INITIALIZE_WHILE_RESUMING');
     beginExecution(state, { ...policy, query: process.env.DISCOVERY_QUERY,
       startTime: process.env.DISCOVERY_START_TIME || undefined, endTime: process.env.DISCOVERY_END_TIME || undefined,
-      maxRequests: process.env.DISCOVERY_MAX_REQUESTS ?? '1', maxCredits: process.env.DISCOVERY_MAX_CREDITS ?? '1' }, process.env.GITHUB_RUN_ID ?? 'local');
+      maxRequests: process.env.DISCOVERY_MAX_REQUESTS ?? '1', maxCredits: process.env.DISCOVERY_MAX_CREDITS ?? '1' }, process.env.GITHUB_RUN_ID ?? 'local', { resumeContinuation });
     console.log(JSON.stringify({ maximumHttpRequests: state.orchestration.config.maxRequests,
       maximumPermittedDeductedCredits: state.orchestration.config.maxCredits,
       maximumContractCreditExposure: Math.min(state.orchestration.config.maxRequests, state.orchestration.config.maxCredits),

@@ -41,6 +41,7 @@ test('manual workflow explicitly consents to up to six requests, scoped key and 
     assert.equal(inputs[name].default, false); assert.ok(job.if.includes(`inputs.${name}`));
   }
   assert.equal(inputs.max_requests.default, '1'); assert.equal(inputs.max_credits.default, '1'); assert.equal(inputs.policy.required, true);
+  assert.equal(inputs.resume_continuation.default, false);
   assert.equal(inputs.query.default, undefined); assert.equal(inputs.query.required, true);
   assert.ok(Object.keys(inputs).length <= 25);
   assert.equal(job.steps.find(s => s.uses?.startsWith('actions/setup-node')).with['node-version'], '22.12.0');
@@ -72,6 +73,7 @@ test('real composite action persists claim before HTTP, result before ack and ex
   const firstPage = discoveryWorkflow.jobs.discover.steps.findIndex(s => s.uses === './.github/actions/socialapis-discovery-page');
   assert.ok(init < firstPage); assert.equal(discoveryWorkflow.jobs.discover.steps[init+1].uses, 'actions/upload-artifact@v4');
   assert.equal(discoveryWorkflow.jobs.discover.steps[init].env.DISCOVERY_POLICY, '${{ inputs.policy }}');
+  assert.equal(discoveryWorkflow.jobs.discover.steps[init].env.RESUME_CONTINUATION, '${{ inputs.resume_continuation }}');
   assert.doesNotMatch(discoveryWorkflow.jobs.discover.steps[init].run, /\$\{\{/u);
 });
 
@@ -161,7 +163,10 @@ test('actual existing CLI init/claim/page/ack persists full registry, prints exp
     assert.throws(() => invoke('claim',env), e => e.stderr.toString().includes('PERSISTENCE_CONFIRMATION_REQUIRED'));
     invoke('ack',env); assert.equal(readFileSync(counter,'utf8'),'x');
     // A new process can resume only after durable acknowledgment, with page 2.
-    invoke('init',{...env,GITHUB_RUN_ID:'101',INITIALIZE_STATE:'false'});
+    assert.throws(() => invoke('init',{...env,GITHUB_RUN_ID:'101',INITIALIZE_STATE:'false'}), e => e.stderr.toString().includes('RESUME_CONTINUATION_REQUIRED'));
+    // Use deterministic clock in the subprocess: synthetic cursor timestamp
+    // follows the real test clock and is not a fixed production fixture date.
+    invoke('init',{...env,GITHUB_RUN_ID:'101',INITIALIZE_STATE:'false',RESUME_CONTINUATION:'true'});
     assert.equal(JSON.parse(readFileSync(t.output,'utf8')).orchestration.plan.pageNumber,2);
   } finally { t.dispose(); }
 });
@@ -183,5 +188,36 @@ test('legacy single-request CLI still preserves historical jobs on insufficient 
       });
       assert.deepEqual(JSON.parse(readFileSync(t.output,'utf8')).jobs,historical);
     }
+  } finally { t.dispose(); }
+});
+
+test('actual CLI resumes a budget-stopped page-2 checkpoint at page 3 with new per-workflow limits', () => {
+  const t=temp(); const counter=join(t.local,'requests.jsonl'); const outputs=join(t.local,'outputs.txt');
+  const env={DISCOVERY_STATE_FILE:t.output,INITIALIZE_STATE:'true',DISCOVERY_QUERY:'synthetic resume query',
+    DISCOVERY_POLICY:JSON.stringify({profile,target:20}),DISCOVERY_MAX_REQUESTS:'2',DISCOVERY_MAX_CREDITS:'2',
+    GITHUB_RUN_ID:'200',GITHUB_OUTPUT:outputs,ARTIFACT_RECEIPT:'123',SOCIALAPIS_API_KEY:'synthetic-resume-key-only',
+    SOCIALAPIS_LIVE_ENABLED:'true',SOCIALAPIS_FREE_PLAN_CONFIRMED:'true',SOCIALAPIS_NO_CASH_CONFIRMED:'true',SOCIALAPIS_PUBLIC_ARTIFACT_CONSENT:'true'};
+  const fake=`import {appendFileSync} from 'node:fs'; import assert from 'node:assert/strict'; globalThis.fetch=async input=>{
+    const cursor=new URL(input).searchParams.get('end_cursor'); assert.ok([null,'next-2','next-3'].includes(cursor));
+    appendFileSync(${JSON.stringify(counter)},JSON.stringify(cursor)+'\\n');
+    const index=cursor===null?1:cursor==='next-2'?2:3; const id=String(5100+index);
+    return new Response(JSON.stringify({data:{items:[{basic_info:{post_id:id,post_text:'Hiring Junior .NET Developer in Hanoi',url:'https://facebook.com/fixture/posts/'+id}}],page_info:{cursor:'next-'+(index+1)}}}),{headers:{'X-SocialAPIs-Credits-Deducted':'1'}});
+  };`;
+  const step = values => { invoke('claim',values);invoke('page',values,fake);invoke('ack',values); };
+  try {
+    invoke('init',env); step(env); step(env);
+    const prior=JSON.parse(readFileSync(t.output,'utf8')); assert.equal(prior.orchestration.status,'STOPPED_RESUMABLE');
+    const resumed={...env,INITIALIZE_STATE:'false',RESUME_CONTINUATION:'true',GITHUB_RUN_ID:'201',DISCOVERY_MAX_REQUESTS:'1',DISCOVERY_MAX_CREDITS:'1'};
+    invoke('init',resumed); step(resumed);
+    const after=JSON.parse(readFileSync(t.output,'utf8'));
+    assert.deepEqual(readFileSync(counter,'utf8').trim().split('\n').map(JSON.parse),[null,'next-2','next-3']);
+    assert.deepEqual(after.orchestration.pages.map(p=>p.pageNumber),[1,2,3]);
+    assert.equal(after.workflowMetrics.actualRequests,1); assert.equal(after.workflowMetrics.logicalExecution.actualRequests,3);
+    assert.equal(after.workflowMetrics.logicalExecution.creditsDeducted,3);
+    assert.equal(after.orchestration.logicalExecutionId,prior.orchestration.logicalExecutionId);
+    assert.deepEqual(after.jobs.slice(0,2),prior.jobs); assert.equal(after.requestLedger.length,3);
+    const before=readFileSync(t.output,'utf8');
+    assert.throws(()=>invoke('init',{...resumed,GITHUB_RUN_ID:'202',DISCOVERY_QUERY:'different query'}),e=>e.stderr.toString().includes('CONTINUATION_POLICY_MISMATCH'));
+    assert.equal(readFileSync(t.output,'utf8'),before);
   } finally { t.dispose(); }
 });

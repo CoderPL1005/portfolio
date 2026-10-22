@@ -3,6 +3,7 @@ import { extractVacancies } from './vacancy-extraction.mjs';
 import { closeSync, lstatSync, mkdirSync, openSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 
 export const SMOKE_QUERY = 'tuyển fresher .NET Hà Nội';
 const ENDPOINT = 'https://api.socialapis.io/facebook/search/posts';
@@ -185,6 +186,42 @@ export function normalizeSocialApisItem(row) {
     mappingStatus: !mapped ? 'UNRECOGNIZED_ITEM_FIELDS' : nested ? 'PARTIAL_OBSERVED_FIELDS'
       : postId && text?.trim() && link && publishedAt ? 'MAPPED_DOCUMENTED_FIELDS' : 'PARTIAL_DOCUMENTED_FIELDS',
     eligibleForProductionIngestion: false };
+}
+
+// Artifact-only structural evidence. Never return raw URLs/IDs/text or contacts.
+// Numeric IDs and opaque pfbid IDs are NOT assumed to be interchangeable.
+export function diagnoseSocialApisItem(row, reason) {
+  const object = isObject(row) ? row : {};
+  const nested = Object.hasOwn(object, 'basic_info');
+  const fields = nested ? (isObject(object.basic_info) ? object.basic_info : {}) : object;
+  const providerId = fields.post_id;
+  const fingerprint = value => ['string', 'number'].includes(typeof value)
+    ? createHash('sha256').update(String(value)).digest('hex') : null;
+  const idKind = value => typeof value !== 'string' ? 'INVALID' : /^\d+$/u.test(value) ? 'NUMERIC'
+    : /^pfbid[A-Za-z0-9]+$/u.test(value) ? 'PFBID' : 'INVALID';
+  const urls = (nested ? ['url'] : ['permalink', 'url', 'post_url', 'post_link']).filter(key => fields[key] !== undefined).map(key => {
+    const canonical = canonicalFacebookPost(fields[key]);
+    let urlType = 'MALFORMED'; let ambiguousQuery = false;
+    try {
+      const url = new URL(fields[key]);
+      if (url.protocol !== 'https:' || url.username || url.password || url.port || !['facebook.com','www.facebook.com','m.facebook.com'].includes(url.hostname)) urlType = 'UNTRUSTED';
+      else {
+        urlType = /^\/groups\/[^/]+\/(posts|permalink)\//u.test(url.pathname) ? 'GROUP_POST'
+          : /^\/[^/]+\/posts\//u.test(url.pathname) ? 'PAGE_POST'
+          : url.pathname === '/story.php' ? 'STORY_QUERY' : url.pathname === '/permalink.php' ? 'PERMALINK_QUERY' : 'UNSUPPORTED_FACEBOOK_PATH';
+        ambiguousQuery = ['story_fbid','id'].some(name => url.searchParams.getAll(name).length > 1);
+      }
+    } catch { /* Return only bounded enums, never the exception/input. */ }
+    return { field: nested ? `basic_info.${key}` : key, urlType, canonicalSupported: !!canonical, ambiguousQuery,
+      urlIdKind: idKind(canonical?.id), urlIdFingerprint: fingerprint(canonical?.id),
+      matchesProviderId: canonical && idKind(providerId) !== 'INVALID' ? canonical.id === providerId : null };
+  });
+  const conflicting = urls.some(u => u.matchesProviderId === true) && urls.some(u => u.matchesProviderId === false);
+  return { providerIdType: type(providerId), providerIdKind: idKind(providerId), providerIdFingerprint: fingerprint(providerId), urls,
+    mismatchType: reason === 'POST_ID_URL_MISMATCH' ? conflicting ? 'CONFLICTING_URL_FIELDS'
+      : urls.some(u => u.canonicalSupported && u.urlIdKind !== idKind(providerId)) ? 'DIFFERENT_ID_REPRESENTATIONS_UNVERIFIED' : 'DIFFERENT_POST_IDS'
+      : reason === 'POST_ID_MISSING' ? 'MISSING_PROVIDER_ID' : reason === 'POST_ID_INVALID' ? 'MALFORMED_PROVIDER_ID'
+      : 'NOT_AN_ID_MISMATCH', mappingDecision: `REJECT_${reason}` };
 }
 
 export async function readSocialApisResponse(response, signal) {
