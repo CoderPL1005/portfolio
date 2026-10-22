@@ -62,19 +62,52 @@ test('three repeated page-1 calls are NOT pages 1-3: source identities and new v
 });
 
 for (const scenario of [
-  { name: 'no cursor', body: payload(['1201']), reason: 'NO_CURSOR' },
-  { name: 'empty next page', body: payload([], 'next'), reason: 'EMPTY_PAGE' },
-  { name: 'zero relevant vacancies', body: payload([item('1201', 'Hiring Senior Java Developer in Hanoi')], 'next'), reason: 'LOW_MARGINAL_YIELD' }
+  { name: 'no cursor', body: payload(['1201']), reason: 'NO_CURSOR' }
 ]) test(`stop: ${scenario.name}`, async () => {
   const s = state(); await page(s, scenario.body);
   assert.equal(s.orchestration.stopReason, scenario.reason); assert.equal(claimPage(s, now), false);
 });
 
-test('repeated cursor, duplicate posts and sufficient-result early stop do not spend unused credits', async () => {
+for (const [name, firstPage] of [
+  ['no matching vacancies', payload([item('1201', 'Hiring Senior Java Developer in Hanoi')], 'second-page')],
+  ['no posts', payload([], 'second-page')]
+]) test(`core page 1 with ${name} still reaches relevant page 2 within a two-request budget`, async () => {
+  const s = state({ maxRequests: 2, maxCredits: 2 });
+  const first = await page(s, firstPage);
+  assert.equal(first.calls, 1); assert.equal(s.orchestration.pages[0].newRelevantVacancies, 0);
+  assert.equal(s.orchestration.stopReason, null);
+  assert.equal(s.orchestration.plan.allocation, 'CORE'); assert.equal(s.orchestration.plan.pageNumber, 2);
+  const second = await page(s, payload(['1202'], 'unused-third-page'));
+  assert.equal(second.calls, 1); assert.equal(second.requests[0].url.searchParams.get('end_cursor'), 'second-page');
+  assert.deepEqual(s.orchestration.pages.map(p => p.newRelevantVacancies), [0, 1]);
+  assert.deepEqual(s.orchestration.pages.map(p => p.pageNumber), [1, 2]);
+  assert.equal(workflowMetrics(s).actualRequests, 2); assert.equal(workflowMetrics(s).totalDeductedCredits, 2);
+  assert.equal(s.orchestration.stopReason, 'REQUEST_BUDGET'); assert.equal(claimPage(s, now), false);
+});
+
+test('zero-yield core pages ignore legacy minMarginal but never exceed four pages', async () => {
+  const s = state({ minMarginal: 200 });
+  for (let number = 1; number <= 4; number++) await page(s, payload([], `next-${number}`));
+  assert.deepEqual(s.orchestration.pages.map(p => p.allocation), ['CORE', 'CORE', 'CORE', 'CORE']);
+  assert.equal(s.orchestration.newRelevantKeys.length, 0); assert.equal(s.orchestration.stopReason, 'CORE_BUDGET');
+  assert.equal(workflowMetrics(s).actualRequests, 4); assert.equal(claimPage(s, now), false);
+});
+
+for (const [options, reason] of [
+  [{ maxRequests: 1 }, 'REQUEST_BUDGET'], [{ maxCredits: 1 }, 'CREDIT_BUDGET']
+]) test(`zero-yield page still respects ${reason}`, async () => {
+  const s = state(options); await page(s, payload([], 'valid-next-cursor'));
+  assert.equal(s.orchestration.stopReason, reason); assert.equal(claimPage(s, now), false);
+  assert.equal(workflowMetrics(s).actualRequests, 1);
+});
+
+test('repeated cursor and target stop early while duplicate posts stay deduplicated without blocking later pages', async () => {
   const repeat = state(); await page(repeat, payload(['1301'], 'repeat')); await page(repeat, payload(['1302'], 'repeat'));
   assert.equal(repeat.orchestration.stopReason, 'REPEATED_CURSOR'); assert.equal(repeat.requestLedger.length, 2);
   const duplicate = state(); await page(duplicate, payload(['1301'], 'one')); await page(duplicate, payload(['1301'], 'two'));
-  assert.equal(duplicate.orchestration.stopReason, 'LOW_MARGINAL_YIELD'); assert.equal(duplicate.jobs.length, 1);
+  assert.equal(duplicate.orchestration.stopReason, null); assert.equal(duplicate.jobs.length, 1);
+  assert.equal(duplicate.orchestration.pages[1].newRelevantVacancies, 0);
+  assert.equal(duplicate.orchestration.plan.pageNumber, 3);
   const enough = state({ target: 1, rotatingQuery: 'rotating', adaptiveQueries: ['adaptive'] });
   await page(enough, payload(['1301'], 'unused')); assert.equal(enough.orchestration.stopReason, 'SUFFICIENT_NEW_VACANCIES');
   assert.equal(enough.requestLedger.length, 1);

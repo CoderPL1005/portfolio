@@ -45,14 +45,18 @@ Không thêm dependency, bảng dữ liệu hoặc catalogue công nghệ mới.
 3. Mỗi page dùng adapter/normalizer thật hiện có, JobPostExtractor, raw hash cũ,
    profile matching, sourceIdentity registry và báo cáo. Tối đa 200 items/page
    theo adapter hiện có; không áp nhầm browser candidate cap 20 vào provider page.
-4. Mặc định target = **5 vacancy phù hợp mới**; minMarginal = **1**. Target tính
+4. Mặc định target = **5 vacancy phù hợp mới**. `minMarginal` (mặc định **1**)
+   chỉ giữ để tương thích config/hash checkpoint cũ, không còn chặn core pagination.
+   Target tính
    theo `(sourceIdentity, vacancy index)` thuộc post chưa có lúc logical execution
    bắt đầu, không theo tổng jobs lịch sử. Matching dùng primary technology,
    seniority/location được extractor hỗ trợ. Bằng chứng quận Hà Nội đã xác minh
    bởi extractor được tái sử dụng, không bắt buộc địa chỉ chứa chữ “Hà Nội”.
 5. Dừng sớm khi đạt target, hết request/credit budget. Dừng nhánh core khi cursor
-   thiếu/invalid/lặp, `has_next=false`, page rỗng, marginal yield thấp hoặc đủ
-   bốn core pages. Nếu còn cần kết quả, còn budget và operator cấu hình, chuyển
+   thiếu/invalid/lặp, `has_next=false` hoặc đủ bốn core pages. Page rỗng hay có
+   0 vacancy phù hợp mới vẫn được tiếp tục nếu cursor hợp lệ và còn budget.
+   Không dùng `LOW_MARGINAL_YIELD` để chặn các trang sau. Nếu còn cần kết quả,
+   còn budget và operator cấu hình, chuyển
    tối đa một rotating query rồi tối đa một adaptive query (mỗi query một page).
 6. Adaptive chỉ chọn query chưa dùng trong pool cấu hình có yield/credits đã
    biết trong history; xếp theo tổng new relevant vacancies / tổng deducted
@@ -136,7 +140,7 @@ hiện hữu vẫn có catalogue/pattern ngôn ngữ hữu hạn; truyền tên 
 
 ## Kiểm chứng offline
 
-- `npm test`: **258 passed, 0 failed, 0 skipped**.
+- `npm test` (B.2.1): **261 passed, 0 failed, 0 skipped**.
 - `npm run test:browser`: **8 passed, 0 failed, 0 skipped**, Chromium fixture
   regression qua Chrome local, không truy cập Facebook.
 - Parse YAML workflow và composite action: **2 PASS**; `git diff --check`: **PASS**.
@@ -168,8 +172,9 @@ hiện hữu vẫn có catalogue/pattern ngôn ngữ hữu hạn; truyền tên 
 ```
 
 4. Không cấu hình rotating/adaptive cho lần thử này. Run in exposure trước HTTP.
-   Chỉ có page 2 nếu page 1 còn thiếu target, có cursor hợp lệ và ít nhất một
-   vacancy phù hợp mới; stop sớm sau một page là hợp lệ, không ép dùng credits.
+   Chỉ có page 2 nếu page 1 còn thiếu target, có cursor hợp lệ và còn budget;
+   không đòi page 1 có vacancy phù hợp mới. Stop sớm sau một page khi đạt target,
+   hết budget hoặc không còn cursor hợp lệ là hợp lệ, không ép dùng credits.
 5. Kiểm tra artifacts page 1/2, pageNumber và cursor fingerprint, returned vs
    inserted IDs, overlap và hai credit headers riêng biệt. Không công khai cursor,
    API key hoặc raw private response. Không retry run lỗi tự động.

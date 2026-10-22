@@ -118,8 +118,8 @@ function chooseNext(state, page, nextCursor, secret) {
   let coreStop = null;
   if (!nextCursor) coreStop = 'NO_CURSOR';
   else if (run.usedCursorHashes.includes(digest(nextCursor))) coreStop = 'REPEATED_CURSOR';
-  else if (!page.returnedPostIds.length) coreStop = 'EMPTY_PAGE';
-  else if (page.newRelevantVacancies < config.minMarginal) coreStop = 'LOW_MARGINAL_YIELD';
+  // A low-yield or empty page does not establish that later pages are useless.
+  // Keep minMarginal in config for checkpoint/hash compatibility, not as a stop.
   else if (page.pageNumber >= 4) coreStop = 'CORE_BUDGET';
   if (page.allocation === 'CORE' && !coreStop) {
     const hash = digest(nextCursor); run.usedCursorHashes.push(hash);
