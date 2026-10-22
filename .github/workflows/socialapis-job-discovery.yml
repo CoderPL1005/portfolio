@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       confirm_live:
-        description: Authorize ONE SocialAPIs request (no retry/pagination)
+        description: Authorize up to max_requests HTTP requests, each <=1 deducted credit under current contract
         type: boolean
         default: false
       confirm_free_no_cash:
@@ -20,9 +20,9 @@ on:
         type: boolean
         default: false
       query:
-        description: Facebook recruitment search query
+        description: Facebook recruitment query (operator supplied, no production profile default)
         type: string
-        default: tuyển fresher .NET Hà Nội
+        required: true
       start_time:
         description: Optional publication start date YYYY-MM-DD
         type: string
@@ -31,11 +31,22 @@ on:
         description: Optional publication end date YYYY-MM-DD
         type: string
         default: ''
+      max_requests:
+        description: Maximum HTTP requests 1..6, core <=4 plus optional rotating/adaptive
+        type: string
+        default: '1'
+      max_credits:
+        description: Maximum deducted Free credits 1..6, no paid fallback
+        type: string
+        default: '1'
+      policy:
+        description: JSON profile {technologies,locations,seniorities}, target=5, minMarginal=1, optional rotatingQuery/adaptiveQueries
+        type: string
+        required: true
 
 permissions:
   contents: read
   actions: read
-
 concurrency:
   group: socialapis-job-discovery-state
   cancel-in-progress: false
@@ -44,7 +55,7 @@ jobs:
   discover:
     if: github.ref == 'refs/heads/main' && inputs.confirm_live && inputs.confirm_free_no_cash && inputs.confirm_artifact_data
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: tools/browser-job-discovery
@@ -69,8 +80,8 @@ jobs:
             if (Number(process.env.GITHUB_RUN_ATTEMPT) !== 1) throw new Error('RERUN_DISABLED_USE_A_NEW_MANUAL_RUN');
             const repo = await github.rest.repos.get(context.repo);
             if (repo.data.private) throw new Error('PUBLIC_REPOSITORY_REQUIRED_FOR_THIS_ZERO_COST_PLAN');
-            const workflow = { ...context.repo, workflow_id: 'socialapis-job-discovery.yml', branch: 'main', event: 'workflow_dispatch' };
-            const history = await github.rest.actions.listWorkflowRuns({ ...workflow, per_page: 2 });
+            const history = await github.rest.actions.listWorkflowRuns({ ...context.repo,
+              workflow_id: 'socialapis-job-discovery.yml', branch: 'main', event: 'workflow_dispatch', per_page: 2 });
             const previous = history.data.workflow_runs.find(run => run.id !== context.runId);
             if (!previous) {
               if (history.data.total_count > 1 || process.env.INITIALIZE_STATE !== 'true') throw new Error('FIRST_RUN_EXPLICIT_INITIALIZATION_REQUIRED');
@@ -78,13 +89,18 @@ jobs:
             }
             if (process.env.INITIALIZE_STATE === 'true') throw new Error('CANNOT_RESET_EXISTING_DISCOVERY_HISTORY');
             if (previous.status !== 'completed') throw new Error('PREVIOUS_RUN_NOT_COMPLETED');
-            const artifacts = await github.rest.actions.listWorkflowRunArtifacts({ ...context.repo, run_id: previous.id, per_page: 100 });
-            const available = artifacts.data.artifacts.filter(item => !item.expired);
-            const state = available.find(item => item.name === 'socialapis-discovery-state')
-              ?? available.find(item => item.name === 'socialapis-discovery-checkpoint');
-            if (!state) throw new Error('CHECKPOINT_MISSING_OR_EXPIRED_RESTORE_BACKUP_BEFORE_ANY_PROVIDER_REQUEST');
+            const response = await github.rest.actions.listWorkflowRunArtifacts({ ...context.repo, run_id: previous.id, per_page: 100 });
+            if (response.data.total_count > 100) throw new Error('ARTIFACT_HISTORY_REQUIRES_MANUAL_RECONCILIATION');
+            const artifacts = response.data.artifacts;
+            // Never restore past a later ambiguous claim, including expired ones.
+            const pages = artifacts.filter(a => /^socialapis-page-\d+-[1-6]-(claim|result)$/.test(a.name));
+            pages.sort((a,b) => Number(b.name.split('-').at(-2)) - Number(a.name.split('-').at(-2)) ||
+              Number(b.name.endsWith('-result')) - Number(a.name.endsWith('-result')));
+            const state = pages[0] ?? artifacts.find(a => a.name === 'socialapis-discovery-state')
+              ?? artifacts.find(a => a.name === 'socialapis-discovery-checkpoint');
+            if (!state || state.expired) throw new Error('CHECKPOINT_MISSING_OR_EXPIRED_RESTORE_BACKUP_BEFORE_ANY_PROVIDER_REQUEST');
             core.setOutput('run_id', String(previous.id)); core.setOutput('artifact_name', state.name);
-            core.setOutput('initialize', 'false');
+            core.setOutput('artifact_id', String(state.id)); core.setOutput('initialize', 'false');
       - name: Restore prior-run state (never runner-local cache)
         if: steps.checkpoint.outputs.initialize != 'true'
         uses: actions/download-artifact@v4
@@ -93,17 +109,18 @@ jobs:
           run-id: ${{ steps.checkpoint.outputs.run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: tools/browser-job-discovery/.debug
-      - name: Validate and prepare state before provider access
+      - name: Validate profile and display maximum credit exposure before HTTP
         env:
           INITIALIZE_STATE: ${{ steps.checkpoint.outputs.initialize }}
-        run: |
-          if [ "$INITIALIZE_STATE" = "true" ]; then
-            node src/cli.mjs --source socialapis --prepare-state --initialize-state
-          else
-            node src/cli.mjs --source socialapis --prepare-state
-          fi
-          node --input-type=module -e "import {statSync} from 'node:fs'; if(statSync('.debug/socialapis-discovery.json').size>500000) throw new Error('CHECKPOINT_CAPACITY_REACHED');"
-      - name: Persist pre-request checkpoint (failure prevents provider call)
+          ARTIFACT_RECEIPT: ${{ steps.checkpoint.outputs.artifact_id }}
+          DISCOVERY_QUERY: ${{ inputs.query }}
+          DISCOVERY_START_TIME: ${{ inputs.start_time }}
+          DISCOVERY_END_TIME: ${{ inputs.end_time }}
+          DISCOVERY_MAX_REQUESTS: ${{ inputs.max_requests }}
+          DISCOVERY_MAX_CREDITS: ${{ inputs.max_credits }}
+          DISCOVERY_POLICY: ${{ inputs.policy }}
+        run: node src/cli.mjs --orchestrate init
+      - name: Persist initialized state before any HTTP
         uses: actions/upload-artifact@v4
         with:
           name: socialapis-discovery-checkpoint
@@ -111,31 +128,33 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 90
-      - name: Discover exactly one page
-        env:
-          SOCIALAPIS_API_KEY: ${{ secrets.SOCIALAPIS_API_KEY }}
-          SOCIALAPIS_LIVE_ENABLED: 'true'
-          SOCIALAPIS_FREE_PLAN_CONFIRMED: 'true'
-          SOCIALAPIS_NO_CASH_CONFIRMED: 'true'
-          SOCIALAPIS_MAX_REQUESTS: '1'
-          SOCIALAPIS_MAX_CREDITS: '1'
-          DISCOVERY_QUERY: ${{ inputs.query }}
-          DISCOVERY_START_TIME: ${{ inputs.start_time }}
-          DISCOVERY_END_TIME: ${{ inputs.end_time }}
-        shell: bash
-        run: |
-          args=(src/cli.mjs --source socialapis --live --query "$DISCOVERY_QUERY")
-          if [ -n "$DISCOVERY_START_TIME" ]; then
-            args+=(--start-time "$DISCOVERY_START_TIME")
-          fi
-          if [ -n "$DISCOVERY_END_TIME" ]; then
-            args+=(--end-time "$DISCOVERY_END_TIME")
-          fi
-          node "${args[@]}"
-      - name: Enforce bounded artifact size
-        run: node --input-type=module -e "import {statSync} from 'node:fs'; if(statSync('.debug/socialapis-discovery.json').size>1048576) throw new Error('ARTIFACT_SIZE_LIMIT');"
-      - name: Persist discovery state and report for next run
-        uses: actions/upload-artifact@v4
+      - uses: ./.github/actions/socialapis-discovery-page
+        with:
+          slot: '1'
+          api_key: ${{ secrets.SOCIALAPIS_API_KEY }}
+      - uses: ./.github/actions/socialapis-discovery-page
+        with:
+          slot: '2'
+          api_key: ${{ secrets.SOCIALAPIS_API_KEY }}
+      - uses: ./.github/actions/socialapis-discovery-page
+        with:
+          slot: '3'
+          api_key: ${{ secrets.SOCIALAPIS_API_KEY }}
+      - uses: ./.github/actions/socialapis-discovery-page
+        with:
+          slot: '4'
+          api_key: ${{ secrets.SOCIALAPIS_API_KEY }}
+      - uses: ./.github/actions/socialapis-discovery-page
+        with:
+          slot: '5'
+          api_key: ${{ secrets.SOCIALAPIS_API_KEY }}
+      - uses: ./.github/actions/socialapis-discovery-page
+        with:
+          slot: '6'
+          api_key: ${{ secrets.SOCIALAPIS_API_KEY }}
+      - name: Final workflow metrics
+        run: node src/cli.mjs --orchestrate summary
+      - uses: actions/upload-artifact@v4
         with:
           name: socialapis-discovery-state
           path: tools/browser-job-discovery/.debug/socialapis-discovery.json

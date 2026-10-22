@@ -1,0 +1,53 @@
+name: Durable SocialAPIs discovery page
+description: One reserved HTTP attempt with awaited pre/post artifact persistence
+inputs:
+  slot:
+    required: true
+    description: Bounded orchestration slot 1..6
+  api_key:
+    required: true
+    description: Secret available only to the HTTP step
+runs:
+  using: composite
+  steps:
+    - id: claim
+      shell: bash
+      working-directory: tools/browser-job-discovery
+      run: node src/cli.mjs --orchestrate claim
+    - id: reservation
+      if: steps.claim.outputs.active == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: socialapis-page-${{ github.run_id }}-${{ inputs.slot }}-claim
+        path: tools/browser-job-discovery/.debug/socialapis-discovery.json
+        include-hidden-files: true
+        if-no-files-found: error
+        retention-days: 90
+    - name: One HTTP attempt, never retry
+      if: steps.claim.outputs.active == 'true'
+      shell: bash
+      working-directory: tools/browser-job-discovery
+      env:
+        ARTIFACT_RECEIPT: ${{ steps.reservation.outputs.artifact-id }}
+        SOCIALAPIS_API_KEY: ${{ inputs.api_key }}
+        SOCIALAPIS_LIVE_ENABLED: 'true'
+        SOCIALAPIS_FREE_PLAN_CONFIRMED: 'true'
+        SOCIALAPIS_NO_CASH_CONFIRMED: 'true'
+        SOCIALAPIS_PUBLIC_ARTIFACT_CONSENT: 'true'
+      run: node src/cli.mjs --orchestrate page
+    - id: result
+      if: success() && steps.claim.outputs.active == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: socialapis-page-${{ github.run_id }}-${{ inputs.slot }}-result
+        path: tools/browser-job-discovery/.debug/socialapis-discovery.json
+        include-hidden-files: true
+        if-no-files-found: error
+        retention-days: 90
+    - name: Confirm persistence or fail closed
+      if: steps.claim.outputs.active == 'true'
+      shell: bash
+      working-directory: tools/browser-job-discovery
+      env:
+        ARTIFACT_RECEIPT: ${{ steps.result.outputs.artifact-id }}
+      run: node src/cli.mjs --orchestrate ack

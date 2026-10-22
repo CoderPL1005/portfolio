@@ -19,7 +19,8 @@ export class SocialApisCaptureDiscoveryAdapter {
     if (parsed.rows.length > 200) throw new Stop('RESULT_COUNT_LIMIT_EXCEEDED');
     this.itemCount = parsed.rows.length;
     this.itemStats = { totalItems: parsed.rows.length, acceptedItems: 0, rejectedItems: 0, rejectionReasons: [], outcome: 'EMPTY_RESULTS' };
-    this.pagination = { cursor: typeof payload.data.page_info?.cursor === 'string' ? payload.data.page_info.cursor : null };
+    this.pagination = { cursor: typeof payload.data.page_info?.cursor === 'string' ? payload.data.page_info.cursor : null,
+      hasNext: typeof payload.data.page_info?.has_next === 'boolean' ? payload.data.page_info.has_next : null };
     this.records = new Map(); this.matches = new Map();
     for (const [index, row] of parsed.rows.entries()) {
       budget?.check();
@@ -80,10 +81,12 @@ export class SocialApisCaptureDiscoveryAdapter {
  */
 export class SocialApisLiveDiscoveryAdapter {
   constructor({ enabled = false, freePlanConfirmed = false, noCashConfirmed = false,
-    maxRequests = 1, maxCredits = 1, timeoutMs = 20_000, query = SMOKE_QUERY, startTime, endTime } = {}, transport) {
+    maxRequests = 1, maxCredits = 1, timeoutMs = 20_000, query = SMOKE_QUERY, startTime, endTime, endCursor = null } = {}, transport) {
     this.options = { enabled, freePlanConfirmed, noCashConfirmed, maxRequests, maxCredits, timeoutMs };
     this.query = validateQuery(query); this.transport = transport;
     this.dateFilters = Object.freeze(validateDateFilters({ startTime, endTime }));
+    if (endCursor !== null && (typeof endCursor !== 'string' || !endCursor.trim() || endCursor.length > 4096 || /[\p{C}]/u.test(endCursor))) throw new Stop('INVALID_CURSOR');
+    this.endCursor = endCursor;
     this.requestStats = { requestCount: 0, creditsDeducted: null, creditsUsedAlternateHeader: null };
   }
   async search(_page, query, budget) {
@@ -103,6 +106,7 @@ export class SocialApisLiveDiscoveryAdapter {
         url.searchParams.set('query', this.query); url.searchParams.set('recent_posts', 'true');
         if (this.dateFilters.startTime) url.searchParams.set('start_time', this.dateFilters.startTime);
         if (this.dateFilters.endTime) url.searchParams.set('end_time', this.dateFilters.endTime);
+        if (this.endCursor !== null) url.searchParams.set('end_cursor', this.endCursor);
         const response = await (this.transport ?? globalThis.fetch)(url.href, { method: 'GET',
           headers: { 'x-api-token': key, Accept: 'application/json' }, redirect: 'manual', credentials: 'omit', signal: controller.signal });
         if (controller.signal.aborted) throw new Stop('DISCOVERY_TIMEOUT');

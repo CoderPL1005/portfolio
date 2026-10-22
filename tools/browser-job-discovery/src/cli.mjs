@@ -9,7 +9,10 @@ import { buildDiscoveryYield } from './discovery-yield.mjs';
 
 // No browser URL/session/auth arguments. Select mode before importing a browser.
 const args = process.argv.slice(2);
-if (args.includes('--source')) {
+if (args.includes('--orchestrate')) {
+  try { await (await import('./pagination-cli.mjs')).paginationCli(args); }
+  catch (error) { console.error(error instanceof Stop ? error.code : 'ORCHESTRATION_FAILED'); process.exitCode = 1; }
+} else if (args.includes('--source')) {
   // Same entrypoint; live is explicit and state must be restored before IO.
   let adapter;
   try {
@@ -37,6 +40,9 @@ if (args.includes('--source')) {
     try {
       if ((await stat(output)).size > 10_485_760) throw new Stop('REPLAY_STORE_TOO_LARGE');
       const previous = JSON.parse(await readFile(output, 'utf8'));
+      // Never let the legacy one-page writer erase a durable pagination journal.
+      // One-request orchestration remains available with maxRequests=1.
+      if (previous.orchestration || previous.requestLedger) throw new Stop('ORCHESTRATED_STATE_REQUIRES_ORCHESTRATION');
       if (!['LOCAL_PROVIDER_CAPTURE_REPLAY', 'LIVE_PROVIDER_RESPONSE', 'SOCIALAPIS_DISCOVERY_STATE'].includes(previous.evidenceKind) || !Array.isArray(previous.jobs) ||
           previous.jobs.some(job => job.provider !== 'SOCIALAPIS' || !job.id || job.sourceIdentity !== `SOCIALAPIS:${job.id}`)) throw new Stop('INVALID_REPLAY_STORE');
       existing = previous.jobs;
