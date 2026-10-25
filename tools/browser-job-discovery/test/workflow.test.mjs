@@ -5,6 +5,8 @@ import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync } from 'nod
 import { join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { tmpdir } from 'node:os';
 import { parse } from 'yaml';
 
 const workflowText = await readFile(new URL('../../../.github/workflows/socialapis-job-discovery.yml', import.meta.url), 'utf8');
@@ -42,6 +44,7 @@ test('manual workflow explicitly consents to up to six requests, scoped key and 
   }
   assert.equal(inputs.max_requests.default, '1'); assert.equal(inputs.max_credits.default, '1'); assert.equal(inputs.policy.required, true);
   assert.equal(inputs.resume_continuation.default, false);
+  assert.equal(inputs.reconcile_terminal_failure.default,false);
   assert.equal(inputs.query.default, undefined); assert.equal(inputs.query.required, false);
   assert.ok(Object.keys(inputs).length <= 25);
   assert.equal(job.steps.find(s => s.uses?.startsWith('actions/setup-node')).with['node-version'], '22.12.0');
@@ -119,7 +122,19 @@ test('latest page reservation wins over earlier result/legacy; expired latest ne
   assert.equal((await checkpointTest({artifacts})).artifact_id,'3');
   const result = [...artifacts,{id:4,name:'socialapis-page-100-2-result'}];
   assert.equal((await checkpointTest({artifacts:result})).artifact_id,'4');
+  assert.equal((await checkpointTest({artifacts:result})).claim_artifact_id,'3');
   await assert.rejects(() => checkpointTest({artifacts:[...artifacts,{id:4,name:'socialapis-page-100-2-result',expired:true}]}), /CHECKPOINT_MISSING/u);
+});
+
+test('reconciliation provenance is wired to uploaded result and matching claim, never a browser-supplied identity flag',()=>{
+  const init=discoveryWorkflow.jobs.discover.steps.find(s=>s.run==='node src/cli.mjs --orchestrate init');
+  assert.equal(init.env.ARTIFACT_NAME,'${{ steps.checkpoint.outputs.artifact_name }}');
+  assert.equal(init.env.ARTIFACT_RUN_ID,'${{ steps.checkpoint.outputs.run_id }}');
+  assert.equal(init.env.CLAIM_ARTIFACT_RECEIPT,'${{ steps.checkpoint.outputs.claim_artifact_id }}');
+  assert.equal(init.env.RECONCILE_TERMINAL_FAILURE,'${{ inputs.reconcile_terminal_failure }}');
+  const ack=action.runs.steps.at(-1);
+  assert.equal(ack.env.ARTIFACT_NAME,'socialapis-page-${{ github.run_id }}-${{ inputs.slot }}-result');
+  assert.equal(ack.env.CLAIM_ARTIFACT_RECEIPT,'${{ steps.reservation.outputs.artifact-id }}');
 });
 
 const profile = { technologies:['.NET'],locations:['Hanoi'],seniorities:['Junior'] };
@@ -133,6 +148,57 @@ function invoke(action, env, fake) {
   const guard = 'data:text/javascript,' + encodeURIComponent(`import net from 'node:net'; net.Socket.prototype.connect=()=>{throw Error('NETWORK_FORBIDDEN');}; ${fake ?? ''}`);
   return execFileSync(process.execPath,['--import',guard,'src/cli.mjs','--orchestrate',action],{cwd:directory,encoding:'utf8',stdio:'pipe',env:{...process.env,...env}});
 }
+
+test('CLI honors explicit dates, falls back to policy when input blank, and reports genuinely unset dates without today defaults',()=>{
+  for(const scenario of [
+    {policy:{startTime:'2026-10-01',endTime:'2026-10-20'},input:{DISCOVERY_START_TIME:'2026-10-02',DISCOVERY_END_TIME:'2026-10-21'},start:'2026-10-02',end:'2026-10-21',source:'ENV_INPUT'},
+    {policy:{startTime:'2026-10-01',endTime:'2026-10-20'},input:{DISCOVERY_START_TIME:'',DISCOVERY_END_TIME:''},start:'2026-10-01',end:'2026-10-20',source:'POLICY'},
+    {policy:{},input:{DISCOVERY_START_TIME:'',DISCOVERY_END_TIME:''},start:null,end:null,source:'UNSET'}
+  ]) {
+    const t=temp();
+    try {
+      const stdout=invoke('init',{DISCOVERY_STATE_FILE:t.output,INITIALIZE_STATE:'true',GITHUB_RUN_ID:'600',
+        DISCOVERY_QUERY:'Backend Fresher Hanoi',DISCOVERY_POLICY:JSON.stringify({profile,...scenario.policy}),...scenario.input});
+      const state=JSON.parse(readFileSync(t.output,'utf8')),audit=state.orchestration.dateFilterAudit;
+      assert.equal(state.orchestration.config.startTime,scenario.start);assert.equal(state.orchestration.config.endTime,scenario.end);
+      assert.equal(audit.startSource,scenario.source);assert.equal(audit.endSource,scenario.source);assert.equal(audit.providerFreshnessVerified,false);
+      if(scenario.source!=='ENV_INPUT')assert.equal(audit.startInputState,'BLANK');
+      assert.match(stdout,/"dateFilters"/u);assert.equal(state.requestLedger.length,0);
+    } finally {t.dispose();}
+  }
+});
+
+test('actual CLI reconciles only an exclusive private copy of a hash-verified observed result with no network or history loss',()=>{
+  const t=temp(),privateDir=mkdtempSync(join(tmpdir(),'socialapis-b42-recovery-'));
+  const env={DISCOVERY_STATE_FILE:t.output,INITIALIZE_STATE:'true',DISCOVERY_QUERY:'Backend Fresher Hanoi',
+    DISCOVERY_POLICY:JSON.stringify({profile}),GITHUB_RUN_ID:'601',ARTIFACT_RECEIPT:'123',SOCIALAPIS_API_KEY:'synthetic-recovery-key',
+    SOCIALAPIS_LIVE_ENABLED:'true',SOCIALAPIS_FREE_PLAN_CONFIRMED:'true',SOCIALAPIS_NO_CASH_CONFIRMED:'true',SOCIALAPIS_PUBLIC_ARTIFACT_CONSENT:'true'};
+  const invalid={data:{items:Array.from({length:5},(_,index)=>({basic_info:{post_id:String(7000+index),post_text:'Synthetic recruitment',url:`https://www.facebook.com/fixture/posts/pfbidUnknown${index}`}})),page_info:{}}};
+  const fake=`globalThis.fetch=async()=>new Response(${JSON.stringify(JSON.stringify(invalid))},{headers:{'X-SocialAPIs-Credits-Deducted':'1'}});`;
+  try {
+    invoke('init',env);invoke('claim',env);invoke('page',env,fake);
+    const bytes=readFileSync(t.output),s=JSON.parse(bytes),attempt=s.requestLedger.at(-1);
+    const source=join(privateDir,'original.json'),metadata=join(privateDir,'observed.json'),output=join(privateDir,'working-copy.json');
+    writeFileSync(source,bytes);
+    const observation={metadataKind:'OBSERVED_FROM_PERSISTED_RESULT_NOT_DISPATCH_INPUTS',workflowRunId:'601',resultArtifactId:456,claimArtifactId:123,
+      stateJsonSHA256:createHash('sha256').update(bytes).digest('hex'),resultUploaded:true,
+      observedRun:{phase:s.orchestration.phase,status:'STOPPED_TERMINAL',stopReason:'NO_VALID_PROVIDER_ITEMS',logicalExecutionId:s.orchestration.logicalExecutionId,attemptIndex:0},
+      effectiveValuesFromPersistedState:{actualRequests:1,creditsDeducted:1,outcome:attempt.outcome},itemStats:attempt.itemStats};
+    writeFileSync(metadata,JSON.stringify(observation));
+    const recovery={DISCOVERY_RECONCILE_SOURCE:source,DISCOVERY_RECONCILE_METADATA:metadata,DISCOVERY_RECONCILE_OUTPUT:output};
+    assert.match(invoke('reconcile',recovery),/"providerRequestsMade":0/u);
+    const copy=JSON.parse(readFileSync(output));assert.equal(copy.orchestration.phase,'TERMINAL_RECONCILED');
+    assert.deepEqual(copy.requestLedger,s.requestLedger);assert.deepEqual(copy.jobs,s.jobs);assert.deepEqual(readFileSync(source),bytes);
+    assert.throws(()=>invoke('reconcile',recovery)); // Never overwrite an existing copy.
+    writeFileSync(metadata,JSON.stringify({...observation,stateJsonSHA256:'0'.repeat(64)}));
+    assert.throws(()=>invoke('reconcile',{...recovery,DISCOVERY_RECONCILE_OUTPUT:join(privateDir,'bad-copy.json')}),e=>e.stderr.toString().includes('RECONCILIATION_EVIDENCE_INVALID'));
+    assert.throws(()=>invoke('reconcile',{...recovery,DISCOVERY_RECONCILE_OUTPUT:source}),e=>e.stderr.toString().includes('PRIVATE_RECOVERY_COPY_REQUIRED'));
+    const init={...env,INITIALIZE_STATE:'false',GITHUB_RUN_ID:'602',RECONCILE_TERMINAL_FAILURE:'true',ARTIFACT_RECEIPT:'456',
+      ARTIFACT_NAME:'socialapis-page-601-1-result',ARTIFACT_RUN_ID:'601',CLAIM_ARTIFACT_RECEIPT:'123'};
+    invoke('init',init);const next=JSON.parse(readFileSync(t.output));
+    assert.equal(next.orchestration.phase,'READY');assert.deepEqual(next.requestLedger,s.requestLedger);assert.equal(next.terminalReconciliations.length,1);
+  } finally {t.dispose();rmSync(privateDir,{recursive:true,force:true});}
+});
 
 test('actual existing CLI init/claim/page/ack persists full registry, prints exposure and never leaks cursor/key', () => {
   const t = temp(); const counter = join(t.local,'calls.txt'); const outputs = join(t.local,'outputs.txt');

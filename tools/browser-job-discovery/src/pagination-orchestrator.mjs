@@ -16,6 +16,57 @@ const stable = value => JSON.stringify(value, (_key, v) => v && typeof v === 'ob
 const compatiblePolicy = config => { const { maxRequests, maxCredits, ...policy } = config; return stable(policy); };
 const currentAttempts = state => state.requestLedger.filter(p => p.workflowRunId === state.orchestration.workflowRunId);
 const validCursor = value => typeof value === 'string' && !!value.trim() && value.length <= 4096 && !/[\p{C}]/u.test(value);
+function knownTerminalFailure(state) {
+  const run=state.orchestration,attempt=state.requestLedger?.[run?.attemptIndex],stats=attempt?.itemStats;
+  const reasons=new Set(['ITEM_NOT_OBJECT','POST_ID_MISSING','POST_ID_INVALID','POST_ID_URL_MISMATCH',
+    'POST_URL_INVALID_OR_UNSUPPORTED','POST_URL_MISSING','POST_TEXT_TOO_LARGE','POST_MAPPING_INVALID']);
+  return !!(run?.plan && run.config && attempt && Array.isArray(run.pages) && typeof run.logicalExecutionId==='string' &&
+    run.logicalExecutionId.length>0 && run.status==='STOPPED_TERMINAL' && run.stopReason==='NO_VALID_PROVIDER_ITEMS' &&
+    run.attemptIndex===state.requestLedger.length-1 && attempt.workflowRunId===run.workflowRunId &&
+    attempt.logicalExecutionId===run.logicalExecutionId && attempt.query===run.plan.query &&
+    attempt.allocation===run.plan.allocation && attempt.pageNumber===run.plan.pageNumber &&
+    attempt.startTime===run.config.startTime && attempt.endTime===run.config.endTime &&
+    (attempt.inputCursorFingerprint??attempt.inputCursor??null)===(run.plan.cursorHash??null) &&
+    attempt.outcome==='FAILED_OR_AMBIGUOUS' && attempt.actualRequests===1 &&
+    Number.isFinite(attempt.creditsDeducted) && attempt.creditsDeducted>=0 && attempt.creditsDeducted<=1 &&
+    (attempt.httpStatus===undefined || attempt.httpStatus===200) && stats?.outcome==='NO_VALID_ITEMS' &&
+    Number.isInteger(stats.totalItems) && stats.totalItems>0 && stats.totalItems<=200 && stats.acceptedItems===0 &&
+    stats.rejectedItems===stats.totalItems && Array.isArray(stats.rejectionReasons) && stats.rejectionReasons.length===stats.totalItems &&
+    Array.isArray(attempt.rejectionDiagnostics) && attempt.rejectionDiagnostics.length===stats.totalItems &&
+    stats.rejectionReasons.every((r,index)=>r.index===index && reasons.has(r.reason) &&
+      attempt.rejectionDiagnostics[index]?.index===index && attempt.rejectionDiagnostics[index].reason===r.reason &&
+      attempt.rejectionDiagnostics[index].pageNumber===attempt.pageNumber) &&
+    !run.pages.some(p=>p.workflowRunId===attempt.workflowRunId && p.query===attempt.query &&
+      p.allocation===attempt.allocation && p.pageNumber===attempt.pageNumber));
+}
+
+// Evidence is supplied by the trusted artifact-download/upload boundary, not by
+// provider content. A positive receipt alone is not enough. Historical counters,
+// outcome, rejection diagnostics and registry remain byte-for-byte equivalent.
+export function reconcileTerminalFailure(state, proof) {
+  const run=state.orchestration,attempt=state.requestLedger?.[run?.attemptIndex];
+  const positive=value=>/^[1-9]\d*$/u.test(String(value??''));
+  const name=typeof proof?.artifactName==='string' ? proof.artifactName.match(/^socialapis-page-([1-9]\d*)-([1-6])-result$/u) : null;
+  // A workflow slot is the ordinal reservation in that workflow, not the global
+  // ledger index or query page number (which resets for rotating/adaptive queries).
+  const slot=state.requestLedger?.slice(0,run?.attemptIndex+1).filter(a=>a.workflowRunId===run?.workflowRunId).length;
+  if (!['CLAIMED','TERMINAL_UNCONFIRMED'].includes(run?.phase) || !knownTerminalFailure(state) ||
+      !positive(proof?.artifactId) || !positive(proof?.claimArtifactId) || String(proof.artifactId)===String(proof.claimArtifactId) ||
+      proof.workflowRunId!==run.workflowRunId || proof.attemptIndex!==run.attemptIndex || proof.artifactKind!=='RESULT' ||
+      !['ACTIONS_RESULT','LOCAL_OBSERVED_RESULT_HASH'].includes(proof.provenance) ||
+      proof.provenance==='ACTIONS_RESULT' && !name || proof.artifactName!==undefined && (!name || name[1]!==run.workflowRunId || Number(name[2])!==slot) ||
+      proof.stateFingerprint!==fingerprint(state) ||
+      attempt.claimArtifactReceipt!==undefined && attempt.claimArtifactReceipt!==String(proof.claimArtifactId) ||
+      attempt.claimArtifactName!==undefined && attempt.claimArtifactName!==(proof.artifactName??'').replace(/-result$/u,'-claim'))
+    throw new Stop('TERMINAL_RECONCILIATION_EVIDENCE_INVALID');
+  state.terminalReconciliations??=[];
+  state.terminalReconciliations.push({version:1,workflowRunId:run.workflowRunId,logicalExecutionId:run.logicalExecutionId,
+    attemptIndex:run.attemptIndex,artifactId:String(proof.artifactId),claimArtifactId:String(proof.claimArtifactId),
+    artifactName:proof.artifactName,provenance:proof.provenance,stateFingerprint:proof.stateFingerprint,priorPhase:run.phase,
+    stopReason:run.stopReason,actualRequests:attempt.actualRequests,creditsDeducted:attempt.creditsDeducted});
+  run.phase='TERMINAL_RECONCILED';
+  return state;
+}
 function stopExecution(run, reason) {
   run.stopReason = reason;
   run.status = ['REQUEST_BUDGET', 'CREDIT_BUDGET', 'DAILY_REQUEST_BUDGET'].includes(reason) && run.continuation
@@ -99,7 +150,7 @@ export function beginExecution(state, input, workflowRunId, { productionGuard, r
       new Set(state.jobs.map(j => j.sourceIdentity)).size !== state.jobs.length) throw new Stop('INVALID_REPLAY_STORE');
   const previous = state.orchestration;
   if (['CLAIMED', 'IN_FLIGHT'].includes(previous?.phase)) throw new Stop('AMBIGUOUS_PAGE_NO_AUTOMATIC_REFETCH');
-  if (previous?.phase === 'COMPLETED_UNCONFIRMED') throw new Stop('PERSISTENCE_CONFIRMATION_REQUIRED');
+  if (['COMPLETED_UNCONFIRMED','TERMINAL_UNCONFIRMED'].includes(previous?.phase)) throw new Stop('PERSISTENCE_CONFIRMATION_REQUIRED');
   if (resumeContinuation) {
     if (!previous) throw new Stop('LEGACY_CONTINUATION_CURSOR_UNAVAILABLE');
     validateContinuation(previous, config, now);
@@ -139,9 +190,9 @@ export function workflowMetrics(state) {
   const knownRequests = attempts.reduce((sum, p) => sum + (p.actualRequests ?? 0), 0);
   const scopedOpportunities=new Set(pages.flatMap(p=>p.opportunityIds??[]));
   const logicalAttempts = [...run.pages]; const pending = state.requestLedger[run.attemptIndex];
-  if (pending && ['CLAIMED','IN_FLIGHT'].includes(run.phase) && !run.pages.some(p => p.workflowRunId === pending.workflowRunId && p.query === pending.query && p.allocation === pending.allocation && p.pageNumber === pending.pageNumber)) logicalAttempts.push(pending);
+  if (pending && ['CLAIMED','IN_FLIGHT','TERMINAL_UNCONFIRMED','TERMINAL_RECONCILED'].includes(run.phase) && !run.pages.some(p => p.workflowRunId === pending.workflowRunId && p.query === pending.query && p.allocation === pending.allocation && p.pageNumber === pending.pageNumber)) logicalAttempts.push(pending);
   return { workflowRunId: run.workflowRunId, logicalExecutionId: run.logicalExecutionId,
-    status: run.status, continuationAvailable: !!run.continuation && !['CLAIMED','IN_FLIGHT'].includes(run.phase),
+    status: run.status, continuationAvailable: run.status!=='STOPPED_TERMINAL' && !!run.continuation && !['CLAIMED','IN_FLIGHT'].includes(run.phase),
     profileVersion:run.config.profile.technologyProfile?.version??'legacy-operator-profile',
     profileFingerprint:run.config.profile.technologyProfile?.fingerprint??fingerprint(run.config.profile),
     canonicalOpportunities:scopedOpportunities.size,newlyDiscoveredOpportunities:pages.reduce((s,p)=>s+(p.newlyDiscoveredOpportunities??0),0),
@@ -168,7 +219,7 @@ export function workflowMetrics(state) {
 export function claimPage(state, now = new Date(), { productionGuard } = {}) {
   const run = state.orchestration; const config = run.config;
   if (['CLAIMED', 'IN_FLIGHT'].includes(run.phase)) throw new Stop('AMBIGUOUS_PAGE_NO_AUTOMATIC_REFETCH');
-  if (run.phase === 'COMPLETED_UNCONFIRMED') throw new Stop('PERSISTENCE_CONFIRMATION_REQUIRED');
+  if (['COMPLETED_UNCONFIRMED','TERMINAL_UNCONFIRMED'].includes(run.phase)) throw new Stop('PERSISTENCE_CONFIRMATION_REQUIRED');
   if (run.stopReason) return false;
   if (config.mode === 'production') {
     if (state.requestLedger.filter(p => p.day === calendarDay(now)).length >= 6) { stopExecution(run, 'DAILY_REQUEST_BUDGET'); return false; }
@@ -239,12 +290,14 @@ function chooseNext(state, page, nextCursor, secret, now) {
 // Caller must upload the CLAIMED state before calling this function, then upload
 // the completed state before acknowledgePersistence. No in-process retry exists.
 export async function performPage(state, { transport, now = new Date(), receipt, enabled, freePlanConfirmed, noCashConfirmed,
-  secret = process.env.SOCIALAPIS_API_KEY, timeoutMs = 20_000 } = {}) {
+  secret = process.env.SOCIALAPIS_API_KEY, timeoutMs = 20_000, claimArtifactName } = {}) {
   const run = state.orchestration;
   if (run.phase !== 'CLAIMED' || !/^[1-9]\d*$/u.test(String(receipt ?? ''))) throw new Stop('DURABLE_CLAIM_RECEIPT_REQUIRED');
   const attempt = state.requestLedger[run.attemptIndex];
   if (attempt.day !== calendarDay(now)) throw new Stop('RESERVATION_DAY_CHANGED_NO_REQUEST');
   run.phase = 'IN_FLIGHT'; // Synchronous in-process claim; durable file is still CLAIMED.
+  attempt.claimArtifactReceipt=String(receipt);
+  if(claimArtifactName!==undefined)attempt.claimArtifactName=claimArtifactName;
   let adapter;
   try {
     cursorKey(secret); // Validate codec before any possible HTTP side effect.
@@ -331,21 +384,24 @@ export async function performPage(state, { transport, now = new Date(), receipt,
   } catch (error) {
     attempt.actualRequests = adapter?.requestStats.requestCount ?? 0;
     attempt.creditsDeducted = adapter?.requestStats.creditsDeducted ?? null;
+    if(adapter?.requestStats.httpStatus!==undefined)attempt.httpStatus=adapter.requestStats.httpStatus;
     attempt.outcome = 'FAILED_OR_AMBIGUOUS'; run.stopReason = error instanceof Stop ? error.code : 'PAGE_FAILED';
     if (adapter?.itemStats) {
       attempt.itemStats = adapter.itemStats;
       attempt.rejectionDiagnostics = (adapter.rejectionDiagnostics ?? []).map(r => ({ ...r, pageNumber: attempt.pageNumber }));
     }
-    // Remain CLAIMED even for a known provider failure: no automatic refetch.
-    run.phase = 'CLAIMED';
     run.status = 'STOPPED_TERMINAL';
+    // Only complete, schema-validated all-invalid responses with verified cost
+    // qualify. Timeouts, unknown cost and all other failures remain ambiguous.
+    run.phase = knownTerminalFailure(state) ? 'TERMINAL_UNCONFIRMED' : 'CLAIMED';
   }
   state.workflowMetrics = workflowMetrics(state);
   return state;
 }
-export function acknowledgePersistence(state, receipt) {
+export function acknowledgePersistence(state, receipt, resultEvidence) {
   if (!/^[1-9]\d*$/u.test(String(receipt ?? ''))) throw new Stop('DURABLE_RESULT_RECEIPT_REQUIRED');
   const run = state.orchestration;
+  if(run?.phase==='TERMINAL_UNCONFIRMED')return reconcileTerminalFailure(state,{...resultEvidence,artifactId:String(receipt)});
   if (['CLAIMED', 'IN_FLIGHT'].includes(run?.phase)) throw new Stop('AMBIGUOUS_PAGE_NO_AUTOMATIC_REFETCH');
   if (run?.phase === 'COMPLETED_UNCONFIRMED') {
     run.phase = 'READY'; run.pages.at(-1).outcome = 'CONFIRMED';

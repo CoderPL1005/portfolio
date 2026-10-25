@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { beginExecution, claimPage, performPage, acknowledgePersistence, calendarDay, configuration, workflowMetrics } from '../src/pagination-orchestrator.mjs';
+import { beginExecution, claimPage, performPage, acknowledgePersistence, calendarDay, configuration, workflowMetrics, reconcileTerminalFailure } from '../src/pagination-orchestrator.mjs';
 import { SocialApisCaptureDiscoveryAdapter } from '../src/socialapis-adapter.mjs';
 import { normalizeSocialApisItem } from '../src/socialapis-live-smoke.mjs';
 
@@ -376,8 +376,104 @@ test('mismatch diagnostics isolate real mismatches, opaque ID aliases and malfor
 test('all-invalid provider page keeps rejection diagnostics in durable failed attempt rather than losing evidence', async () => {
   const s=state(); const bad=item('4201'); bad.basic_info.url='https://facebook.com/fixture/posts/4202';
   await page(s,payload([bad]));
-  assert.equal(s.orchestration.phase,'CLAIMED'); assert.equal(s.orchestration.stopReason,'NO_VALID_PROVIDER_ITEMS');
+  assert.equal(s.orchestration.phase,'TERMINAL_UNCONFIRMED'); assert.equal(s.orchestration.stopReason,'NO_VALID_PROVIDER_ITEMS');
   const attempt=s.requestLedger.at(-1); assert.equal(attempt.itemStats.rejectedItems,1);
   assert.equal(attempt.rejectionDiagnostics[0].pageNumber,1); assert.equal(attempt.rejectionDiagnostics[0].reason,'POST_ID_URL_MISMATCH');
   assert.equal(s.jobs.length,0);
+});
+
+const terminalProof = (s, overrides={}) => ({artifactId:'456',claimArtifactId:'123',workflowRunId:s.orchestration.workflowRunId,
+  attemptIndex:s.orchestration.attemptIndex,artifactKind:'RESULT',provenance:'ACTIONS_RESULT',
+  artifactName:`socialapis-page-${s.orchestration.workflowRunId}-1-result`,
+  stateFingerprint:createHash('sha256').update(JSON.stringify(s)).digest('hex'),...overrides});
+
+test('known terminal result reconciles with bound result evidence without rewriting ledger, registry or refetching',async()=>{
+  const historical=state().jobs; const s=state();const bad=item('5101');bad.basic_info.url='https://facebook.com/fixture/posts/pfbidUnverified';
+  const result=await page(s,payload(Array.from({length:5},()=>structuredClone(bad))));
+  assert.equal(result.calls,1);const ledger=structuredClone(s.requestLedger),jobs=structuredClone(s.jobs);
+  assert.throws(()=>beginExecution(structuredClone(s),config,'200'),/PERSISTENCE_CONFIRMATION_REQUIRED/u);
+  const proof=terminalProof(s);reconcileTerminalFailure(s,proof);
+  assert.equal(s.orchestration.phase,'TERMINAL_RECONCILED');assert.equal(s.orchestration.status,'STOPPED_TERMINAL');
+  assert.equal(s.orchestration.stopReason,'NO_VALID_PROVIDER_ITEMS');assert.deepEqual(s.requestLedger,ledger);assert.deepEqual(s.jobs,jobs);
+  assert.deepEqual(jobs,historical);assert.equal(s.requestLedger.at(-1).rejectionDiagnostics.length,5);
+  assert.equal(workflowMetrics(s).actualRequests,1);assert.equal(workflowMetrics(s).totalDeductedCredits,1);
+  assert.equal(workflowMetrics(s).logicalExecution.actualRequests,1);assert.equal(claimPage(s,now),false);
+  await assert.rejects(()=>performPage(s,{receipt:'123',transport:()=>{throw Error('MUST_NOT_REFETCH');}}),/DURABLE_CLAIM_RECEIPT_REQUIRED/u);
+  assert.equal(s.terminalReconciliations[0].artifactId,'456');
+  beginExecution(s,config,'200');assert.equal(s.orchestration.phase,'READY');assert.deepEqual(s.requestLedger,ledger);
+});
+
+test('legacy CLAIMED all-invalid result can reconcile without inventing missing HTTP metadata',async()=>{
+  const s=state();const bad=item('5151');bad.basic_info.url='https://facebook.com/fixture/posts/pfbidUnknown';await page(s,payload([bad]));
+  s.orchestration.phase='CLAIMED';delete s.requestLedger.at(-1).httpStatus;delete s.requestLedger.at(-1).claimArtifactReceipt;
+  const before=structuredClone(s.requestLedger);
+  reconcileTerminalFailure(s,terminalProof(s));assert.equal(s.orchestration.phase,'TERMINAL_RECONCILED');
+  assert.deepEqual(s.requestLedger,before);assert.equal(s.requestLedger.at(-1).httpStatus,undefined);
+});
+
+test('legacy result slot counts attempts in this workflow, not the global ledger index',async()=>{
+  const s=state();
+  for(let i=0;i<6;i++)s.requestLedger.push({workflowRunId:String(90+i),actualRequests:1,creditsDeducted:1});
+  const bad=item('5161');bad.basic_info.url='https://facebook.com/fixture/posts/pfbidUnknown';await page(s,payload([bad]));
+  s.orchestration.phase='CLAIMED';delete s.requestLedger.at(-1).claimArtifactName;delete s.requestLedger.at(-1).claimArtifactReceipt;
+  assert.equal(s.orchestration.attemptIndex,6);
+  for(const provenance of ['ACTIONS_RESULT','LOCAL_OBSERVED_RESULT_HASH']) {
+    const copy=structuredClone(s);
+    assert.throws(()=>reconcileTerminalFailure(copy,terminalProof(copy,{provenance,artifactName:'socialapis-page-100-2-result'})),/RECONCILIATION/u);
+    assert.deepEqual(copy,s);
+  }
+  const ledger=structuredClone(s.requestLedger);
+  reconcileTerminalFailure(s,terminalProof(s,{artifactName:'socialapis-page-100-1-result'}));
+  assert.equal(s.orchestration.phase,'TERMINAL_RECONCILED');assert.deepEqual(s.requestLedger,ledger);
+});
+
+test('legacy rotating result requires slot two even though its query page number is one',async()=>{
+  const s=state({rotatingQuery:'Python Backend Fresher Hanoi'});
+  await page(s,payload(['5170']));
+  assert.equal(s.orchestration.plan.allocation,'ROTATING');assert.equal(s.orchestration.plan.pageNumber,1);
+  const bad=item('5171');bad.basic_info.url='https://facebook.com/fixture/posts/pfbidUnknown';await page(s,payload([bad]));
+  s.orchestration.phase='CLAIMED';delete s.requestLedger.at(-1).claimArtifactName;delete s.requestLedger.at(-1).claimArtifactReceipt;
+  const copy=structuredClone(s);
+  assert.throws(()=>reconcileTerminalFailure(copy,terminalProof(copy,{artifactName:'socialapis-page-100-1-result'})),/RECONCILIATION/u);
+  assert.deepEqual(copy,s);
+  const ledger=structuredClone(s.requestLedger),jobs=structuredClone(s.jobs);
+  reconcileTerminalFailure(s,terminalProof(s,{artifactName:'socialapis-page-100-2-result'}));
+  assert.equal(s.orchestration.phase,'TERMINAL_RECONCILED');assert.deepEqual(s.requestLedger,ledger);assert.deepEqual(s.jobs,jobs);
+});
+
+test('terminal reconciliation rejects missing, claim-only, wrong-run and stale result evidence',async()=>{
+  const s=state();const bad=item('5201');bad.basic_info.url='https://facebook.com/fixture/posts/5202';await page(s,payload([bad]));
+  for(const patch of [{artifactId:''},{claimArtifactId:'456'},{workflowRunId:'999'},{attemptIndex:99},{artifactKind:'CLAIM'},{artifactName:undefined},
+    {artifactName:'socialapis-page-100-1-claim'},{artifactName:'socialapis-page-999-1-result'},{stateFingerprint:'0'.repeat(64)}]) {
+    const copy=structuredClone(s);assert.throws(()=>reconcileTerminalFailure(copy,terminalProof(copy,patch)),/RECONCILIATION/u);assert.deepEqual(copy,s);
+  }
+});
+
+test('numeric/PFBID aliases remain rejected, exact IDs stay unverified candidates and true URL conflicts stay rejected',()=>{
+  const numeric=item('5401');numeric.basic_info.url='https://www.facebook.com/fixture/posts/pfbidUnknownAlias';
+  const conflicting={post_id:'5402',text:'Synthetic recruitment',url:'https://www.facebook.com/fixture/posts/5402',post_url:'https://www.facebook.com/fixture/posts/5403'};
+  const unsupported=item('5404');unsupported.basic_info.url='https://www.facebook.com/search/posts/?q=Backend';
+  const opaque=item('pfbidSupported');
+  const adapter=new SocialApisCaptureDiscoveryAdapter(payload([numeric,conflicting,unsupported,opaque]));
+  assert.equal(adapter.itemStats.acceptedItems,1);assert.equal(adapter.itemStats.rejectedItems,3);
+  assert.deepEqual(adapter.itemStats.rejectionReasons.map(r=>r.reason),['POST_ID_URL_MISMATCH','POST_ID_URL_MISMATCH','POST_URL_INVALID_OR_UNSUPPORTED']);
+  assert.equal(adapter.records.values().next().value.id,'pfbidSupported');
+  assert.equal(normalizeSocialApisItem(opaque).permalinkVerified,false);
+});
+
+test('known terminal ACK needs result provenance; the same bound claim name cannot acknowledge another slot',async()=>{
+  const s=state();const bad=item('5501');bad.basic_info.url='https://facebook.com/fixture/posts/5502';await page(s,payload([bad]));
+  s.requestLedger.at(-1).claimArtifactName='socialapis-page-100-1-claim';
+  assert.throws(()=>acknowledgePersistence(structuredClone(s),'456'),/RECONCILIATION/u);
+  assert.throws(()=>acknowledgePersistence(structuredClone(s),'456',terminalProof(s,{artifactName:'socialapis-page-100-2-result'})),/RECONCILIATION/u);
+  acknowledgePersistence(s,'456',terminalProof(s));assert.equal(s.orchestration.phase,'TERMINAL_RECONCILED');
+});
+
+test('unknown charge, timeout, in-flight and incomplete diagnostics remain ambiguous even with a result receipt',async()=>{
+  const original=state();const bad=item('5301');bad.basic_info.url='https://facebook.com/fixture/posts/5302';await page(original,payload([bad]));
+  for(const change of [s=>{s.requestLedger.at(-1).creditsDeducted=null;},s=>{s.orchestration.stopReason='DISCOVERY_TIMEOUT';},
+    s=>{s.orchestration.phase='IN_FLIGHT';},s=>{s.requestLedger.at(-1).actualRequests=null;},s=>{s.requestLedger.at(-1).rejectionDiagnostics=[];}]) {
+    const s=structuredClone(original);change(s);const before=structuredClone(s);
+    assert.throws(()=>reconcileTerminalFailure(s,terminalProof(s)),/RECONCILIATION/u);assert.deepEqual(s,before);
+  }
 });

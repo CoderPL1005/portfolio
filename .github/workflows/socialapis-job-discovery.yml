@@ -23,6 +23,10 @@ on:
         description: Resume saved core cursor with matching query/date/profile; never fall back to page 1
         type: boolean
         default: false
+      reconcile_terminal_failure:
+        description: Explicitly reconcile a complete known terminal result before starting a NEW logical execution; never refetch the old attempt
+        type: boolean
+        default: false
       query:
         description: Optional query override; leave empty with policy.planQueries and Portfolio snapshot
         type: string
@@ -105,6 +109,8 @@ jobs:
             if (!state || state.expired) throw new Error('CHECKPOINT_MISSING_OR_EXPIRED_RESTORE_BACKUP_BEFORE_ANY_PROVIDER_REQUEST');
             core.setOutput('run_id', String(previous.id)); core.setOutput('artifact_name', state.name);
             core.setOutput('artifact_id', String(state.id)); core.setOutput('initialize', 'false');
+            const claim = state.name.endsWith('-result') ? artifacts.find(a => a.name === state.name.replace(/-result$/, '-claim')) : null;
+            core.setOutput('claim_artifact_id', claim ? String(claim.id) : '');
       - name: Restore prior-run state (never runner-local cache)
         if: steps.checkpoint.outputs.initialize != 'true'
         uses: actions/download-artifact@v4
@@ -117,6 +123,10 @@ jobs:
         env:
           INITIALIZE_STATE: ${{ steps.checkpoint.outputs.initialize }}
           ARTIFACT_RECEIPT: ${{ steps.checkpoint.outputs.artifact_id }}
+          ARTIFACT_NAME: ${{ steps.checkpoint.outputs.artifact_name }}
+          ARTIFACT_RUN_ID: ${{ steps.checkpoint.outputs.run_id }}
+          CLAIM_ARTIFACT_RECEIPT: ${{ steps.checkpoint.outputs.claim_artifact_id }}
+          RECONCILE_TERMINAL_FAILURE: ${{ inputs.reconcile_terminal_failure }}
           DISCOVERY_QUERY: ${{ inputs.query }}
           DISCOVERY_START_TIME: ${{ inputs.start_time }}
           DISCOVERY_END_TIME: ${{ inputs.end_time }}

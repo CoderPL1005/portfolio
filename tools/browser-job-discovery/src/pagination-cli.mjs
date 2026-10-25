@@ -1,15 +1,56 @@
 import { mkdir, readFile, stat, writeFile, rename, unlink, appendFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { resolve, relative, isAbsolute } from 'node:path';
 import { Stop } from './core.mjs';
-import { beginExecution, claimPage, performPage, acknowledgePersistence, workflowMetrics } from './pagination-orchestrator.mjs';
+import { beginExecution, claimPage, performPage, acknowledgePersistence, workflowMetrics, reconcileTerminalFailure } from './pagination-orchestrator.mjs';
 import { resolveDiscoveryPolicy, planFacebookQueries } from './candidate-technology-profile.mjs';
+
+const hash=value=>createHash('sha256').update(value).digest('hex');
+function actionsResultEvidence(state) {
+  return {artifactKind:'RESULT',provenance:'ACTIONS_RESULT',artifactName:process.env.ARTIFACT_NAME,
+    workflowRunId:process.env.ARTIFACT_RUN_ID,claimArtifactId:process.env.CLAIM_ARTIFACT_RECEIPT,
+    attemptIndex:state.orchestration.attemptIndex,stateFingerprint:hash(JSON.stringify(state))};
+}
+// Offline recovery uses an immutable source + operator-provided observed result
+// metadata. It never downloads, overwrites evidence, or performs a provider call.
+async function reconcileLocalResult() {
+  const source=process.env.DISCOVERY_RECONCILE_SOURCE,metadata=process.env.DISCOVERY_RECONCILE_METADATA,output=process.env.DISCOVERY_RECONCILE_OUTPUT;
+  if(!source || !metadata || !output)throw new Stop('RECONCILIATION_FILES_REQUIRED');
+  const target=resolve(output),repo=fileURLToPath(new URL('../../../',import.meta.url)),inside=relative(repo,target);
+  if(target===resolve(source) || target===resolve(metadata) || !inside.startsWith('..') && !isAbsolute(inside))throw new Stop('PRIVATE_RECOVERY_COPY_REQUIRED');
+  if((await stat(source)).size>1_048_576 || (await stat(metadata)).size>65_536)throw new Stop('RECONCILIATION_EVIDENCE_TOO_LARGE');
+  const bytes=await readFile(source),observed=JSON.parse(await readFile(metadata,'utf8')),state=JSON.parse(bytes.toString('utf8'));
+  const run=state.orchestration,attempt=state.requestLedger?.[run?.attemptIndex],values=observed.effectiveValuesFromPersistedState;
+  if(observed.metadataKind!=='OBSERVED_FROM_PERSISTED_RESULT_NOT_DISPATCH_INPUTS' || observed.resultUploaded!==true ||
+    observed.stateJsonSHA256!==hash(bytes) || observed.workflowRunId!==run?.workflowRunId ||
+    !observed.observedRun || Object.entries(observed.observedRun).some(([key,value])=>run[key]!==value) ||
+    !values || Object.entries(values).some(([key,value])=>attempt?.[key]!==value) ||
+    JSON.stringify(observed.itemStats)!==JSON.stringify(attempt?.itemStats))throw new Stop('TERMINAL_RECONCILIATION_EVIDENCE_INVALID');
+  reconcileTerminalFailure(state,{artifactId:observed.resultArtifactId,claimArtifactId:observed.claimArtifactId,
+    workflowRunId:observed.workflowRunId,attemptIndex:run.attemptIndex,artifactKind:'RESULT',provenance:'LOCAL_OBSERVED_RESULT_HASH',
+    stateFingerprint:hash(JSON.stringify(state))});
+  state.workflowMetrics=workflowMetrics(state);
+  // Exclusive create also rejects aliases/hardlinks to either existing source.
+  const json=JSON.stringify(state,null,2)+'\n';
+  if(Buffer.byteLength(json)>1_048_576)throw new Stop('CHECKPOINT_CAPACITY_REACHED');
+  await writeFile(target,json,{flag:'wx',mode:0o600});
+  console.log(JSON.stringify({offlineRecovery:true,workflowRunId:run.workflowRunId,phase:run.phase,stopReason:run.stopReason,
+    actualRequests:attempt.actualRequests,creditsDeducted:attempt.creditsDeducted,rejectedItems:attempt.itemStats.rejectedItems,
+    registryJobs:state.jobs.length,providerRequestsMade:0,originalEvidenceModified:false}));
+}
+
+function dateSelection(name,policyValue) {
+  const value=process.env[name],inputState=value===undefined?'OMITTED':value===''?'BLANK':'PROVIDED';
+  return {value:inputState==='PROVIDED'?value:policyValue??undefined,inputState,
+    source:inputState==='PROVIDED'?'ENV_INPUT':policyValue!==undefined && policyValue!==null?'POLICY':'UNSET'};
+}
 
 // Existing CLI entrypoint; action commands make the artifact/HTTP boundary explicit.
 export async function paginationCli(args) {
   const action = args[args.indexOf('--orchestrate') + 1];
-  if (args.length !== 2 || !['init', 'claim', 'page', 'ack', 'summary'].includes(action)) throw new Stop('INVALID_ORCHESTRATION_COMMAND');
+  if (args.length !== 2 || !['init', 'claim', 'page', 'ack', 'summary','reconcile'].includes(action)) throw new Stop('INVALID_ORCHESTRATION_COMMAND');
+  if(action==='reconcile')return reconcileLocalResult();
   const directory = fileURLToPath(new URL('../.debug/', import.meta.url));
   const output = resolve(process.env.DISCOVERY_STATE_FILE ?? fileURLToPath(new URL('../.debug/socialapis-discovery.json', import.meta.url)));
   const local = relative(directory, output);
@@ -30,17 +71,23 @@ export async function paginationCli(args) {
     // Downloading this exact result artifact is proof of persistence. A claim
     // artifact is NEVER acknowledged, even if the prior workflow reported PASS.
     if (state.orchestration?.phase === 'COMPLETED_UNCONFIRMED') acknowledgePersistence(state, receipt);
+    if(process.env.RECONCILE_TERMINAL_FAILURE!==undefined && !['true','false',''].includes(process.env.RECONCILE_TERMINAL_FAILURE))throw new Stop('INVALID_RECONCILIATION_OPTION');
+    if(process.env.RECONCILE_TERMINAL_FAILURE==='true')reconcileTerminalFailure(state,{...actionsResultEvidence(state),artifactId:receipt});
     const policy = JSON.parse(process.env.DISCOVERY_POLICY ?? '{}');
     // The manual runner deliberately cannot enable unattended production mode.
     if (policy.mode && policy.mode !== 'development') throw new Stop('MONTHLY_FREE_BALANCE_UNVERIFIED_SCHEDULE_DISABLED');
     const resumeContinuation = process.env.RESUME_CONTINUATION === 'true';
     if (resumeContinuation && process.env.INITIALIZE_STATE === 'true') throw new Stop('CANNOT_INITIALIZE_WHILE_RESUMING');
     const resolved=resolveDiscoveryPolicy(policy,process.env.DISCOVERY_QUERY,state.discoveryYieldHistory??[],{resume:resumeContinuation,previous:state.orchestration});
+    const start=dateSelection('DISCOVERY_START_TIME',resolved.startTime),end=dateSelection('DISCOVERY_END_TIME',resolved.endTime);
     beginExecution(state, { ...resolved,
-      startTime: process.env.DISCOVERY_START_TIME || undefined, endTime: process.env.DISCOVERY_END_TIME || undefined,
+      startTime:start.value,endTime:end.value,
       maxRequests: process.env.DISCOVERY_MAX_REQUESTS ?? '1', maxCredits: process.env.DISCOVERY_MAX_CREDITS ?? '1' }, process.env.GITHUB_RUN_ID ?? 'local', { resumeContinuation });
+    state.orchestration.dateFilterAudit={startTime:state.orchestration.config.startTime,endTime:state.orchestration.config.endTime,
+      startInputState:start.inputState,endInputState:end.inputState,startSource:start.source,endSource:end.source,providerFreshnessVerified:false};
     if(resolved.profile?.technologyProfile)state.queryPlan={version:'facebook-query-v1',candidates:planFacebookQueries(resolved.profile.technologyProfile,state.discoveryYieldHistory??[],resolved.targetJobPreferences)};
     console.log(JSON.stringify({ maximumHttpRequests: state.orchestration.config.maxRequests,
+      dateFilters:state.orchestration.dateFilterAudit,
       maximumPermittedDeductedCredits: state.orchestration.config.maxCredits,
       maximumContractCreditExposure: Math.min(state.orchestration.config.maxRequests, state.orchestration.config.maxCredits),
       warning: 'Free credits only; provider overcharge cannot be undone; operator must verify no auto-top-up. No schedule.' }));
@@ -50,10 +97,11 @@ export async function paginationCli(args) {
   } else if (action === 'page') {
     if (process.env.SOCIALAPIS_PUBLIC_ARTIFACT_CONSENT !== 'true') throw new Stop('PUBLIC_ARTIFACT_CONSENT_REQUIRED');
     await performPage(state, { receipt, enabled: process.env.SOCIALAPIS_LIVE_ENABLED === 'true',
+      claimArtifactName:process.env.ARTIFACT_NAME,
       freePlanConfirmed: process.env.SOCIALAPIS_FREE_PLAN_CONFIRMED === 'true', noCashConfirmed: process.env.SOCIALAPIS_NO_CASH_CONFIRMED === 'true' });
   } else if (action === 'ack') {
     // Result has already been uploaded even when HTTP/parsing failed.
-    acknowledgePersistence(state, receipt);
+    acknowledgePersistence(state, receipt, actionsResultEvidence(state));
   }
   state.workflowMetrics = workflowMetrics(state);
   await mkdir(directory, { recursive: true });

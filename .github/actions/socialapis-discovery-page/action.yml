@@ -29,6 +29,7 @@ runs:
       working-directory: tools/browser-job-discovery
       env:
         ARTIFACT_RECEIPT: ${{ steps.reservation.outputs.artifact-id }}
+        ARTIFACT_NAME: socialapis-page-${{ github.run_id }}-${{ inputs.slot }}-claim
         SOCIALAPIS_API_KEY: ${{ inputs.api_key }}
         SOCIALAPIS_LIVE_ENABLED: 'true'
         SOCIALAPIS_FREE_PLAN_CONFIRMED: 'true'
@@ -50,4 +51,7 @@ runs:
       working-directory: tools/browser-job-discovery
       env:
         ARTIFACT_RECEIPT: ${{ steps.result.outputs.artifact-id }}
+        ARTIFACT_NAME: socialapis-page-${{ github.run_id }}-${{ inputs.slot }}-result
+        ARTIFACT_RUN_ID: ${{ github.run_id }}
+        CLAIM_ARTIFACT_RECEIPT: ${{ steps.reservation.outputs.artifact-id }}
       run: node src/cli.mjs --orchestrate ack
