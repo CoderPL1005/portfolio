@@ -1,0 +1,6 @@
+ONE_SHOT_DEMO_ARM_V1
+
+Adding this file to main triggers the single 2026-10-26 SocialAPIs demo.
+Only commit/push this file after verifying available FREE credit, disabled
+paid top-ups, configured GitHub/Render keys, and the infrastructure tests.
+Do not re-run a failed workflow. There is no schedule.
