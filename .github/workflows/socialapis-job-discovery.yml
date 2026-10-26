@@ -86,6 +86,8 @@ jobs:
           node-version: 22.12.0
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Offline unit and configuration tests (no provider secret)
+        env:
+          DISCOVERY_AUTO_ADMIN_SYNC: 'false'
         run: npm test
       - name: Validate development safeguards and locate previous checkpoint
         id: checkpoint
