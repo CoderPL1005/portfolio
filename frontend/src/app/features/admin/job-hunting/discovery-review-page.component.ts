@@ -3,6 +3,7 @@ import { DatePipe, JsonPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { combineLatest } from 'rxjs';
 import { JobHuntingService } from './job-hunting.service';
 import { DiscoveryReviewDetail, DiscoveryReviewList, DiscoveryQualityReport, ReviewHistory, HumanReviewWrite } from './discovery-review.models';
 import { DiscoveryQualityComponent } from './discovery-quality.component';
@@ -39,6 +40,7 @@ import { safeAdminError } from '../shared/admin-api';
           @for(s of d.item.targetMatching.evidenceSnippets; track $index){<blockquote class="border-l-2 pl-3">{{s}}</blockquote>}
           <p>Source warnings: {{d.item.sourceWarnings.join(', ') || 'Không'}} · Cùng nội dung: {{d.duplicateCount}}</p>
           <p>Thiếu/chưa rõ: {{d.item.missingFields.join(', ') || 'Không ghi nhận'}}</p>
+          <p>Freshness: {{d.item.publishedAt ? 'UNVERIFIED_PROVIDER_TIMESTAMP' : 'UNKNOWN'}} · Import: STORED · Phát hiện: {{d.item.evaluatedAt | date:'medium'}}</p>
           <details class="technical"><summary>Technical Details</summary><p>Run {{d.runId}} · trang {{d.pageNumber}} · item {{d.item.itemIndex}}</p><p>{{d.query}} · đồng bộ {{d.ingestedAt | date:'medium'}}</p>
             <p>Provider ID: {{d.item.providerPostId ?? 'Thiếu'}} · Company verification: {{d.item.verificationStatus}}</p>
             <pre class="overflow-auto whitespace-pre-wrap">{{d.item.extracted | json}}</pre>
@@ -82,7 +84,7 @@ import { safeAdminError } from '../shared/admin-api';
         </section>
         @if(list(); as data){
           <p role="status">Tập đang lọc — Tổng {{data.counts.total}} · Valid {{data.counts.valid}} · Invalid {{data.counts.invalid}} · Needs review {{data.counts.needsReview}} · Target {{data.counts.targetMatch}} · Identity warnings {{data.counts.identityWarnings}} · Duplicate items {{data.counts.duplicateItems}}</p>
-          <p class="muted">Ưu tiên TARGET_MATCH chưa review. Giữ cả INVALID, NOT_MATCHED, malformed và duplicate.</p>
+          <p class="muted">Ưu tiên TARGET_MATCH chưa review. Giữ cả INVALID, NOT_MATCHED, malformed và duplicate. Import: STORED. Ngày UNKNOWN không chứng minh bài còn tuyển.</p>
           <div class="candidate-list"><table class="w-full text-left"><thead><tr><th>Cơ hội / nguồn</th><th>Thời gian</th><th>Content / Target / Human</th><th>Reasons / warnings</th></tr></thead><tbody>
             @for(d of data.results.items; track d.id){<tr><td><small>{{text(d.item.extracted['company']) || 'Chưa xác định công ty'}}</small><a [routerLink]="['/admin/job-hunting/discovery',d.id]">{{title(d.item.extracted)}}</a><p>{{text(d.item.extracted['location']) || 'Chưa rõ địa điểm'}} · {{seniority(d)}}</p><p>{{text(d.item.extracted['technologies']) || 'Chưa rõ công nghệ'}}</p><small>Run {{d.runId}} / {{d.pageNumber}} / {{d.item.itemIndex}}</small></td><td><small>Ngày đăng</small><p>{{d.item.publishedAt ? (d.item.publishedAt | date:'short') : 'UNKNOWN'}}</p><small>Thu thập</small><p>{{d.item.evaluatedAt | date:'short'}}</p></td><td><span [class.target]="d.item.targetMatching.status==='TARGET_MATCH'">{{d.item.targetMatching.status}}</span><span>{{d.item.contentValidity.status}}</span><strong>{{d.humanReview?.status ?? 'UNREVIEWED'}}</strong></td><td>{{d.item.contentValidity.reasonCodes.join(', ')}}<br />{{d.item.sourceWarnings.join(', ')}} @if(d.duplicateCount > 1){<span> · {{d.duplicateCount}} cùng nội dung</span>}</td></tr>}
           </tbody></table></div>
@@ -122,10 +124,17 @@ export class DiscoveryReviewPageComponent {
   loadHistory(page:number){const d=this.detail();if(!d || this.historyLoading())return;this.historyLoading.set(true);
     const request=this.requestNumber;
     this.api.discoveryHistory(d.id,page).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({next:h=>{this.historyLoading.set(false);if(request===this.requestNumber)this.history.set(h);},error:e=>{this.historyLoading.set(false);if(request===this.requestNumber)this.error.set(safeAdminError(e));}});}
-  loadMetrics(){if(this.metricsLoading())return;this.metricsLoading.set(true);this.metrics.set(null);
-    this.api.discoveryMetrics(this.runId.trim()||undefined).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({next:m=>{this.metrics.set(m);this.metricsLoading.set(false);},error:e=>{this.error.set(safeAdminError(e));this.metricsLoading.set(false);}});}
+  private metricsRequest = 0; private metricsRequested = false;
+  loadMetrics(){if(this.metricsLoading())return;this.metricsRequested=true;const request=++this.metricsRequest;
+    this.metricsLoading.set(true);this.metrics.set(null);
+    this.api.discoveryMetrics(this.runId.trim()||undefined).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({next:m=>{if(request===this.metricsRequest){this.metrics.set(m);this.metricsLoading.set(false);}},error:e=>{if(request===this.metricsRequest){this.error.set(safeAdminError(e));this.metricsLoading.set(false);}}});}
   private requestNumber = 0;
-  constructor() { this.route.paramMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => this.load()); }
+  constructor() { combineLatest([this.route.paramMap,this.route.queryParamMap]).pipe(takeUntilDestroyed(this.destroyRef)).subscribe(([,query]) => {
+    this.runId = query.get('runId') ?? ''; this.page=1;
+    this.list.set(null);
+    this.metricsRequest++;this.metrics.set(null);this.metricsLoading.set(false);
+    this.load();if(this.metricsRequested)this.loadMetrics();
+  }); }
   filter() { this.page = 1; this.load(); }
   changePage(delta: number) { this.page += delta; this.load(); }
   load() {

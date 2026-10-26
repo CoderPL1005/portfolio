@@ -216,11 +216,36 @@ export function workflowMetrics(state) {
       actualRequests: logicalAttempts.some(p => p.actualRequests === null) ? null : logicalAttempts.reduce((sum,p) => sum+(p.actualRequests ?? 0),0),
       creditsDeducted: logicalAttempts.some(p => p.creditsDeducted === null) ? null : logicalAttempts.reduce((sum,p) => sum+(p.creditsDeducted ?? 0),0) } };
 }
+export const accountingFingerprint = ledger => digest(JSON.stringify(ledger.map(a => ({workflowRunId:a.workflowRunId,
+  logicalExecutionId:a.logicalExecutionId,day:a.day,actualRequests:a.actualRequests,creditsDeducted:a.creditsDeducted}))));
+
+// Trusted operator configuration, not dispatch inputs. No default allowance and
+// no inference of provider balance from the opaque Credits-Used header.
+export function assertFreshBudget(ledger, budget, now = new Date()) {
+  if(!budget || ![budget.maxRequests31Days,budget.maxCredits31Days].every(n=>Number.isSafeInteger(n)&&n>0))
+    throw new Stop('GLOBAL_31_DAY_BUDGET_UNVERIFIED');
+  const age=now.getTime()-Date.parse(budget.verifiedAt);
+  if(budget.source!=='OPERATOR_VERIFIED_FREE_ACCOUNT'||budget.freePlan!==true||budget.noAutoTopUp!==true||
+    !Number.isFinite(age)||age<0||age>24*60*60*1000||!Number.isSafeInteger(budget.freeCreditsRemaining)||budget.freeCreditsRemaining<1||
+    budget.ledgerFingerprint!==accountingFingerprint(ledger))throw new Stop('FREE_BALANCE_UNVERIFIED_OR_STALE');
+  const today=calendarDay(now),start=new Date(today+'T00:00:00Z');start.setUTCDate(start.getUTCDate()-30);
+  const first=start.toISOString().slice(0,10);let requests=0,credits=0;
+  for(const a of ledger){
+    if(typeof a.day!=='string'||!/^\d{4}-\d{2}-\d{2}$/u.test(a.day)||!Number.isFinite(Date.parse(a.day+'T00:00:00Z'))||
+      new Date(a.day+'T00:00:00Z').toISOString().slice(0,10)!==a.day||a.day>today||a.actualRequests!==1||
+      !Number.isFinite(a.creditsDeducted)||a.creditsDeducted<0||a.creditsDeducted>1)throw new Stop('GLOBAL_LEDGER_USAGE_UNVERIFIED');
+    if(a.day>=first){requests+=a.actualRequests;credits+=a.creditsDeducted;}
+  }
+  if(requests+1>budget.maxRequests31Days||credits+1>budget.maxCredits31Days)throw new Stop('GLOBAL_31_DAY_BUDGET_EXHAUSTED');
+  return {windowStart:first,windowEnd:today,requests,credits,reservedRequests:1,reservedCredits:1};
+}
+
 export function claimPage(state, now = new Date(), { productionGuard } = {}) {
   const run = state.orchestration; const config = run.config;
   if (['CLAIMED', 'IN_FLIGHT'].includes(run.phase)) throw new Stop('AMBIGUOUS_PAGE_NO_AUTOMATIC_REFETCH');
   if (['COMPLETED_UNCONFIRMED','TERMINAL_UNCONFIRMED'].includes(run.phase)) throw new Stop('PERSISTENCE_CONFIRMATION_REQUIRED');
   if (run.stopReason) return false;
+  if(state.freshSession?.workflowRunId===run.workflowRunId)assertFreshBudget(state.requestLedger,state.freshSession.globalBudget,now);
   if (config.mode === 'production') {
     if (state.requestLedger.filter(p => p.day === calendarDay(now)).length >= 6) { stopExecution(run, 'DAILY_REQUEST_BUDGET'); return false; }
     if (typeof productionGuard !== 'function' || productionGuard() !== true) throw new Stop('MONTHLY_FREE_BALANCE_UNVERIFIED_SCHEDULE_DISABLED');
@@ -292,9 +317,12 @@ function chooseNext(state, page, nextCursor, secret, now) {
 export async function performPage(state, { transport, now = new Date(), receipt, enabled, freePlanConfirmed, noCashConfirmed,
   secret = process.env.SOCIALAPIS_API_KEY, timeoutMs = 20_000, claimArtifactName, captureReviews = false } = {}) {
   const run = state.orchestration;
+  const fresh=state.freshSession?.workflowRunId===run.workflowRunId;
+  if(fresh&&!captureReviews)throw new Stop('FRESH_REVIEW_CAPTURE_REQUIRED');
   if (run.phase !== 'CLAIMED' || !/^[1-9]\d*$/u.test(String(receipt ?? ''))) throw new Stop('DURABLE_CLAIM_RECEIPT_REQUIRED');
   const attempt = state.requestLedger[run.attemptIndex];
   if (attempt.day !== calendarDay(now)) throw new Stop('RESERVATION_DAY_CHANGED_NO_REQUEST');
+  if(fresh)assertFreshBudget(state.requestLedger.slice(0,run.attemptIndex),state.freshSession.globalBudget,now);
   run.phase = 'IN_FLIGHT'; // Synchronous in-process claim; durable file is still CLAIMED.
   attempt.claimArtifactReceipt=String(receipt);
   if(claimArtifactName!==undefined)attempt.claimArtifactName=claimArtifactName;
@@ -305,7 +333,7 @@ export async function performPage(state, { transport, now = new Date(), receipt,
     if (run.plan.pageNumber > 1 && (!validCursor(inputCursor) || digest(inputCursor) !== run.plan.cursorHash)) throw new Stop('CONTINUATION_INVALID');
     adapter = new SocialApisLiveDiscoveryAdapter({ enabled, freePlanConfirmed, noCashConfirmed,
       query: run.plan.query, ...run.config, ...{ query: run.plan.query, maxRequests: 1, maxCredits: 1 },
-      timeoutMs, endCursor: inputCursor,
+      timeoutMs, endCursor: inputCursor,retainAudit:fresh,
       ...(captureReviews ? {reviewContext:{profile:run.config.profile,targetJobPreferences:run.config.targetJobPreferences,evaluatedAt:now.toISOString()}} : {}) }, transport);
     const budget = new ActivityBudget();
     const urls = await adapter.search(undefined, adapter.query, budget);
@@ -399,8 +427,9 @@ export async function performPage(state, { transport, now = new Date(), receipt,
   if(captureReviews && Array.isArray(adapter?.adapter?.reviewItems)) {
     const {reviewExport}=await import('./discovery-review.mjs');
     state.discoveryReviews??=[];
-    state.discoveryReviews.push(reviewExport(adapter.adapter.reviewItems,{runId:String(run.workflowRunId),query:attempt.query,pageNumber:attempt.pageNumber}));
+    state.discoveryReviews.push(reviewExport(adapter.adapter.reviewItems,{runId:fresh?state.freshSession.id:String(run.workflowRunId),query:attempt.query,pageNumber:attempt.pageNumber}));
   }
+  if(fresh&&adapter?.responseAudit)state.privateResponseAudit=adapter.responseAudit;
   state.workflowMetrics = workflowMetrics(state);
   return state;
 }

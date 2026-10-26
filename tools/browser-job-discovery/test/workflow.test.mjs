@@ -8,6 +8,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { parse } from 'yaml';
+import {historyFixture,run,artifact} from './fixtures/checkpoint-history.mjs';
 
 const workflowText = await readFile(new URL('../../../.github/workflows/socialapis-job-discovery.yml', import.meta.url), 'utf8');
 const discoveryWorkflow = parse(workflowText);
@@ -48,7 +49,13 @@ test('manual workflow explicitly consents to up to six requests, scoped key and 
   assert.equal(inputs.query.default, undefined); assert.equal(inputs.query.required, false);
   assert.ok(Object.keys(inputs).length <= 25);
   assert.equal(job.steps.find(s => s.uses?.startsWith('actions/setup-node')).with['node-version'], '22.12.0');
-  assert.doesNotMatch(workflowText + actionText, /MAX_31_DAY_REQUESTS|ROLLING_REQUEST_CAP|vars\.|schedule:|curl |wget |continue-on-error|retry:/u);
+  assert.doesNotMatch(workflowText + actionText, /ROLLING_REQUEST_CAP|schedule:|curl |wget |continue-on-error|retry:/u);
+  const freshInit=job.steps.find(s=>s.run==='node src/cli.mjs --orchestrate fresh-init');
+  assert.equal(freshInit.env.SOCIALAPIS_MAX_31_DAY_REQUESTS,'${{ vars.SOCIALAPIS_MAX_31_DAY_REQUESTS }}');
+  assert.equal(freshInit.env.SOCIALAPIS_MAX_31_DAY_CREDITS,'${{ vars.SOCIALAPIS_MAX_31_DAY_CREDITS }}');
+  assert.equal(freshInit.env.SOCIALAPIS_FREE_BALANCE_EVIDENCE,'${{ vars.SOCIALAPIS_FREE_BALANCE_EVIDENCE }}');
+  assert.ok(freshInit.if.includes("inputs.fresh_session_id != ''"));
+  for(const step of job.steps.filter(s=>s!==freshInit))assert.doesNotMatch(JSON.stringify(step.env??{}),/SOCIALAPIS_MAX_31_DAY|SOCIALAPIS_FREE_BALANCE_EVIDENCE/u);
   assert.equal(job.env?.SOCIALAPIS_API_KEY, undefined); assert.equal(discoveryWorkflow.env?.SOCIALAPIS_API_KEY, undefined);
   assert.equal(job.steps.filter(s => s.env?.SOCIALAPIS_API_KEY).length, 0);
   const calls = job.steps.filter(s => s.uses === './.github/actions/socialapis-discovery-page');
@@ -105,17 +112,21 @@ test('automatic sync demo validates readiness before HTTP, persists ciphertext b
 
 const checkpoint = discoveryWorkflow.jobs.discover.steps.find(s => s.id === 'checkpoint');
 async function checkpointTest({ prior = true, initialize = false, count = 2, attempt = '1', privateRepo = false,
-  status = 'completed', artifacts = [{ id: 11, name: 'socialapis-discovery-state' }], artifactCount = artifacts.length } = {}) {
-  const saved = { GITHUB_RUN_ATTEMPT: process.env.GITHUB_RUN_ATTEMPT, INITIALIZE_STATE: process.env.INITIALIZE_STATE };
+  status = 'completed', artifacts = [{ id: 11, name: 'socialapis-discovery-state' }], artifactCount = artifacts.length,
+  preHttpFailure = false } = {}) {
+  const saved = Object.fromEntries(['GITHUB_RUN_ATTEMPT','INITIALIZE_STATE','GITHUB_WORKSPACE','GITHUB_RUN_NUMBER'].map(k=>[k,process.env[k]]));
   const outputs = {}; process.env.GITHUB_RUN_ATTEMPT = attempt; process.env.INITIALIZE_STATE = String(initialize);
+  process.env.GITHUB_WORKSPACE=resolve(directory,'../..');process.env.GITHUB_RUN_NUMBER='200';
   try {
-    const github = { rest: { repos: { get: async () => ({ data: { private: privateRepo } }) }, actions: {
-      listWorkflowRuns: async options => {
-        assert.equal(options.per_page, 2); assert.equal(options.branch, 'main'); assert.equal(options.created, undefined);
-        return { data: { total_count: count, workflow_runs: [{ id: 200 }, ...(prior ? [{ id: 100, status }] : [])] } };
-      },
-      listWorkflowRunArtifacts: async options => { assert.equal(options.run_id, 100); return { data: { artifacts, total_count: artifactCount } }; }
-    } } };
+    const runs=[run(200),...(prior?[run(100,{status})]:[]),...(preHttpFailure?[run(99)]:[])];
+    const slot=Math.max(0,...artifacts.map(a=>Number(a.name?.match(/-([1-6])-(?:claim|result)$/u)?.[1]??0)));
+    const f=historyFixture({runs,runTotal:preHttpFailure?3:count,privateRepo,
+      artifacts:{100:preHttpFailure?[]:artifacts.map(a=>({...artifact(a.id,a.name),...a})),99:artifacts.map(a=>({...artifact(a.id,a.name),...a}))},
+      modes:{100:preHttpFailure?'PRE_HTTP_FAILURE':slot?'PROVIDER':'PRE_REQUEST_CHECKPOINT'},startedSlots:{100:Array.from({length:slot},(_,i)=>i+1)}});
+    const {github}=f;
+    if(artifactCount!==artifacts.length){const original=github.rest.actions.listWorkflowRunArtifacts;github.rest.actions.listWorkflowRunArtifacts=async params=>{
+      const response=await original(params);response.data.total_count=artifactCount;return response;
+    };}
     const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
     await new AsyncFunction('github','context','core',checkpoint.with.script)(github, { repo: { owner:'fixture',repo:'fixture' },runId:200 },
       { setOutput: (key,value) => { outputs[key] = value; } });
@@ -123,16 +134,20 @@ async function checkpointTest({ prior = true, initialize = false, count = 2, att
   } finally { for (const [key,value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } }
 }
 
+test('checkpoint traversal does not let a proven offline-test failure hide an older durable checkpoint',async()=>{
+  assert.equal((await checkpointTest({preHttpFailure:true})).run_id,'99');
+});
+
 test('checkpoint accepts historical failed-run checkpoint but never resets, reruns, skips unavailable history', async () => {
   assert.equal(checkpoint.with.retries, 0);
   assert.equal((await checkpointTest()).artifact_name, 'socialapis-discovery-state');
   assert.equal((await checkpointTest({ prior:false,count:1,initialize:true })).initialize, 'true');
   assert.equal((await checkpointTest({ artifacts:[{id:12,name:'socialapis-discovery-checkpoint'}] })).artifact_name, 'socialapis-discovery-checkpoint');
   for (const [options,code] of [
-    [{prior:false},'FIRST_RUN_EXPLICIT'], [{prior:false,count:100,initialize:true},'FIRST_RUN_EXPLICIT'],
+    [{prior:false},'HISTORY_CHANGED_OR_INCOMPLETE'], [{prior:false,count:100,initialize:true},'HISTORY_CHANGED_OR_INCOMPLETE'],
     [{initialize:true},'CANNOT_RESET'], [{attempt:'2'},'RERUN_DISABLED'], [{privateRepo:true},'PUBLIC_REPOSITORY'],
-    [{status:'in_progress'},'PREVIOUS_RUN_NOT_COMPLETED'], [{artifacts:[]},'CHECKPOINT_MISSING'],
-    [{artifacts:[{name:'socialapis-discovery-state',expired:true}]},'CHECKPOINT_MISSING'], [{artifactCount:101},'ARTIFACT_HISTORY']
+    [{status:'in_progress'},'PREVIOUS_RUN_NOT_COMPLETED'], [{artifacts:[]},'NO_ARTIFACT_HTTP_UNPROVEN'],
+    [{artifacts:[{id:11,name:'socialapis-discovery-state',expired:true}]},'CHECKPOINT_MISSING'], [{artifactCount:101},'METADATA_INCOMPLETE']
   ]) await assert.rejects(() => checkpointTest(options), new RegExp(code,'u'));
   const old = process.env.MAX_31_DAY_REQUESTS;
   try { for (const value of ['', 'bad', '0', '200']) { process.env.MAX_31_DAY_REQUESTS = value; assert.equal((await checkpointTest({count:10000})).run_id,'100'); } }
@@ -140,7 +155,7 @@ test('checkpoint accepts historical failed-run checkpoint but never resets, reru
 });
 
 test('latest page reservation wins over earlier result/legacy; expired latest never silently rolls back', async () => {
-  const artifacts = [{id:1,name:'socialapis-discovery-state'}, {id:2,name:'socialapis-page-100-1-result'},
+  const artifacts = [{id:1,name:'socialapis-discovery-state'}, {id:10,name:'socialapis-page-100-1-claim'}, {id:2,name:'socialapis-page-100-1-result'},
     {id:3,name:'socialapis-page-100-2-claim'}];
   assert.equal((await checkpointTest({artifacts})).artifact_id,'3');
   const result = [...artifacts,{id:4,name:'socialapis-page-100-2-result'}];

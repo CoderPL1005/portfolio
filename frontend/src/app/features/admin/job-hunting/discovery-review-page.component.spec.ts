@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
-import { of, Subject, throwError } from 'rxjs';
+import { of, Subject, BehaviorSubject, throwError } from 'rxjs';
 import { vi } from 'vitest';
 import { DiscoveryReviewPageComponent } from './discovery-review-page.component';
 import { DiscoveryReviewDetail, DiscoveryReviewList, HumanReview, DiscoveryQualityReport, ReviewHistory, DimensionQuality } from './discovery-review.models';
@@ -15,17 +15,49 @@ const detail = (): DiscoveryReviewDetail => ({id:'synthetic-1',runId:'synthetic-
     sourceWarnings:['POST_ID_URL_MISMATCH'],classifierVersion:'content-first-v1',evaluatedAt:'2026-10-26T03:00:00Z'}});
 const listing = ():DiscoveryReviewList=>({results:{items:[detail()],page:1,pageSize:20,total:1,totalPages:1},
   counts:{total:1,valid:1,invalid:0,needsReview:0,targetMatch:0,identityWarnings:1,duplicateItems:1}});
-function mount(id?:string) {
+function mount(id?:string,runId?:string) {
   const api={discovery:vi.fn(()=>of(listing())),discoveryItem:vi.fn(()=>of(detail())),importDiscovery:vi.fn(()=>of({inserted:1,unchanged:0})),
     saveDiscoveryReview:vi.fn(()=>of({status:'CONFIRMED',version:1,contentStatus:'VALID_RECRUITMENT',targetStatus:'NOT_MATCHED',notes:'reason',reviewedAt:'2026-10-26T03:00:00Z',reviewedByAdminId:'synthetic-admin'} as HumanReview)),
     discoveryHistory:vi.fn(()=>of({items:[],page:1,pageSize:20,total:0,totalPages:0,current:{status:'UNREVIEWED',version:0,contentStatus:null,targetStatus:null,notes:null,reviewedAt:null,reviewedByAdminId:null}} as ReviewHistory)),
     discoveryMetrics:vi.fn(()=>of({} as DiscoveryQualityReport))};
   const map=convertToParamMap(id?{id}:{});
+  const query=new BehaviorSubject(convertToParamMap(runId?{runId}:{}));
   TestBed.configureTestingModule({imports:[DiscoveryReviewPageComponent],providers:[provideRouter([]),
-    {provide:JobHuntingService,useValue:api},{provide:ActivatedRoute,useValue:{paramMap:of(map),snapshot:{paramMap:map}}}]});
-  const fixture=TestBed.createComponent(DiscoveryReviewPageComponent);fixture.detectChanges();return {fixture,api,c:fixture.componentInstance};
+    {provide:JobHuntingService,useValue:api},{provide:ActivatedRoute,useValue:{paramMap:of(map),queryParamMap:query,snapshot:{paramMap:map,queryParamMap:query.value}}}]});
+  const fixture=TestBed.createComponent(DiscoveryReviewPageComponent);fixture.detectChanges();return {fixture,api,query,c:fixture.componentInstance};
 }
 describe('Discovery Review',()=>{
+  it('updates same-route session list and metrics, ignoring stale responses and clearing removed runId',()=>{
+    const {api,c,query}=mount(undefined,'fresh-session-a');const oldMetrics=new Subject<DiscoveryQualityReport>();
+    const newMetrics=new Subject<DiscoveryQualityReport>();const staleList=new Subject<DiscoveryReviewList>();const newList=new Subject<DiscoveryReviewList>();
+    api.discoveryMetrics.mockReturnValueOnce(oldMetrics).mockReturnValueOnce(newMetrics);
+    c.loadMetrics();api.discovery.mockReturnValueOnce(staleList);c.load();c.page=3;api.discovery.mockReturnValueOnce(newList);
+    query.next(convertToParamMap({runId:'fresh-session-b'}));
+    expect(api.discovery).toHaveBeenLastCalledWith({page:1,pageSize:20,runId:'fresh-session-b'});
+    expect(api.discoveryMetrics).toHaveBeenLastCalledWith('fresh-session-b');
+    oldMetrics.next({notice:'OLD'} as DiscoveryQualityReport);oldMetrics.complete();
+    expect(c.metrics()).toBeNull();expect(c.metricsLoading()).toBe(true);
+    staleList.next({...listing(),counts:{...listing().counts,total:999}});expect(c.list()).toBeNull();
+    newList.next(listing());expect(c.list()?.counts.total).toBe(1);
+    newMetrics.next({notice:'NEW'} as DiscoveryQualityReport);expect(c.metrics()?.notice).toBe('NEW');
+    api.discoveryMetrics.mockReturnValue(of({} as DiscoveryQualityReport));query.next(convertToParamMap({}));
+    expect(c.runId).toBe('');expect(api.discovery).toHaveBeenLastCalledWith({page:1,pageSize:20});
+    expect(api.discoveryMetrics).toHaveBeenLastCalledWith(undefined);
+  });
+  it('opens the fresh session using server-side run filter without clearing historical observations',()=>{
+    const {api,c}=mount(undefined,'fresh-offline-demo-01');
+    expect(c.runId).toBe('fresh-offline-demo-01');
+    expect(api.discovery).toHaveBeenCalledExactlyOnceWith({page:1,pageSize:20,runId:'fresh-offline-demo-01'});
+    expect(api.importDiscovery).not.toHaveBeenCalled();
+  });
+  it('distinguishes stored observations and unknown publication freshness from verified recent jobs',()=>{
+    const {fixture,c}=mount('synthetic-1');
+    expect(fixture.nativeElement.textContent).toContain('Freshness: UNKNOWN');
+    expect(fixture.nativeElement.textContent).toContain('Import: STORED');
+    c.detail.set({...c.detail()!,item:{...c.detail()!.item,publishedAt:'2026-10-26T03:00:00Z'}});fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('UNVERIFIED_PROVIDER_TIMESTAMP');
+    expect(fixture.nativeElement.textContent).not.toContain('verified_recent');
+  });
   afterEach(()=>TestBed.resetTestingModule());
   it('does not auto-review and sends original confirm with authoritative version and mandatory reason',()=>{
     const {c,api}=mount('synthetic-1');expect(api.saveDiscoveryReview).not.toHaveBeenCalled();

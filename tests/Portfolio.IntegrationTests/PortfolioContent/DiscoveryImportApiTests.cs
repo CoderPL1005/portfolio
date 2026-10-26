@@ -41,6 +41,7 @@ public sealed class DiscoveryImportApiTests(AuthApiFactory root) : IClassFixture
         Assert.Equal(1,json.GetProperty("data").GetProperty("unchanged").GetInt32());
         Assert.Equal(HttpStatusCode.Unauthorized,(await client.GetAsync("/api/v1/admin/job-hunting/discovery")).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized,(await client.PostAsJsonAsync("/api/v1/admin/job-hunting/discovery/import",bundle)).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized,(await client.PostAsJsonAsync("/api/v1/admin/job-hunting/discovery/demo-reset-plan",new {runIds=new[]{bundle.RunId}})).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized,(await client.PostAsJsonAsync($"/api/v1/admin/job-hunting/discovery/{Guid.NewGuid()}/reviews",new{})).StatusCode);
         using var scope=factory.Services.CreateScope();var db=scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
         Assert.Single(await db.DiscoveryCandidates.ToListAsync());Assert.Empty(await db.DiscoveryCandidateReviews.ToListAsync());
@@ -59,6 +60,11 @@ public sealed class DiscoveryImportApiTests(AuthApiFactory root) : IClassFixture
         client.DefaultRequestHeaders.Authorization=new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer",token.Value);
         Assert.Equal(HttpStatusCode.Unauthorized,(await client.GetAsync("/api/v1/discovery-sync/ready")).StatusCode);
         var bundle=Bundle();Assert.Equal(HttpStatusCode.OK,(await client.PostAsJsonAsync("/api/v1/admin/job-hunting/discovery/import",bundle)).StatusCode);
+        var plan=await client.PostAsJsonAsync("/api/v1/admin/job-hunting/discovery/demo-reset-plan",new {runIds=new[]{bundle.RunId}});
+        Assert.Equal(HttpStatusCode.OK,plan.StatusCode);
+        var planned=(await plan.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>()).GetProperty("data");
+        Assert.True(planned.GetProperty("dryRun").GetBoolean());Assert.Equal(1,planned.GetProperty("scopedObservations").GetInt32());
+        Assert.Equal(HttpStatusCode.BadRequest,(await client.PostAsJsonAsync("/api/v1/admin/job-hunting/discovery/demo-reset-plan",new{runIds=new[]{"*"}})).StatusCode);
         var db=scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();var candidate=await db.DiscoveryCandidates.SingleAsync();
         Assert.Equal(HttpStatusCode.OK,(await client.PostAsJsonAsync($"/api/v1/admin/job-hunting/discovery/{candidate.Id}/reviews",
             new{expectedVersion=0,action="CONFIRMED",notes="Synthetic reviewed evidence"})).StatusCode);

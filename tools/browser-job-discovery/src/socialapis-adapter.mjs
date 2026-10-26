@@ -85,8 +85,9 @@ export class SocialApisCaptureDiscoveryAdapter {
  */
 export class SocialApisLiveDiscoveryAdapter {
   constructor({ enabled = false, freePlanConfirmed = false, noCashConfirmed = false,
-    maxRequests = 1, maxCredits = 1, timeoutMs = 20_000, query = SMOKE_QUERY, startTime, endTime, endCursor = null, reviewContext } = {}, transport) {
+    maxRequests = 1, maxCredits = 1, timeoutMs = 20_000, query = SMOKE_QUERY, startTime, endTime, endCursor = null, reviewContext, retainAudit = false } = {}, transport) {
     this.reviewContext = reviewContext;
+    this.retainAudit=retainAudit;
     this.options = { enabled, freePlanConfirmed, noCashConfirmed, maxRequests, maxCredits, timeoutMs };
     this.query = validateQuery(query); this.transport = transport;
     this.dateFilters = Object.freeze(validateDateFilters({ startTime, endTime }));
@@ -124,6 +125,7 @@ export class SocialApisLiveDiscoveryAdapter {
         if (controller.signal.aborted) throw new Stop('DISCOVERY_TIMEOUT');
         const payload = JSON.parse(raw);
         if ([raw, JSON.stringify(payload)].some(value => value.includes(key) || value.includes(encodeURIComponent(key)))) throw new Stop('PROVIDER_SECRET_REFLECTION');
+        if(this.retainAudit)this.responseAudit={kind:'PRIVATE_PROVIDER_JSON',payload};
         const bodyCredits = payload?.meta?.creditsCharged;
         if (this.requestStats.creditsDeducted === null || this.requestStats.creditsDeducted > maxCredits ||
             typeof bodyCredits === 'number' && bodyCredits > maxCredits) throw new Stop('PROVIDER_CREDIT_COST_UNVERIFIED_OR_EXCEEDED');

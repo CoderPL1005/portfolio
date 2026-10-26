@@ -27,6 +27,10 @@ on:
         description: Retry only saved observation import; ZERO SocialAPIs requests (requires auto_admin_sync)
         type: boolean
         default: false
+      fresh_session_id:
+        description: Optional NEW fresh-<unique-id>, isolated candidates/cursor; preserves global audit; burns a new one-shot claim
+        type: string
+        default: ''
       resume_continuation:
         description: Resume saved core cursor with matching query/date/profile; never fall back to page 1
         type: boolean
@@ -71,9 +75,13 @@ jobs:
   discover:
     if: github.ref == 'refs/heads/main' && ((inputs.confirm_live && inputs.confirm_free_no_cash && (inputs.confirm_artifact_data || inputs.auto_admin_sync)) || (inputs.auto_admin_sync && inputs.sync_only))
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # Only the explicit fresh mode creates a new immutable activation claim.
+      actions: read
     timeout-minutes: 10
     env:
       DISCOVERY_AUTO_ADMIN_SYNC: ${{ inputs.auto_admin_sync }}
+      DISCOVERY_FRESH_SESSION_ID: ${{ inputs.fresh_session_id }}
     defaults:
       run:
         working-directory: tools/browser-job-discovery
@@ -97,32 +105,12 @@ jobs:
         with:
           retries: 0
           script: |
-            if (Number(process.env.GITHUB_RUN_ATTEMPT) !== 1) throw new Error('RERUN_DISABLED_USE_A_NEW_MANUAL_RUN');
-            const repo = await github.rest.repos.get(context.repo);
-            if (repo.data.private) throw new Error('PUBLIC_REPOSITORY_REQUIRED_FOR_THIS_ZERO_COST_PLAN');
-            const history = await github.rest.actions.listWorkflowRuns({ ...context.repo,
-              workflow_id: 'socialapis-job-discovery.yml', branch: 'main', event: 'workflow_dispatch', per_page: 2 });
-            const previous = history.data.workflow_runs.find(run => run.id !== context.runId);
-            if (!previous) {
-              if (history.data.total_count > 1 || process.env.INITIALIZE_STATE !== 'true') throw new Error('FIRST_RUN_EXPLICIT_INITIALIZATION_REQUIRED');
-              core.setOutput('initialize', 'true'); return;
-            }
-            if (process.env.INITIALIZE_STATE === 'true') throw new Error('CANNOT_RESET_EXISTING_DISCOVERY_HISTORY');
-            if (previous.status !== 'completed') throw new Error('PREVIOUS_RUN_NOT_COMPLETED');
-            const response = await github.rest.actions.listWorkflowRunArtifacts({ ...context.repo, run_id: previous.id, per_page: 100 });
-            if (response.data.total_count > 100) throw new Error('ARTIFACT_HISTORY_REQUIRES_MANUAL_RECONCILIATION');
-            const artifacts = response.data.artifacts;
-            // Never restore past a later ambiguous claim, including expired ones.
-            const pages = artifacts.filter(a => /^socialapis-page-\d+-[1-6]-(claim|result)$/.test(a.name));
-            pages.sort((a,b) => Number(b.name.split('-').at(-2)) - Number(a.name.split('-').at(-2)) ||
-              Number(b.name.endsWith('-result')) - Number(a.name.endsWith('-result')));
-            const state = pages[0] ?? artifacts.find(a => a.name === 'socialapis-discovery-state')
-              ?? artifacts.find(a => a.name === 'socialapis-discovery-checkpoint');
-            if (!state || state.expired) throw new Error('CHECKPOINT_MISSING_OR_EXPIRED_RESTORE_BACKUP_BEFORE_ANY_PROVIDER_REQUEST');
-            core.setOutput('run_id', String(previous.id)); core.setOutput('artifact_name', state.name);
-            core.setOutput('artifact_id', String(state.id)); core.setOutput('initialize', 'false');
-            const claim = state.name.endsWith('-result') ? artifacts.find(a => a.name === state.name.replace(/-result$/, '-claim')) : null;
-            core.setOutput('claim_artifact_id', claim ? String(claim.id) : '');
+            const { pathToFileURL } = await import('node:url');
+            const { locateCheckpoint } = await import(pathToFileURL(`${process.env.GITHUB_WORKSPACE}/tools/browser-job-discovery/src/checkpoint-history.mjs`).href);
+            const found = await locateCheckpoint({ github, context,
+              initialize: process.env.INITIALIZE_STATE === 'true', attempt: process.env.GITHUB_RUN_ATTEMPT,
+              currentRunNumber: process.env.GITHUB_RUN_NUMBER });
+            for (const [key, value] of Object.entries(found)) core.setOutput(key, value);
       - name: Restore prior-run state (never runner-local cache)
         if: steps.checkpoint.outputs.initialize != 'true'
         uses: actions/download-artifact@v4
@@ -150,8 +138,9 @@ jobs:
           DISCOVERY_IMPORT_KEY: ${{ secrets.DISCOVERY_IMPORT_KEY }}
         run: node src/cli.mjs --orchestrate sync
       - name: Validate profile and display maximum credit exposure before HTTP
-        if: '!inputs.sync_only'
+        if: "!inputs.sync_only && inputs.fresh_session_id == ''"
         env:
+          DISCOVERY_ADMIN_ORIGIN: https://portfolio-api-forn.onrender.com
           INITIALIZE_STATE: ${{ steps.checkpoint.outputs.initialize }}
           ARTIFACT_RECEIPT: ${{ steps.checkpoint.outputs.artifact_id }}
           ARTIFACT_NAME: ${{ steps.checkpoint.outputs.artifact_name }}
@@ -168,6 +157,56 @@ jobs:
           DISCOVERY_IMPORT_KEY: ${{ secrets.DISCOVERY_IMPORT_KEY }}
           DISCOVERY_CHECKPOINT_KEY: ${{ secrets.DISCOVERY_CHECKPOINT_KEY }}
         run: node src/cli.mjs --orchestrate init
+      - name: Reserve a NEW fresh-session activation, never reuse the old demo claim
+        id: fresh_activation
+        if: inputs.fresh_session_id != '' && !inputs.sync_only
+        uses: actions/github-script@v7
+        env:
+          FRESH_ID: ${{ inputs.fresh_session_id }}
+          FRESH_REQUESTS: ${{ inputs.max_requests }}
+          FRESH_CREDITS: ${{ inputs.max_credits }}
+          FRESH_AUTO_SYNC: ${{ inputs.auto_admin_sync }}
+          FRESH_FREE: ${{ inputs.confirm_free_no_cash }}
+          FRESH_LIVE: ${{ inputs.confirm_live }}
+          FRESH_RESUME: ${{ inputs.resume_continuation }}
+          FRESH_INITIALIZE: ${{ inputs.initialize_state }}
+        with:
+          retries: 0
+          script: |
+            const { pathToFileURL } = await import('node:url');
+            const { freshClaimName } = await import(pathToFileURL(`${process.env.GITHUB_WORKSPACE}/tools/browser-job-discovery/src/fresh-demo.mjs`).href);
+            if (process.env.FRESH_REQUESTS !== '1' || process.env.FRESH_CREDITS !== '1' || process.env.FRESH_AUTO_SYNC !== 'true' ||
+                process.env.FRESH_FREE !== 'true' || process.env.FRESH_LIVE !== 'true' || process.env.FRESH_RESUME === 'true' ||
+                process.env.FRESH_INITIALIZE === 'true') throw new Error('FRESH_CONFIGURATION_INVALID');
+            const tag = freshClaimName(process.env.FRESH_ID);
+            // Atomic create only. An existing tag is a hard stop; never delete/update/reuse it.
+            await github.rest.git.createRef({ ...context.repo, ref: `refs/tags/${tag}`, sha: context.sha });
+            core.setOutput('sha', context.sha);
+      - name: Initialize isolated fresh session from audit evidence only
+        if: inputs.fresh_session_id != '' && !inputs.sync_only
+        env:
+          SOCIALAPIS_MAX_31_DAY_REQUESTS: ${{ vars.SOCIALAPIS_MAX_31_DAY_REQUESTS }}
+          SOCIALAPIS_MAX_31_DAY_CREDITS: ${{ vars.SOCIALAPIS_MAX_31_DAY_CREDITS }}
+          SOCIALAPIS_FREE_BALANCE_EVIDENCE: ${{ vars.SOCIALAPIS_FREE_BALANCE_EVIDENCE }}
+          DISCOVERY_ADMIN_ORIGIN: https://portfolio-api-forn.onrender.com
+          DISCOVERY_FRESH_ACTIVATION_SHA: ${{ steps.fresh_activation.outputs.sha }}
+          ARTIFACT_RECEIPT: ${{ steps.checkpoint.outputs.artifact_id }}
+          ARTIFACT_NAME: ${{ steps.checkpoint.outputs.artifact_name }}
+          ARTIFACT_RUN_ID: ${{ steps.checkpoint.outputs.run_id }}
+          CLAIM_ARTIFACT_RECEIPT: ${{ steps.checkpoint.outputs.claim_artifact_id }}
+          DISCOVERY_QUERY: ${{ inputs.query }}
+          DISCOVERY_START_TIME: ${{ inputs.start_time }}
+          DISCOVERY_END_TIME: ${{ inputs.end_time }}
+          DISCOVERY_MAX_REQUESTS: ${{ inputs.max_requests }}
+          DISCOVERY_MAX_CREDITS: ${{ inputs.max_credits }}
+          DISCOVERY_POLICY: ${{ inputs.policy }}
+          INITIALIZE_STATE: ${{ inputs.initialize_state }}
+          RESUME_CONTINUATION: ${{ inputs.resume_continuation }}
+          SOCIALAPIS_FREE_PLAN_CONFIRMED: ${{ inputs.confirm_free_no_cash }}
+          SOCIALAPIS_NO_CASH_CONFIRMED: ${{ inputs.confirm_free_no_cash }}
+          DISCOVERY_IMPORT_KEY: ${{ secrets.DISCOVERY_IMPORT_KEY }}
+          DISCOVERY_CHECKPOINT_KEY: ${{ secrets.DISCOVERY_CHECKPOINT_KEY }}
+        run: node src/cli.mjs --orchestrate fresh-init
       - name: Encrypt initialized checkpoint for automatic sync
         if: inputs.auto_admin_sync && !inputs.sync_only
         env:

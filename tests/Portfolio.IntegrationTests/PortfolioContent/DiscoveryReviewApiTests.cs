@@ -20,6 +20,7 @@ public sealed class DiscoveryReviewApiTests(AuthApiFactory root) : IClassFixture
     [InlineData("GET", "/api/v1/admin/job-hunting/discovery")]
     [InlineData("GET", "/api/v1/admin/job-hunting/discovery/11111111-1111-1111-1111-111111111111")]
     [InlineData("POST", "/api/v1/admin/job-hunting/discovery/import")]
+    [InlineData("POST", "/api/v1/admin/job-hunting/discovery/demo-reset-plan")]
     public async Task All_review_routes_require_authentication(string method, string url)
     {
         using var client = root.CreateClient();

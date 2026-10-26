@@ -9,6 +9,9 @@ namespace Portfolio.Api.Controllers;
 [ApiController, Authorize, Route("api/v1/admin/job-hunting/discovery")]
 public sealed class AdminDiscoveryReviewController(IRequestDispatcher dispatcher) : ControllerBase
 {
+    [HttpPost("demo-reset-plan"), RequestSizeLimit(16 * 1024)]
+    public async Task<ActionResult<ApiResponse<DiscoveryDemoResetPlan>>> ResetPlan([FromBody] PlanDiscoveryDemoResetQuery query, CancellationToken ct) =>
+        Ok(ApiResponse<DiscoveryDemoResetPlan>.Ok(await dispatcher.DispatchAsync(query, ct)));
     [HttpGet]
     public async Task<ActionResult<ApiResponse<DiscoveryReviewList>>> List([FromQuery] GetDiscoveryReviewQuery query, CancellationToken ct) =>
         Ok(ApiResponse<DiscoveryReviewList>.Ok(await dispatcher.DispatchAsync(query, ct)));
