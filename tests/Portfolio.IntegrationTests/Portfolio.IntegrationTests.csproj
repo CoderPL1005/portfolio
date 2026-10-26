@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <Compile Include="..\Portfolio.UnitTests\PortfolioContent\ContentTestDbContext.cs" Link="Support\ContentTestDbContext.cs" />
   </ItemGroup>
 
   <ItemGroup>

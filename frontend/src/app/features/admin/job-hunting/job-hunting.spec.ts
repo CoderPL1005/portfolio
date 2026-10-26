@@ -18,7 +18,7 @@ describe('Job Hunting admin feature', () => {
   it('registers the lazy private routes under the guarded admin shell', () => {
     const admin = routes.find(x => x.path === 'admin')!;
     const feature = admin.children!.filter(x => x.path?.startsWith('job-hunting/'));
-    expect(feature.map(x => x.path)).toEqual(['job-hunting/jobs','job-hunting/jobs/new/screenshots','job-hunting/jobs/new','job-hunting/jobs/:id','job-hunting/preferences','job-hunting/applications','job-hunting/applications/:id']);
+    expect(feature.map(x => x.path)).toEqual(['job-hunting/jobs','job-hunting/discovery','job-hunting/discovery/:id','job-hunting/jobs/new/screenshots','job-hunting/jobs/new','job-hunting/jobs/:id','job-hunting/preferences','job-hunting/applications','job-hunting/applications/:id']);
     expect(feature.every(x => !!x.loadComponent)).toBe(true);
     expect(admin.canActivateChild).toHaveLength(1);
   });

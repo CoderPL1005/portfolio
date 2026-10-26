@@ -6,6 +6,8 @@ import { ActivityBudget, SearchPlanner, JobPostExtractor, DiscoveryReporter, run
 import { structuredMetrics } from './vacancy-extraction.mjs';
 import { validateDateFilters } from './discovery-contract.mjs';
 import { buildDiscoveryYield } from './discovery-yield.mjs';
+import { reviewExport } from './discovery-review.mjs';
+import { resolveDiscoveryPolicy } from './candidate-technology-profile.mjs';
 
 // No browser URL/session/auth arguments. Select mode before importing a browser.
 const args = process.argv.slice(2);
@@ -23,7 +25,7 @@ if (args.includes('--orchestrate')) {
         if (flags.has(argument)) throw new Stop('INVALID_DISCOVERY_ARGUMENTS');
         flags.add(argument); continue;
       }
-      if (!['--source', '--replay', '--output', '--max-requests', '--max-credits', '--timeout-ms', '--query', '--start-time', '--end-time'].includes(argument) ||
+      if (!['--source', '--replay', '--output', '--max-requests', '--max-credits', '--timeout-ms', '--query', '--start-time', '--end-time', '--review-output', '--review-run-id', '--review-policy'].includes(argument) ||
           !args[i + 1] || options.has(argument)) throw new Stop('INVALID_DISCOVERY_ARGUMENTS');
       options.set(argument, args[++i]);
     }
@@ -32,7 +34,27 @@ if (args.includes('--orchestrate')) {
     const dateFilters = validateDateFilters({ startTime: options.get('--start-time'), endTime: options.get('--end-time') });
     const debugDirectory = fileURLToPath(new URL('../.debug/', import.meta.url));
     const capture = options.has('--replay') ? resolve(options.get('--replay')) : null;
+    const reviewOutput = options.has('--review-output') ? resolve(options.get('--review-output')) : null;
+    let reviewContext;
+    if (reviewOutput) {
+      const repo = fileURLToPath(new URL('../../../', import.meta.url));
+      const fromRepo = relative(repo, reviewOutput), fromDebug = relative(debugDirectory, reviewOutput);
+      const inRepo = fromRepo && !fromRepo.startsWith('..') && !isAbsolute(fromRepo);
+      const inDebug = fromDebug && !fromDebug.startsWith('..') && !isAbsolute(fromDebug);
+      if (prepare || !reviewOutput.endsWith('.json') || reviewOutput === capture || inRepo && !inDebug) throw new Stop('PRIVATE_REVIEW_OUTPUT_REQUIRED');
+      try { await stat(reviewOutput); throw new Stop('REVIEW_EXPORT_ALREADY_EXISTS'); }
+      catch (error) { if (error.code !== 'ENOENT') throw error; }
+      reviewExport([], { runId: options.get('--review-run-id'), query: options.get('--query') ?? 'capture' });
+      let policy = {};
+      if (options.has('--review-policy')) {
+        if ((await stat(options.get('--review-policy'))).size > 1_048_576) throw new Stop('REVIEW_POLICY_TOO_LARGE');
+        policy = resolveDiscoveryPolicy(JSON.parse(await readFile(options.get('--review-policy'), 'utf8')), options.get('--query') ?? 'capture');
+      }
+      reviewContext = { runId: options.get('--review-run-id'), pageNumber: 1, evaluatedAt: new Date().toISOString(),
+        profile: policy.profile, targetJobPreferences: policy.targetJobPreferences };
+    } else if (options.has('--review-run-id') || options.has('--review-policy')) throw new Stop('REVIEW_OUTPUT_REQUIRED');
     const output = resolve(options.get('--output') ?? resolve(debugDirectory, 'socialapis-discovery.json'));
+    if (reviewOutput === output) throw new Stop('PRIVATE_REVIEW_OUTPUT_REQUIRED');
     const outputRelative = relative(debugDirectory, output);
     if (!outputRelative || outputRelative.startsWith('..') || isAbsolute(outputRelative) || output === capture ||
         output === resolve(debugDirectory, 'socialapis-response.json') || !output.endsWith('.json')) throw new Stop('PRIVATE_REPLAY_OUTPUT_REQUIRED');
@@ -67,7 +89,7 @@ if (args.includes('--orchestrate')) {
       if (capture) {
         requireMode('offline');
         if ((await stat(capture)).size > 1_048_576) throw new Stop('RESPONSE_TOO_LARGE');
-        adapter = new SocialApisCaptureDiscoveryAdapter(JSON.parse(await readFile(capture, 'utf8')), { budget });
+        adapter = new SocialApisCaptureDiscoveryAdapter(JSON.parse(await readFile(capture, 'utf8')), { budget, reviewContext });
       } else {
         // Reserve a local checkpoint before the possible external side effect.
         await save({ evidenceKind: 'SOCIALAPIS_DISCOVERY_STATE', jobs: existing });
@@ -76,12 +98,19 @@ if (args.includes('--orchestrate')) {
           maxRequests: Number(options.get('--max-requests') ?? process.env.SOCIALAPIS_MAX_REQUESTS ?? 1),
           maxCredits: Number(options.get('--max-credits') ?? process.env.SOCIALAPIS_MAX_CREDITS ?? 1),
           timeoutMs: Number(options.get('--timeout-ms') ?? 20_000),
-          ...dateFilters,
+          ...dateFilters, reviewContext,
           ...(options.has('--query') ? { query: options.get('--query') } : {}) });
       }
       const report = await runDiscovery({ adapter, planner: { plan: () => [adapter.query] },
         extractor: new JobPostExtractor(), reporter: new DiscoveryReporter({ evidenceKind: live ? 'LIVE_PROVIDER_RESPONSE' : 'LOCAL_PROVIDER_CAPTURE_REPLAY' }),
         budget, target: {}, matcher: job => adapter.classify(job) });
+      if (reviewOutput && (adapter.reviewItems || adapter.adapter?.reviewItems)) {
+        const bundle = reviewExport(adapter.reviewItems ?? adapter.adapter.reviewItems, { runId: reviewContext.runId, query: adapter.query });
+        const json = JSON.stringify(bundle, null, 2) + '\n';
+        if (Buffer.byteLength(json) > 8 * 1024 * 1024) throw new Stop('REVIEW_EXPORT_TOO_LARGE');
+        await mkdir(dirname(reviewOutput), { recursive: true });
+        await writeFile(reviewOutput, json, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+      }
       if (report.stopCode) throw new Stop(report.stopCode);
       report.queryYield = buildDiscoveryYield({ jobs: report.jobs, existingJobs: existing, query: adapter.query,
         itemStats: adapter.itemStats, requestStats: adapter.requestStats, dateFilters,

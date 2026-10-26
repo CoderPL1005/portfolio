@@ -35,6 +35,9 @@ internal sealed class ContentTestDbContext(DbContextOptions<ContentTestDbContext
     public DbSet<ChatMessageFeedback> ChatMessageFeedback => Set<ChatMessageFeedback>();
     public DbSet<ChatUsageDaily> ChatUsageDaily => Set<ChatUsageDaily>();
     public DbSet<RawJobPosting> RawJobPostings => Set<RawJobPosting>();
+    public DbSet<DiscoveryCandidate> DiscoveryCandidates => Set<DiscoveryCandidate>();
+    public DbSet<DiscoveryCandidateReview> DiscoveryCandidateReviews => Set<DiscoveryCandidateReview>();
+    public DbSet<DiscoveryCandidateReviewEvent> DiscoveryCandidateReviewEvents => Set<DiscoveryCandidateReviewEvent>();
     public DbSet<RawJobPostingAttachment> RawJobPostingAttachments => Set<RawJobPostingAttachment>();
     public DbSet<JobPosting> JobPostings => Set<JobPosting>();
     public DbSet<JobApplication> JobApplications => Set<JobApplication>();
@@ -62,6 +65,9 @@ internal sealed class ContentTestDbContext(DbContextOptions<ContentTestDbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.ApplyConfiguration(new Portfolio.Infrastructure.Persistence.Configurations.DiscoveryCandidateConfiguration());
+        modelBuilder.ApplyConfiguration(new Portfolio.Infrastructure.Persistence.Configurations.DiscoveryCandidateReviewConfiguration());
+        modelBuilder.ApplyConfiguration(new Portfolio.Infrastructure.Persistence.Configurations.DiscoveryCandidateReviewEventConfiguration());
         modelBuilder.Ignore<AdminUser>(); modelBuilder.Ignore<AdminRefreshToken>();
 
         modelBuilder.Entity<MediaAsset>().HasKey(item => item.Id);

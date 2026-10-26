@@ -638,3 +638,192 @@ test('existing CLI replays twice into private local store with no duplicate inse
       error => error.stderr.toString().includes('PRIVATE_REPLAY_OUTPUT_REQUIRED'));
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
+
+// B.4.4 test-first contract. All rows below are SYNTHETIC_FIXTURE, not the
+// unavailable five raw posts of Run 40216232001. These assertions exercise the
+// existing adapter, not a test-side implementation of the missing projection.
+// reviewItems is an ordered per-input collection, independent of strict records.
+const reviewQuery = 'Backend Fresher Hà Nội';
+const reviewText = 'Hiring Fresher .NET Backend Developer\nRequirements: Build REST APIs using ASP.NET Core; 0–1 years experience\nLocation: Hanoi';
+const reviewRow = (id, text = reviewText, url = `https://www.facebook.com/fixture/posts/${id}`) => ({
+  basic_info: { post_id: id, post_text: text, url },
+  owner_info: {}, feedback_details: {}, video_details: {}
+});
+function reviewAdapter(rows) {
+  return new SocialApisCaptureDiscoveryAdapter({
+    fixture_kind: 'SYNTHETIC_FIXTURE', data: { items: rows, page_info: { cursor: null } }
+  }, {
+    capturedQuery: reviewQuery, evidenceKind: 'SYNTHETIC_FIXTURE',
+    reviewContext: {
+      runId: 'synthetic-b44-review', pageNumber: 1, evaluatedAt: '2026-10-26T03:00:00.000Z',
+      profile: { technologies: ['ASP.NET Core', 'Python', 'FastAPI'], locations: ['Hanoi'], seniorities: ['Intern', 'Fresher'] },
+      targetJobPreferences: {
+        version: 1, primaryRole: 'BACKEND', allowFullStack: true,
+        stackGroups: [
+          { preference: 'PREFERRED', technologies: ['.NET', 'ASP.NET Core', 'C#'] },
+          { preference: 'ACCEPTED', technologies: ['Python', 'FastAPI'] }
+        ],
+        seniorities: ['Intern', 'Fresher'], locations: ['Hanoi'],
+        preferredExperienceMax: 1, fallbackExperienceMax: 2
+      }
+    }
+  });
+}
+
+test('B44 RED: numeric/PFBID mismatch survives in review with observed URL, not a verified alias', () => {
+  const observedUrl = 'https://www.facebook.com/fixture/posts/pfbidSyntheticUnverified';
+  const adapter = reviewAdapter([reviewRow('84001', reviewText, observedUrl)]);
+  // Existing strict acceptance must not be relaxed to satisfy review retention.
+  assert.equal(adapter.records.size, 0);
+  assert.equal(adapter.itemStats.rejectionReasons[0].reason, 'POST_ID_URL_MISMATCH');
+  assert.deepEqual(adapter.reviewItems?.map(item => ({
+    index: item.itemIndex, providerPostId: item.providerPostId, sourceUrl: item.sourceUrl,
+    rawContent: item.rawContent, warnings: item.sourceWarnings, verification: item.verificationStatus
+  })), [{
+    index: 0, providerPostId: '84001', sourceUrl: observedUrl, rawContent: reviewText,
+    warnings: ['POST_ID_URL_MISMATCH'], verification: 'NOT_CHECKED'
+  }], 'Missing content-first review observation; rejection must not discard the item');
+});
+
+test('B44 RED: every input index has an outcome, including malformed, blank, oversized and duplicate items', () => {
+  const duplicate = reviewRow('84002');
+  const adapter = reviewAdapter([
+    null, 42, { basic_info: null }, reviewRow('84003', '   '),
+    reviewRow('84004', 'x'.repeat(24_001)), duplicate, structuredClone(duplicate)
+  ]);
+  assert.equal(adapter.itemStats.totalItems, 7);
+  assert.deepEqual(adapter.reviewItems?.map(item => item.itemIndex), [0, 1, 2, 3, 4, 5, 6],
+    'Strict records/URL Map is not the all-items review collection');
+  for (const index of [0, 1, 2, 3, 4]) {
+    const item = adapter.reviewItems[index];
+    assert.equal(item.rawContent, null, 'Unsafe/unusable text must be represented by a bounded outcome, not raw payload');
+    assert.equal(item.contentValidity.status, 'NEEDS_REVIEW');
+    assert.ok(item.contentValidity.reasonCodes.length > 0);
+  }
+  assert.equal(adapter.reviewItems[5].rawContent, reviewText);
+  assert.equal(adapter.reviewItems[6].rawContent, reviewText, 'Duplicate observations must remain separately reviewable');
+});
+
+test('B44 RED: valid Senior Java recruitment stays valid independently of NOT_MATCHED candidate fit', () => {
+  const text = 'Hiring Senior Java Backend Developer\nRequirements: Java Spring; 5 years experience\nLocation: Hanoi';
+  const adapter = reviewAdapter([reviewRow('84005', text)]);
+  assert.equal(adapter.records.size, 1, 'Fixture is a valid existing provider record');
+  assert.deepEqual(adapter.reviewItems?.map(item => [
+    item.contentValidity.status, item.targetMatching.status, item.verificationStatus
+  ]), [['VALID_RECRUITMENT', 'NOT_MATCHED', 'NOT_CHECKED']],
+  'Recruitment validity must not be inferred from whether the candidate matches');
+});
+
+test('B44 RED: candidate-seeking-work content has its own invalid-recruitment decision', () => {
+  const text = 'Em đang tìm việc Fresher .NET Backend Developer tại Hanoi.\nEm biết ASP.NET Core, mong được giới thiệu việc làm.';
+  const adapter = reviewAdapter([reviewRow('84006', text)]);
+  assert.equal(adapter.records.size, 1);
+  assert.deepEqual(adapter.reviewItems?.map(item => [
+    item.contentValidity.status, item.targetMatching.status, item.verificationStatus
+  ]), [['INVALID_RECRUITMENT', 'NOT_MATCHED', 'NOT_CHECKED']],
+  'A job seeker is a content-validity decision, not just an incompatible technology');
+});
+
+test('B44 RED: review list retains valid nonmatching and matching recruitment without filtering either out', () => {
+  const otherRole = 'Hiring Senior Java Backend Developer\nRequirements: Java Spring; 5 years experience\nLocation: Hanoi';
+  const adapter = reviewAdapter([reviewRow('84007', otherRole), reviewRow('84008')]);
+  assert.equal(adapter.records.size, 2);
+  assert.deepEqual(adapter.reviewItems?.map(item => [
+    item.itemIndex, item.rawContent, item.contentValidity.status, item.targetMatching.status
+  ]), [
+    [0, otherRole, 'VALID_RECRUITMENT', 'NOT_MATCHED'],
+    [1, reviewText, 'VALID_RECRUITMENT', 'TARGET_MATCH']
+  ], 'The review collection must expose all recruitment, not only target matches');
+});
+
+test('B44 safety control: strict discovery still rejects mismatched identity and preserves input evidence', async () => {
+  const mismatch = reviewRow('84009', reviewText, 'https://www.facebook.com/fixture/posts/pfbidSyntheticOther');
+  const accepted = reviewRow('84010');
+  const input = [mismatch, accepted]; const before = structuredClone(input);
+  const adapter = reviewAdapter(input);
+  const report = await runDiscovery({
+    adapter, budget: new ActivityBudget(), planner: { plan: () => [reviewQuery] },
+    extractor: new JobPostExtractor(),
+    reporter: new DiscoveryReporter({ evidenceKind: 'SYNTHETIC_FIXTURE' }),
+    matcher: job => adapter.classify(job), target: {}
+  });
+  assert.equal(report.stopCode, null);
+  assert.deepEqual(report.jobs.map(job => job.sourceIdentity), ['SOCIALAPIS:84010']);
+  assert.equal(report.itemStats.rejectedItems, 1);
+  assert.equal(report.itemStats.rejectionReasons[0].reason, 'POST_ID_URL_MISMATCH');
+  assert.deepEqual(input, before);
+});
+
+for (const [body, validity, target] of [
+  [reviewText + '\nHow to apply?', 'VALID_RECRUITMENT', 'TARGET_MATCH'],
+  ['Hiring Fresher Python Backend Developer\nRequirements: Build REST APIs using FastAPI; 0–1 years experience\nLocation: Hanoi', 'VALID_RECRUITMENT', 'TARGET_MATCH'],
+  ['Hiring Fresher .NET Backend Developer\nRequirements: Build REST APIs using ASP.NET Core; at least 2 years experience\nLocation: Hanoi', 'VALID_RECRUITMENT', 'FALLBACK_MATCH'],
+  ['Hiring Senior Java Backend Developer\nRequirements: Java Spring; 5 years experience\nLocation: Hanoi', 'VALID_RECRUITMENT', 'NOT_MATCHED'],
+  ['Hiring Fresher .NET Backend Developer\nRequirements: Build REST APIs using ASP.NET Core\nLocation: Hanoi\nApplications are closed', 'INVALID_RECRUITMENT', 'NOT_MATCHED'],
+  ['Chia sẻ kiến thức C# và ASP.NET Core. Khóa học lập trình backend.', 'INVALID_RECRUITMENT', 'NOT_MATCHED'],
+  ['Tuyển sinh khóa học Fresher .NET Backend Developer tại Hanoi', 'INVALID_RECRUITMENT', 'NOT_MATCHED'],
+  ['Có công ty nào tuyển Fresher .NET Backend Developer không?\nLocation: Hanoi', 'INVALID_RECRUITMENT', 'NOT_MATCHED'],
+  ['Hiring Backend Fresher Developer\nRequirements: Build REST APIs\nLocation: Hanoi', 'VALID_RECRUITMENT', 'POTENTIAL_MATCH'],
+  ['Hiring Fresher Backend Developer\nRequirements: Build REST APIs\nSalary: 12 triệu NET\nLocation: Hanoi', 'VALID_RECRUITMENT', 'POTENTIAL_MATCH']
+]) test(`B44 classification regression: ${target} / ${validity} / ${body.split('\n')[0]}`, () => {
+  const item = reviewAdapter([reviewRow('85001', body)]).reviewItems[0];
+  assert.equal(item.contentValidity.status, validity); assert.equal(item.targetMatching.status, target);
+  assert.equal(item.verificationStatus, 'NOT_CHECKED');
+  assert.equal(item.publishedAt, null);
+  for (const decision of [item.contentValidity, item.targetMatching]) {
+    assert.ok(decision.reasonCodes.length); assert.ok(decision.explanation);
+    for (const snippet of decision.evidenceSnippets) assert.ok(body.includes(snippet));
+  }
+});
+
+test('B44 missing fields, invalid URL and repost observations remain independent of identity and company verification', () => {
+  const body = 'Hiring Fresher .NET Backend Developer\nRequirements: Build REST APIs using ASP.NET Core';
+  const adapter = reviewAdapter([reviewRow('85002', body, 'javascript:alert(1)'), reviewRow('85003', body)]);
+  assert.equal(adapter.reviewItems.length, 2);
+  assert.equal(adapter.reviewItems[0].sourceUrl, null);
+  assert.ok(adapter.reviewItems[0].sourceWarnings.includes('POST_URL_INVALID_OR_UNSUPPORTED'));
+  assert.ok(adapter.reviewItems[1].sourceWarnings.includes('DUPLICATE_CONTENT'));
+  assert.equal(adapter.reviewItems[0].contentGroupHash, adapter.reviewItems[1].contentGroupHash);
+  assert.equal(adapter.reviewItems[0].contentValidity.status, 'VALID_RECRUITMENT');
+  assert.equal(adapter.reviewItems[0].extracted.company, null);
+  assert.ok(adapter.reviewItems[0].missingFields.includes('LOCATION'));
+  assert.equal(adapter.reviewItems[0].targetMatching.status, 'INSUFFICIENT_DATA');
+});
+
+test('B44 multi-vacancy recruitment keeps each role and does not claim hiring verification', () => {
+  const body = 'Tuyển hộ công ty, chưa rõ tên:\n1. Fresher .NET Backend Developer\nRequirements: Build REST APIs using ASP.NET Core\nLocation: Hanoi\n2. Senior Java Backend Developer\nRequirements: Java Spring; 5 years experience\nLocation: Hanoi';
+  const item = reviewAdapter([reviewRow('85004', body)]).reviewItems[0];
+  assert.equal(item.contentValidity.status, 'VALID_RECRUITMENT');
+  assert.equal(item.extracted.vacancies.length, 2);
+  assert.deepEqual(item.extracted.vacancies.map(v => v.targetStatus), ['TARGET_MATCH', 'NOT_MATCHED']);
+  assert.equal(item.verificationStatus, 'NOT_CHECKED');
+});
+
+test('B44 actual CLI exports all rejected observations without changing historical state or requesting network', () => {
+  const directory = mkdtempSync(join(fileURLToPath(new URL('../.debug/', import.meta.url)), 'b44-review-test-'));
+  const capture = join(directory, 'capture.json'), state = join(directory, 'state.json'), review = join(directory, 'review.json');
+  const cli = fileURLToPath(new URL('../src/cli.mjs', import.meta.url));
+  const noNetwork = 'data:text/javascript,' + encodeURIComponent("import net from 'node:net';globalThis.fetch=()=>{throw new Error('NETWORK_FORBIDDEN')};net.Socket.prototype.connect=function(){throw new Error('NETWORK_FORBIDDEN')};");
+  try {
+    const oldState = JSON.stringify({ evidenceKind: 'LOCAL_PROVIDER_CAPTURE_REPLAY', jobs: [] });
+    writeFileSync(state, oldState);
+    const raw = JSON.stringify({ data: { items: [null, reviewRow('86001', reviewText, 'https://www.facebook.com/fixture/posts/pfbidSyntheticMismatch')] } });
+    writeFileSync(capture, raw);
+    const command = ['--import', noNetwork, cli, '--source', 'socialapis', '--replay', capture, '--output', state,
+      '--review-output', review, '--review-run-id', 'synthetic-cli-review'];
+    assert.throws(() => execFileSync(process.execPath, command, { stdio: 'pipe' }), e => e.status === 1 && e.stderr.toString().includes('NO_VALID_PROVIDER_ITEMS'));
+    const result = JSON.parse(readFileSync(review, 'utf8'));
+    assert.equal(result.items.length, 2); assert.deepEqual(result.items.map(i => i.itemIndex), [0, 1]);
+    assert.equal(result.items[0].rawContent, null);
+    assert.ok(result.items[1].sourceWarnings.includes('POST_ID_URL_MISMATCH'));
+    assert.equal(readFileSync(state, 'utf8'), oldState); assert.equal(readFileSync(capture, 'utf8'), raw);
+    assert.throws(() => execFileSync(process.execPath, command, { stdio: 'pipe' }), e => e.stderr.toString().includes('REVIEW_EXPORT_ALREADY_EXISTS'));
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('B44 unsafe control text has an accurate bounded reason rather than pretending it is oversized', () => {
+  const item = reviewAdapter([reviewRow('86002', 'Hiring\0Developer')]).reviewItems[0];
+  assert.equal(item.rawContent, null);
+  assert.deepEqual(item.contentValidity.reasonCodes, ['POST_TEXT_UNSAFE']);
+  assert.equal(item.contentValidity.status, 'NEEDS_REVIEW');
+});

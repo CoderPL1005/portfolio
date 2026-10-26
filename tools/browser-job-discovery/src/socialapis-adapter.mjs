@@ -1,6 +1,7 @@
 import { Stop } from './core.mjs';
 import { validateQuery, validateDateFilters, canonicalFacebookPost, candidateRecord, boundedOperation } from './discovery-contract.mjs';
 import { SMOKE_QUERY, normalizeSocialApisItem, diagnoseSocialApisItem, parseSocialApisSearchResponse, summarizeSocialApisRows, readSocialApisResponse } from './socialapis-live-smoke.mjs';
+import { buildReviewItems } from './discovery-review.mjs';
 
 export const PROVIDER_SCHEMA_STATUS = 'PROVIDER_RESPONSE_SCHEMA_UNVERIFIED';
 // Separate, manual, one-request diagnostic; V2 discover() remains mock-only.
@@ -12,11 +13,12 @@ const mockTransports = new WeakSet();
  * in runDiscovery. A capture is evidence for its one query, not fresh searches.
  */
 export class SocialApisCaptureDiscoveryAdapter {
-  constructor(payload, { capturedQuery = SMOKE_QUERY, evidenceKind = 'LOCAL_PROVIDER_CAPTURE_REPLAY', budget } = {}) {
+  constructor(payload, { capturedQuery = SMOKE_QUERY, evidenceKind = 'LOCAL_PROVIDER_CAPTURE_REPLAY', budget, reviewContext } = {}) {
     this.query = validateQuery(capturedQuery);
     const parsed = parseSocialApisSearchResponse(payload);
     if (!parsed.rows) throw new Stop(parsed.outcome);
     if (parsed.rows.length > 200) throw new Stop('RESULT_COUNT_LIMIT_EXCEEDED');
+    this.reviewItems = buildReviewItems(parsed.rows, reviewContext, budget);
     this.itemCount = parsed.rows.length;
     this.rejectionDiagnostics = [];
     this.itemStats = { totalItems: parsed.rows.length, acceptedItems: 0, rejectedItems: 0, rejectionReasons: [], outcome: 'EMPTY_RESULTS' };
@@ -83,7 +85,8 @@ export class SocialApisCaptureDiscoveryAdapter {
  */
 export class SocialApisLiveDiscoveryAdapter {
   constructor({ enabled = false, freePlanConfirmed = false, noCashConfirmed = false,
-    maxRequests = 1, maxCredits = 1, timeoutMs = 20_000, query = SMOKE_QUERY, startTime, endTime, endCursor = null } = {}, transport) {
+    maxRequests = 1, maxCredits = 1, timeoutMs = 20_000, query = SMOKE_QUERY, startTime, endTime, endCursor = null, reviewContext } = {}, transport) {
+    this.reviewContext = reviewContext;
     this.options = { enabled, freePlanConfirmed, noCashConfirmed, maxRequests, maxCredits, timeoutMs };
     this.query = validateQuery(query); this.transport = transport;
     this.dateFilters = Object.freeze(validateDateFilters({ startTime, endTime }));
@@ -126,7 +129,7 @@ export class SocialApisLiveDiscoveryAdapter {
             typeof bodyCredits === 'number' && bodyCredits > maxCredits) throw new Stop('PROVIDER_CREDIT_COST_UNVERIFIED_OR_EXCEEDED');
         // Credits-Used remains a separate opaque usage metric, never added.
         const adapter = new SocialApisCaptureDiscoveryAdapter(payload, { capturedQuery: this.query,
-          evidenceKind: this.transport ? 'MOCK_PROVIDER_RESPONSE' : 'LIVE_PROVIDER_RESPONSE', budget });
+          evidenceKind: this.transport ? 'MOCK_PROVIDER_RESPONSE' : 'LIVE_PROVIDER_RESPONSE', budget, reviewContext: this.reviewContext });
         if (controller.signal.aborted) throw new Stop('DISCOVERY_TIMEOUT');
         this.adapter = adapter; this.itemCount = adapter.itemCount; this.pagination = adapter.pagination; this.itemStats = adapter.itemStats;
         this.rejectionDiagnostics = adapter.rejectionDiagnostics;

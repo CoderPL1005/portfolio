@@ -94,6 +94,9 @@ builder.Services.AddCors(options => options.AddPolicy(FrontendCorsPolicy, policy
         .AllowCredentials()));
 
 var app = builder.Build();
+var discoveryMigrationsReady = false;
+var deploymentCommit = builder.Configuration["RENDER_GIT_COMMIT"];
+if (deploymentCommit is not { Length: 40 } || !deploymentCommit.All(Uri.IsHexDigit)) deploymentCommit = null;
 
 if (app.Environment.IsDevelopment())
 {
@@ -115,7 +118,7 @@ app.MapGet(
     () => Results.Ok(ApiResponse<object>.Ok(new { status = "Portfolio API initialized." })));
 app.MapGet(
     "/health",
-    () => Results.Ok(ApiResponse<object>.Ok(new { status = "Healthy" })))
+    () => Results.Ok(ApiResponse<object>.Ok(new { status = "Healthy", discoveryMigrationsReady, deploymentCommit })))
     .AllowAnonymous();
 app.MapControllers();
 
@@ -129,6 +132,12 @@ if (seedRequested)
     var seeder = scope.ServiceProvider.GetRequiredService<DatabaseSeeder>();
     await seeder.SeedAsync(seedPath);
     return;
+}
+
+if (DiscoveryMigrationStartup.ShouldRun(app.Environment.IsProduction(), builder.Configuration["RENDER"], seedRequested))
+{
+    await DiscoveryMigrationStartup.RunAsync(app);
+    discoveryMigrationsReady = true;
 }
 
 app.Run();

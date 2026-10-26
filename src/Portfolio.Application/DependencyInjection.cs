@@ -39,6 +39,17 @@ public static class DependencyInjection
     public static IServiceCollection AddApplication(this IServiceCollection services)
     {
         services.AddScoped<IRequestDispatcher, RequestDispatcher>();
+        services.AddScoped<IRequestHandler<SaveDiscoveryHumanReviewCommand, HumanReviewSummary>, SaveDiscoveryHumanReviewHandler>();
+        services.AddScoped<IRequestValidator<SaveDiscoveryHumanReviewCommand>, SaveDiscoveryHumanReviewValidator>();
+        services.AddScoped<IRequestHandler<GetDiscoveryReviewHistoryQuery, DiscoveryReviewHistory>, GetDiscoveryReviewHistoryHandler>();
+        services.AddScoped<IRequestValidator<GetDiscoveryReviewHistoryQuery>, GetDiscoveryReviewHistoryValidator>();
+        services.AddScoped<IRequestHandler<GetDiscoveryQualityMetricsQuery, DiscoveryQualityReport>, GetDiscoveryQualityMetricsHandler>();
+        services.AddScoped<IRequestValidator<GetDiscoveryQualityMetricsQuery>, GetDiscoveryQualityMetricsValidator>();
+        services.AddScoped<IRequestHandler<ImportDiscoveryReviewCommand, DiscoveryImportResult>, ImportDiscoveryReviewHandler>();
+        services.AddScoped<IRequestValidator<ImportDiscoveryReviewCommand>, ImportDiscoveryReviewValidator>();
+        services.AddScoped<IRequestHandler<GetDiscoveryReviewQuery, DiscoveryReviewList>, GetDiscoveryReviewHandler>();
+        services.AddScoped<IRequestValidator<GetDiscoveryReviewQuery>, GetDiscoveryReviewValidator>();
+        services.AddScoped<IRequestHandler<GetDiscoveryCandidateQuery, DiscoveryReviewDetail>, GetDiscoveryCandidateHandler>();
 
         // Registration order defines the pipeline: validation -> logging -> handler.
         services.AddTransient(typeof(IRequestBehavior<,>), typeof(ValidationBehavior<,>));

@@ -791,6 +791,216 @@ namespace Portfolio.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Portfolio.Domain.Entities.DiscoveryCandidate", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("ContentGroupHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("content_group_hash");
+
+                    b.Property<string>("ContentStatus")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("content_status");
+
+                    b.Property<bool>("IdentityWarning")
+                        .HasColumnType("boolean")
+                        .HasColumnName("identity_warning");
+
+                    b.Property<DateTimeOffset>("IngestedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("ingested_at");
+
+                    b.Property<int>("ItemIndex")
+                        .HasColumnType("integer")
+                        .HasColumnName("item_index");
+
+                    b.Property<int>("PageNumber")
+                        .HasColumnType("integer")
+                        .HasColumnName("page_number");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("payload");
+
+                    b.Property<string>("PayloadHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("payload_hash");
+
+                    b.Property<string>("Query")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("query");
+
+                    b.Property<string>("RunId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("run_id");
+
+                    b.Property<string>("TargetStatus")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("target_status");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ContentGroupHash");
+
+                    b.HasIndex("IngestedAt", "Id");
+
+                    b.HasIndex("RunId", "PageNumber", "ItemIndex")
+                        .IsUnique()
+                        .HasDatabaseName("uq_discovery_candidates_ingestion");
+
+                    b.ToTable("discovery_candidates", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_discovery_candidates_content", "content_status IN ('VALID_RECRUITMENT','INVALID_RECRUITMENT','NEEDS_REVIEW')");
+
+                            t.HasCheckConstraint("ck_discovery_candidates_coordinates", "page_number BETWEEN 1 AND 6 AND item_index BETWEEN 0 AND 199");
+
+                            t.HasCheckConstraint("ck_discovery_candidates_hash", "payload_hash ~ '^[0-9a-f]{64}$' AND (content_group_hash IS NULL OR content_group_hash ~ '^[0-9a-f]{64}$')");
+
+                            t.HasCheckConstraint("ck_discovery_candidates_target", "target_status IN ('TARGET_MATCH','FALLBACK_MATCH','POTENTIAL_MATCH','NOT_MATCHED','INSUFFICIENT_DATA')");
+                        });
+                });
+
+            modelBuilder.Entity("Portfolio.Domain.Entities.DiscoveryCandidateReview", b =>
+                {
+                    b.Property<Guid>("CandidateId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("candidate_id");
+
+                    b.Property<string>("ContentStatus")
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("content_status");
+
+                    b.Property<string>("Notes")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("notes");
+
+                    b.Property<DateTimeOffset>("ReviewedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("reviewed_at");
+
+                    b.Property<Guid>("ReviewedByAdminId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("reviewed_by_admin_id");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("status");
+
+                    b.Property<string>("TargetStatus")
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("target_status");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("CandidateId")
+                        .HasName("discovery_candidate_reviews_pkey");
+
+                    b.HasIndex("Status", "ReviewedAt");
+
+                    b.ToTable("discovery_candidate_reviews", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_discovery_review_labels", "(status = 'UNCERTAIN' AND content_status IS NULL AND target_status IS NULL) OR (status IN ('CONFIRMED','CORRECTED') AND content_status IS NOT NULL AND target_status IS NOT NULL AND content_status IN ('VALID_RECRUITMENT','INVALID_RECRUITMENT','NEEDS_REVIEW') AND target_status IN ('TARGET_MATCH','FALLBACK_MATCH','POTENTIAL_MATCH','NOT_MATCHED','INSUFFICIENT_DATA'))");
+
+                            t.HasCheckConstraint("ck_discovery_review_notes", "length(btrim(notes)) BETWEEN 1 AND 2000");
+
+                            t.HasCheckConstraint("ck_discovery_review_version", "version >= 1");
+                        });
+                });
+
+            modelBuilder.Entity("Portfolio.Domain.Entities.DiscoveryCandidateReviewEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("CandidateId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("candidate_id");
+
+                    b.Property<string>("ContentStatus")
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("content_status");
+
+                    b.Property<string>("Notes")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("notes");
+
+                    b.Property<string>("ObservationPayloadHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("observation_payload_hash");
+
+                    b.Property<DateTimeOffset>("ReviewedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("reviewed_at");
+
+                    b.Property<Guid>("ReviewedByAdminId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("reviewed_by_admin_id");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("status");
+
+                    b.Property<string>("TargetStatus")
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("target_status");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CandidateId", "Version")
+                        .IsUnique()
+                        .HasDatabaseName("uq_discovery_review_event_version");
+
+                    b.ToTable("discovery_candidate_review_events", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_discovery_review_event_hash", "observation_payload_hash ~ '^[0-9a-f]{64}$'");
+
+                            t.HasCheckConstraint("ck_discovery_review_event_labels", "(status = 'UNCERTAIN' AND content_status IS NULL AND target_status IS NULL) OR (status IN ('CONFIRMED','CORRECTED') AND content_status IS NOT NULL AND target_status IS NOT NULL AND content_status IN ('VALID_RECRUITMENT','INVALID_RECRUITMENT','NEEDS_REVIEW') AND target_status IN ('TARGET_MATCH','FALLBACK_MATCH','POTENTIAL_MATCH','NOT_MATCHED','INSUFFICIENT_DATA'))");
+
+                            t.HasCheckConstraint("ck_discovery_review_event_notes", "length(btrim(notes)) BETWEEN 1 AND 2000");
+
+                            t.HasCheckConstraint("ck_discovery_review_event_version", "version >= 1");
+                        });
+                });
+
             modelBuilder.Entity("Portfolio.Domain.Entities.Education", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3057,6 +3267,36 @@ namespace Portfolio.Infrastructure.Persistence.Migrations
                     b.Navigation("ChatMessage");
 
                     b.Navigation("KnowledgeChunk");
+                });
+
+            modelBuilder.Entity("Portfolio.Domain.Entities.DiscoveryCandidateReview", b =>
+                {
+                    b.HasOne("Portfolio.Domain.Entities.DiscoveryCandidate", null)
+                        .WithOne()
+                        .HasForeignKey("Portfolio.Domain.Entities.DiscoveryCandidateReview", "CandidateId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Portfolio.Domain.Entities.AdminUser", null)
+                        .WithMany()
+                        .HasForeignKey("ReviewedByAdminId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Portfolio.Domain.Entities.DiscoveryCandidateReviewEvent", b =>
+                {
+                    b.HasOne("Portfolio.Domain.Entities.DiscoveryCandidateReview", null)
+                        .WithMany()
+                        .HasForeignKey("CandidateId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Portfolio.Domain.Entities.AdminUser", null)
+                        .WithMany()
+                        .HasForeignKey("ReviewedByAdminId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Portfolio.Domain.Entities.ExperienceTechnology", b =>

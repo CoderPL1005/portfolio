@@ -22,11 +22,11 @@ public sealed class ApplicationDbContextModelTests
         "chat_message_sources", "chat_message_feedback", "chat_usage_daily", "raw_job_postings",
         "raw_job_posting_attachments", "job_postings", "job_applications", "job_application_events", "job_application_documents",
         "push_subscriptions", "candidate_job_preferences", "canonical_cvs",
-        "submission_attempts", "submission_attempt_events"
+        "submission_attempts", "submission_attempt_events", "discovery_candidates", "discovery_candidate_reviews", "discovery_candidate_review_events"
     ];
 
     [Fact]
-    public void Model_contains_all_37_expected_tables_and_excludes_contact_messages()
+    public void Model_contains_all_40_expected_tables_and_excludes_contact_messages()
     {
         using var context = CreateContext();
         var tables = context.Model.GetEntityTypes().Select(entity => entity.GetTableName()).Order().ToArray();
@@ -37,13 +37,13 @@ public sealed class ApplicationDbContextModelTests
     }
 
     [Fact]
-    public void Application_context_contract_exposes_all_37_sets()
+    public void Application_context_contract_exposes_all_40_sets()
     {
         var dbSetCount = typeof(IApplicationDbContext).GetProperties()
             .Count(property => property.PropertyType.IsGenericType &&
                 property.PropertyType.GetGenericTypeDefinition() == typeof(DbSet<>));
 
-        Assert.Equal(37, dbSetCount);
+        Assert.Equal(40, dbSetCount);
     }
 
     [Fact]
@@ -61,9 +61,9 @@ public sealed class ApplicationDbContextModelTests
         using var context = CreateContext();
         var model = context.GetService<IDesignTimeModel>().Model;
 
-        Assert.Equal(31, model.GetEntityTypes().SelectMany(entity => entity.GetForeignKeys()).Count());
-        Assert.Equal(96, model.GetEntityTypes().SelectMany(entity => entity.GetCheckConstraints()).Count());
-        Assert.Equal(51, model.GetEntityTypes().SelectMany(entity => entity.GetIndexes()).Count());
+        Assert.Equal(35, model.GetEntityTypes().SelectMany(entity => entity.GetForeignKeys()).Count());
+        Assert.Equal(107, model.GetEntityTypes().SelectMany(entity => entity.GetCheckConstraints()).Count());
+        Assert.Equal(56, model.GetEntityTypes().SelectMany(entity => entity.GetIndexes()).Count());
 
         var experienceTechnology = model.FindEntityType(typeof(ExperienceTechnology))!;
         Assert.Equal(2, experienceTechnology.FindPrimaryKey()!.Properties.Count);
@@ -113,7 +113,7 @@ public sealed class ApplicationDbContextModelTests
         using var context = CreateContext();
         var migrations = context.Database.GetMigrations().ToArray();
 
-        Assert.Equal(16, migrations.Length);
+        Assert.Equal(18, migrations.Length);
         Assert.EndsWith("_InitialPortfolioSchema", migrations[0], StringComparison.Ordinal);
         Assert.EndsWith("_RemoveContactMessages", migrations[1], StringComparison.Ordinal);
         Assert.EndsWith("_AllowDuplicateSocialLinkPlatforms", migrations[2], StringComparison.Ordinal);
@@ -130,6 +130,8 @@ public sealed class ApplicationDbContextModelTests
         Assert.EndsWith("_AddPrivateCanonicalCv", migrations[13], StringComparison.Ordinal);
         Assert.EndsWith("_FinalizeApplicationPackage", migrations[14], StringComparison.Ordinal);
         Assert.EndsWith("_AddSubmissionAttemptCore", migrations[15], StringComparison.Ordinal);
+        Assert.EndsWith("_AddDiscoveryReviewCandidates", migrations[16], StringComparison.Ordinal);
+        Assert.EndsWith("_AddDiscoveryHumanReviews", migrations[17], StringComparison.Ordinal);
     }
 
     [Fact]
@@ -399,6 +401,55 @@ public sealed class ApplicationDbContextModelTests
         Assert.Contains("ck_candidate_job_preferences_salary_consistency", script, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("minimum_salary IS NULL AND salary_currency IS NULL AND salary_period IS NULL", script, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("minimum_salary IS NOT NULL AND salary_currency IS NOT NULL AND salary_period IS NOT NULL", script, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Discovery_migration_and_model_only_add_immutable_observation_storage()
+    {
+        using var context = CreateContext();
+        var migrations = context.Database.GetMigrations().ToArray();
+        var script = context.GetService<IMigrator>().GenerateScript(migrations[15], migrations[16]);
+        Assert.Equal(1, CountOccurrences(script.ToUpperInvariant(), "CREATE TABLE"));
+        Assert.Contains("CREATE TABLE discovery_candidates", script);
+        Assert.Contains("CREATE UNIQUE INDEX uq_discovery_candidates_ingestion", script);
+        Assert.DoesNotContain("ALTER TABLE raw_job_postings", script, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("ALTER TABLE job_postings", script, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("DELETE FROM", script, StringComparison.OrdinalIgnoreCase);
+        var type = context.Model.FindEntityType(typeof(DiscoveryCandidate))!;
+        Assert.Contains(type.GetIndexes(), i => i.IsUnique && i.Properties.Select(p => p.Name).SequenceEqual(new[] { "RunId", "PageNumber", "ItemIndex" }));
+        var q = context.DiscoveryCandidates.Where(c => c.ContentGroupHash != null && context.DiscoveryCandidates.Count(d => d.ContentGroupHash == c.ContentGroupHash) > 1)
+            .OrderByDescending(c => c.IngestedAt).ThenBy(c => c.RunId).ThenBy(c => c.PageNumber).ThenBy(c => c.ItemIndex).Take(20).ToQueryString();
+        Assert.Contains("SELECT", q); Assert.Contains("LIMIT", q);
+    }
+
+    [Fact]
+    public void Human_review_migration_is_additive_and_enforces_atomic_aggregate_boundaries()
+    {
+        using var context = CreateContext();
+        var migrations = context.Database.GetMigrations().ToArray();
+        var sql = context.GetService<IMigrator>().GenerateScript(migrations[16], migrations[17]);
+        Assert.Equal(2, CountOccurrences(sql.ToUpperInvariant(), "CREATE TABLE"));
+        Assert.DoesNotContain("ALTER TABLE", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("DROP TABLE", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("UPDATE ", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("DELETE FROM", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("discovery_candidate_reviews_pkey", sql);
+        Assert.Contains("uq_discovery_review_event_version", sql);
+        var review = context.Model.FindEntityType(typeof(DiscoveryCandidateReview))!;
+        Assert.True(review.FindProperty(nameof(DiscoveryCandidateReview.Version))!.IsConcurrencyToken);
+        Assert.Equal("discovery_candidate_reviews_pkey", review.FindPrimaryKey()!.GetName());
+        Assert.All(review.GetForeignKeys(), fk => Assert.Equal(DeleteBehavior.Restrict, fk.DeleteBehavior));
+        var events = context.Model.FindEntityType(typeof(DiscoveryCandidateReviewEvent))!;
+        Assert.All(events.GetForeignKeys(), fk => Assert.Equal(DeleteBehavior.Restrict, fk.DeleteBehavior));
+        Assert.Contains(events.GetIndexes(), i => i.IsUnique && i.Properties.Select(p => p.Name).SequenceEqual(new[]{"CandidateId","Version"}));
+        var query = context.DiscoveryCandidates.Where(c => !context.DiscoveryCandidateReviews.Any(v => v.CandidateId == c.Id)).Take(20).ToQueryString();
+        Assert.Contains("NOT EXISTS", query);
+        var metricsSql = Portfolio.Application.Features.JobHunting.GetDiscoveryQualityMetricsHandler.Query(context, "fixture-run").ToQueryString();
+        Assert.Contains("LEFT JOIN", metricsSql);
+        Assert.Contains("LIMIT", metricsSql);
+        Assert.DoesNotContain("OFFSET", metricsSql);
+        Assert.DoesNotContain("FOR UPDATE", metricsSql);
+        Assert.DoesNotContain("reviewed_by_admin_id", metricsSql);
     }
 
     private static ApplicationDbContext CreateContext()

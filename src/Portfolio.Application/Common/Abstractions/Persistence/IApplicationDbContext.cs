@@ -32,6 +32,9 @@ public interface IApplicationDbContext
     DbSet<ChatMessageFeedback> ChatMessageFeedback { get; }
     DbSet<ChatUsageDaily> ChatUsageDaily { get; }
     DbSet<RawJobPosting> RawJobPostings { get; }
+    DbSet<DiscoveryCandidate> DiscoveryCandidates { get; }
+    DbSet<DiscoveryCandidateReview> DiscoveryCandidateReviews { get; }
+    DbSet<DiscoveryCandidateReviewEvent> DiscoveryCandidateReviewEvents { get; }
     DbSet<RawJobPostingAttachment> RawJobPostingAttachments { get; }
     DbSet<JobPosting> JobPostings { get; }
     DbSet<JobApplication> JobApplications { get; }

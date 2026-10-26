@@ -4,9 +4,16 @@ import { ApiClientService } from '../../../core/api/api-client.service';
 import { ApiResponse } from '../../../core/api/api-response.model';
 import { PagedResult } from '../../../core/api/paged-result.model';
 import { requireData } from '../shared/admin-api';
+import { DiscoveryReviewDetail, DiscoveryReviewList, HumanReview, HumanReviewWrite, ReviewHistory, DiscoveryQualityReport } from './discovery-review.models';
 import { ApplicationCreate, ApplicationDetail, ApplicationItem, ApplicationPackage, ApplicationPackageReadiness, ApplicationSubmissionReadiness, CandidateJobPreferences, CandidateJobPreferencesWrite, CanonicalCv, DocumentItem, EmailApplicationWorkflowResult, JobCreate, JobDetail, JobFitAnalysis, JobSummary, JobWrite, RawJobPostingSummary, ScreenshotSubmissionResult, SubmissionAttempt } from './job-hunting.models';
 @Injectable({ providedIn: 'root' }) export class JobHuntingService {
  private api=inject(ApiClientService);
+ saveDiscoveryReview(id:string,body:HumanReviewWrite){return this.api.post<ApiResponse<HumanReview>>(`admin/job-hunting/discovery/${id}/reviews`,body).pipe(map(requireData))}
+ discoveryHistory(id:string,page=1){return this.api.get<ApiResponse<ReviewHistory>>(`admin/job-hunting/discovery/${id}/reviews`,{params:{page,pageSize:20}}).pipe(map(requireData))}
+ discoveryMetrics(runId?:string){return this.api.get<ApiResponse<DiscoveryQualityReport>>('admin/job-hunting/discovery/quality-metrics',{params:runId?{runId}:{}}).pipe(map(requireData))}
+ discovery(params:Record<string,string|number|boolean>){return this.api.get<ApiResponse<DiscoveryReviewList>>('admin/job-hunting/discovery',{params}).pipe(map(requireData))}
+ discoveryItem(id:string){return this.api.get<ApiResponse<DiscoveryReviewDetail>>(`admin/job-hunting/discovery/${id}`).pipe(map(requireData))}
+ importDiscovery(bundle:unknown){return this.api.post<ApiResponse<{inserted:number;unchanged:number}>>('admin/job-hunting/discovery/import',bundle).pipe(map(requireData))}
  jobs(params:Record<string,string|number|boolean>){return this.api.get<ApiResponse<PagedResult<JobSummary>>>('admin/job-postings',{params}).pipe(map(requireData))} job(id:string){return this.api.get<ApiResponse<JobDetail>>(`admin/job-postings/${id}`).pipe(map(requireData))}
  createJob(body:JobCreate){return this.api.post<ApiResponse<JobDetail>>('admin/job-postings',body).pipe(map(requireData))} updateJob(id:string,body:JobWrite&{expectedVersion:number}){return this.api.put<ApiResponse<JobDetail>>(`admin/job-postings/${id}`,body).pipe(map(requireData))}
  submitScreenshots(submissionId:string,files:readonly File[]){const body=new FormData();body.append('submissionId',submissionId);for(const file of files)body.append('files',file,file.name);return this.api.post<ApiResponse<ScreenshotSubmissionResult>>('admin/raw-job-postings/screenshots',body).pipe(map(requireData))}
