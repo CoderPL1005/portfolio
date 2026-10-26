@@ -290,7 +290,7 @@ function chooseNext(state, page, nextCursor, secret, now) {
 // Caller must upload the CLAIMED state before calling this function, then upload
 // the completed state before acknowledgePersistence. No in-process retry exists.
 export async function performPage(state, { transport, now = new Date(), receipt, enabled, freePlanConfirmed, noCashConfirmed,
-  secret = process.env.SOCIALAPIS_API_KEY, timeoutMs = 20_000, claimArtifactName } = {}) {
+  secret = process.env.SOCIALAPIS_API_KEY, timeoutMs = 20_000, claimArtifactName, captureReviews = false } = {}) {
   const run = state.orchestration;
   if (run.phase !== 'CLAIMED' || !/^[1-9]\d*$/u.test(String(receipt ?? ''))) throw new Stop('DURABLE_CLAIM_RECEIPT_REQUIRED');
   const attempt = state.requestLedger[run.attemptIndex];
@@ -305,7 +305,8 @@ export async function performPage(state, { transport, now = new Date(), receipt,
     if (run.plan.pageNumber > 1 && (!validCursor(inputCursor) || digest(inputCursor) !== run.plan.cursorHash)) throw new Stop('CONTINUATION_INVALID');
     adapter = new SocialApisLiveDiscoveryAdapter({ enabled, freePlanConfirmed, noCashConfirmed,
       query: run.plan.query, ...run.config, ...{ query: run.plan.query, maxRequests: 1, maxCredits: 1 },
-      timeoutMs, endCursor: inputCursor }, transport);
+      timeoutMs, endCursor: inputCursor,
+      ...(captureReviews ? {reviewContext:{profile:run.config.profile,targetJobPreferences:run.config.targetJobPreferences,evaluatedAt:now.toISOString()}} : {}) }, transport);
     const budget = new ActivityBudget();
     const urls = await adapter.search(undefined, adapter.query, budget);
     // A provider page is bounded to 200 records by the existing adapter. Extract
@@ -394,6 +395,11 @@ export async function performPage(state, { transport, now = new Date(), receipt,
     // Only complete, schema-validated all-invalid responses with verified cost
     // qualify. Timeouts, unknown cost and all other failures remain ambiguous.
     run.phase = knownTerminalFailure(state) ? 'TERMINAL_UNCONFIRMED' : 'CLAIMED';
+  }
+  if(captureReviews && Array.isArray(adapter?.adapter?.reviewItems)) {
+    const {reviewExport}=await import('./discovery-review.mjs');
+    state.discoveryReviews??=[];
+    state.discoveryReviews.push(reviewExport(adapter.adapter.reviewItems,{runId:String(run.workflowRunId),query:attempt.query,pageNumber:attempt.pageNumber}));
   }
   state.workflowMetrics = workflowMetrics(state);
   return state;

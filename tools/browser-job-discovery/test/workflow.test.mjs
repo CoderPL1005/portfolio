@@ -57,7 +57,7 @@ test('manual workflow explicitly consents to up to six requests, scoped key and 
 });
 
 test('real composite action persists claim before HTTP, result before ack and exposes secret only to HTTP', () => {
-  const steps = action.runs.steps;
+  const steps = action.runs.steps.filter(s=>!['Encrypt claim for automatic sync','Encrypt completed response observations before synchronization','Automatically import saved observations, never refetch provider'].includes(s.name));
   assert.equal(action.runs.using, 'composite');
   assert.deepEqual(steps.map(s => s.id ?? s.name), ['claim','reservation','One HTTP attempt, never retry','result','Confirm persistence or fail closed']);
   assert.equal(steps[0].run, 'node src/cli.mjs --orchestrate claim');
@@ -74,10 +74,33 @@ test('real composite action persists claim before HTTP, result before ack and ex
   }
   const init = discoveryWorkflow.jobs.discover.steps.findIndex(s => s.run === 'node src/cli.mjs --orchestrate init');
   const firstPage = discoveryWorkflow.jobs.discover.steps.findIndex(s => s.uses === './.github/actions/socialapis-discovery-page');
-  assert.ok(init < firstPage); assert.equal(discoveryWorkflow.jobs.discover.steps[init+1].uses, 'actions/upload-artifact@v4');
+  assert.ok(init < firstPage); assert.ok(discoveryWorkflow.jobs.discover.steps.slice(init+1,firstPage).some(s=>s.uses==='actions/upload-artifact@v4'));
   assert.equal(discoveryWorkflow.jobs.discover.steps[init].env.DISCOVERY_POLICY, '${{ inputs.policy }}');
   assert.equal(discoveryWorkflow.jobs.discover.steps[init].env.RESUME_CONTINUATION, '${{ inputs.resume_continuation }}');
   assert.doesNotMatch(discoveryWorkflow.jobs.discover.steps[init].run, /\$\{\{/u);
+});
+test('automatic sync demo validates readiness before HTTP, persists ciphertext before import, and exposes no personal Admin token',()=>{
+  const job=discoveryWorkflow.jobs.discover,steps=job.steps;
+  assert.equal(discoveryWorkflow.on.workflow_dispatch.inputs.auto_admin_sync.default,false);
+  assert.equal(discoveryWorkflow.on.workflow_dispatch.inputs.sync_only.default,false);
+  const preflight=steps.findIndex(s=>s.run==='node src/cli.mjs --orchestrate sync-ready');
+  const first=steps.findIndex(s=>s.uses==='./.github/actions/socialapis-discovery-page');
+  assert.ok(preflight<first);assert.equal(steps[preflight].env.SOCIALAPIS_API_KEY,undefined);
+  const calls=steps.filter(s=>s.uses==='./.github/actions/socialapis-discovery-page');
+  assert.equal(calls[0].if,'!inputs.sync_only');
+  assert.ok(calls.slice(1).every(s=>s.if==='!inputs.sync_only && !inputs.auto_admin_sync'));
+  const parts=action.runs.steps;
+  const result=parts.findIndex(s=>s.id==='result'),sync=parts.findIndex(s=>s.run==='node src/cli.mjs --orchestrate sync');
+  assert.ok(result<sync);assert.match(parts[sync].if,/steps.result.outputs.artifact-id/u);
+  assert.equal(parts[sync].env.SOCIALAPIS_API_KEY,undefined);
+  assert.equal(parts[sync].env.DISCOVERY_IMPORT_KEY,'${{ inputs.import_key }}');
+  for(const step of [...steps,...parts].filter(s=>s.uses==='actions/upload-artifact@v4')){
+    assert.match(step.with.path,/\.enc/u);assert.doesNotMatch(step.with.path,/\*|review-final|response\.json/u);
+  }
+  const replay=steps.find(s=>s.name==='Retry only saved Admin synchronization');
+  assert.equal(replay.if,'inputs.auto_admin_sync && inputs.sync_only');assert.equal(replay.env.SOCIALAPIS_API_KEY,undefined);
+  assert.doesNotMatch(workflowText+actionText,/ADMIN_TOKEN|ADMIN_PASSWORD|schedule:/u);
+  assert.equal(parts.find(s=>s.run==='node src/cli.mjs --orchestrate page').env.SOCIALAPIS_PRIVATE_CHECKPOINT_CONFIRMED,'${{ env.DISCOVERY_AUTO_ADMIN_SYNC }}');
 });
 
 const checkpoint = discoveryWorkflow.jobs.discover.steps.find(s => s.id === 'checkpoint');

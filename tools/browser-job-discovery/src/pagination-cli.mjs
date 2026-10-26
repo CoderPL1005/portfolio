@@ -5,6 +5,7 @@ import { resolve, relative, isAbsolute } from 'node:path';
 import { Stop } from './core.mjs';
 import { beginExecution, claimPage, performPage, acknowledgePersistence, workflowMetrics, reconcileTerminalFailure } from './pagination-orchestrator.mjs';
 import { resolveDiscoveryPolicy, planFacebookQueries } from './candidate-technology-profile.mjs';
+import {encryptCheckpoint,decryptCheckpoint,syncConfiguration,preflightAdminSync,syncReviews} from './admin-sync.mjs';
 
 const hash=value=>createHash('sha256').update(value).digest('hex');
 function actionsResultEvidence(state) {
@@ -49,16 +50,33 @@ function dateSelection(name,policyValue) {
 // Existing CLI entrypoint; action commands make the artifact/HTTP boundary explicit.
 export async function paginationCli(args) {
   const action = args[args.indexOf('--orchestrate') + 1];
-  if (args.length !== 2 || !['init', 'claim', 'page', 'ack', 'summary','reconcile'].includes(action)) throw new Stop('INVALID_ORCHESTRATION_COMMAND');
+  if (args.length !== 2 || !['init', 'claim', 'page', 'ack', 'summary','reconcile','seal','unseal','sync-ready','sync'].includes(action)) throw new Stop('INVALID_ORCHESTRATION_COMMAND');
   if(action==='reconcile')return reconcileLocalResult();
+  if(action==='sync-ready'){
+    // No provider request: validate import-only credentials and readiness first.
+    encryptCheckpoint(Buffer.from('{}'),process.env.DISCOVERY_CHECKPOINT_KEY);
+    await preflightAdminSync(syncConfiguration());console.log(JSON.stringify({adminSyncReady:true,providerRequests:0}));return;
+  }
   const directory = fileURLToPath(new URL('../.debug/', import.meta.url));
   const output = resolve(process.env.DISCOVERY_STATE_FILE ?? fileURLToPath(new URL('../.debug/socialapis-discovery.json', import.meta.url)));
   const local = relative(directory, output);
   if (!local || local.startsWith('..') || isAbsolute(local) || !output.endsWith('.json') ||
       output === resolve(directory, 'socialapis-response.json')) throw new Stop('PRIVATE_REPLAY_OUTPUT_REQUIRED');
+  if(action==='seal'){
+    if((await stat(output)).size>12*1024*1024)throw new Stop('CHECKPOINT_CAPACITY_REACHED');
+    await writeFile(output+'.enc',encryptCheckpoint(await readFile(output),process.env.DISCOVERY_CHECKPOINT_KEY),{mode:0o600});return;
+  }
+  if(action==='unseal'){
+    try{
+      if((await stat(output+'.enc')).size>12*1024*1024+32)throw new Stop('CHECKPOINT_CAPACITY_REACHED');
+      const plaintext=decryptCheckpoint(await readFile(output+'.enc'),process.env.DISCOVERY_CHECKPOINT_KEY);
+      await writeFile(output,plaintext,{mode:0o600});
+    }catch(error){if(error.code!=='ENOENT')throw error;else await stat(output);} // Explicit legacy plaintext compatibility, never initialize here.
+    return;
+  }
   let state;
   try {
-    if ((await stat(output)).size > 10_485_760) throw new Stop('CHECKPOINT_CAPACITY_REACHED');
+    if ((await stat(output)).size > 12 * 1024 * 1024) throw new Stop('CHECKPOINT_CAPACITY_REACHED');
     state = JSON.parse(await readFile(output, 'utf8'));
     if (!['SOCIALAPIS_DISCOVERY_STATE', 'LIVE_PROVIDER_RESPONSE', 'LOCAL_PROVIDER_CAPTURE_REPLAY'].includes(state.evidenceKind) || !Array.isArray(state.jobs)) throw new Stop('INVALID_REPLAY_STORE');
   } catch (error) {
@@ -67,6 +85,12 @@ export async function paginationCli(args) {
   }
   const receipt = process.env.ARTIFACT_RECEIPT;
   if (action === 'init') {
+    if(process.env.DISCOVERY_AUTO_ADMIN_SYNC==='true'){
+      syncConfiguration();encryptCheckpoint(Buffer.from('{}'),process.env.DISCOVERY_CHECKPOINT_KEY);
+      if(process.env.DISCOVERY_MAX_REQUESTS!=='1'||process.env.DISCOVERY_MAX_CREDITS!=='1'||process.env.RESUME_CONTINUATION==='true'||
+        process.env.DISCOVERY_QUERY!=='Fresher .NET Hà Nội'||process.env.DISCOVERY_START_TIME!=='2026-10-26'||process.env.DISCOVERY_END_TIME!=='2026-10-26')
+        throw new Stop('ONE_REQUEST_DEMO_CONFIGURATION_REQUIRED');
+    }
     if (process.env.RESUME_CONTINUATION !== undefined && !['true','false',''].includes(process.env.RESUME_CONTINUATION)) throw new Stop('INVALID_RESUME_OPTION');
     // Downloading this exact result artifact is proof of persistence. A claim
     // artifact is NEVER acknowledged, even if the prior workflow reported PASS.
@@ -95,18 +119,23 @@ export async function paginationCli(args) {
     const active = claimPage(state);
     if (process.env.GITHUB_OUTPUT) await appendFile(process.env.GITHUB_OUTPUT, `active=${active}\n`);
   } else if (action === 'page') {
-    if (process.env.SOCIALAPIS_PUBLIC_ARTIFACT_CONSENT !== 'true') throw new Stop('PUBLIC_ARTIFACT_CONSENT_REQUIRED');
+    if (process.env.SOCIALAPIS_PUBLIC_ARTIFACT_CONSENT !== 'true' && !(process.env.DISCOVERY_AUTO_ADMIN_SYNC==='true' &&
+        process.env.SOCIALAPIS_PRIVATE_CHECKPOINT_CONFIRMED==='true')) throw new Stop('PUBLIC_ARTIFACT_CONSENT_REQUIRED');
     await performPage(state, { receipt, enabled: process.env.SOCIALAPIS_LIVE_ENABLED === 'true',
-      claimArtifactName:process.env.ARTIFACT_NAME,
+      claimArtifactName:process.env.ARTIFACT_NAME,captureReviews:process.env.DISCOVERY_AUTO_ADMIN_SYNC==='true',
       freePlanConfirmed: process.env.SOCIALAPIS_FREE_PLAN_CONFIRMED === 'true', noCashConfirmed: process.env.SOCIALAPIS_NO_CASH_CONFIRMED === 'true' });
   } else if (action === 'ack') {
     // Result has already been uploaded even when HTTP/parsing failed.
     acknowledgePersistence(state, receipt, actionsResultEvidence(state));
+  } else if(action==='sync'){
+    // Only saved observations are replayed. This branch never constructs a provider adapter.
+    const summaries=await syncReviews(state,syncConfiguration());
+    console.log(JSON.stringify({adminSync:summaries,providerRequests:0}));
   }
   state.workflowMetrics = workflowMetrics(state);
   await mkdir(directory, { recursive: true });
   const json = JSON.stringify(state, null, 2) + '\n';
-  if (Buffer.byteLength(json) > 1_048_576) throw new Stop('CHECKPOINT_CAPACITY_REACHED');
+  if (Buffer.byteLength(json) > (process.env.DISCOVERY_AUTO_ADMIN_SYNC==='true' ? 12*1024*1024 : 1_048_576)) throw new Stop('CHECKPOINT_CAPACITY_REACHED');
   const temporary = `${output}.${randomUUID()}.tmp`;
   try { await writeFile(temporary, json, { mode: 0o600, flag: 'wx' }); await rename(temporary, output); }
   finally { await unlink(temporary).catch(error => { if (error.code !== 'ENOENT') throw error; }); }

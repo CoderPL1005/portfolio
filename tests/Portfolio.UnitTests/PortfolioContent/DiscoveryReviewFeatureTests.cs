@@ -48,6 +48,20 @@ public sealed class DiscoveryReviewFeatureTests
         await using var db = Db();
         await Assert.ThrowsAsync<NotFoundException>(() => new GetDiscoveryCandidateHandler(db).HandleAsync(new(Guid.NewGuid())));
     }
+    [Fact] public async Task Unreviewed_targets_sort_first_without_hiding_invalid_rows_and_collection_dates_filter_on_server()
+    {
+        await using var db=Db();var b=Bundle();var import=new ImportDiscoveryReviewHandler(db,TimeProvider.System);
+        await import.HandleAsync(new(b));
+        await import.HandleAsync(new(b with {RunId="target-run",Items=[b.Items[0] with {TargetMatching=new("TARGET_MATCH",["TARGET_MATCH"],"Synthetic target.",[])}]}));
+        var rows=await db.DiscoveryCandidates.ToListAsync();
+        foreach(var row in rows)row.IngestedAt=DateTimeOffset.Parse(row.RunId=="target-run"?"2026-10-25T12:00:00Z":"2026-10-26T12:00:00Z");
+        await db.SaveChangesAsync();
+        var all=await new GetDiscoveryReviewHandler(db).HandleAsync(new());
+        Assert.Equal("target-run",all.Results.Items.First().RunId);Assert.Equal(2,all.Counts.Total);
+        var day=await new GetDiscoveryReviewHandler(db).HandleAsync(new(CollectedFrom:DateTimeOffset.Parse("2026-10-26T00:00:00Z"),CollectedBefore:DateTimeOffset.Parse("2026-10-27T00:00:00Z")));
+        Assert.Equal("synthetic-unit",Assert.Single(day.Results.Items).RunId);
+        Assert.NotEmpty(await new GetDiscoveryReviewValidator().ValidateAsync(new(CollectedFrom:DateTimeOffset.UtcNow,CollectedBefore:DateTimeOffset.MinValue)));
+    }
     [Fact] public async Task Database_failure_does_not_leave_tracked_imports_or_promote_jobs()
     {
         await using var db = Db(); db.FailSaveChanges = true;

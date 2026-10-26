@@ -24,7 +24,8 @@ public static class AuthenticationExtensions
         services.AddSingleton<IClientIdentityProvider, ClientIdentityProvider>();
         services.AddScoped<ICurrentUser, CurrentUser>();
         services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-            .AddJwtBearer();
+            .AddJwtBearer()
+            .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, DiscoveryImportAuthentication>(DiscoveryImportAuthentication.SchemeName, _ => { });
         services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
             .Configure<IOptions<JwtSettings>>((options, configuredSettings) =>
             {

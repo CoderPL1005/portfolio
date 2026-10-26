@@ -104,4 +104,28 @@ describe('Discovery Review',()=>{
     expect(fixture.nativeElement.querySelector('[data-testid=raw-content]')).toBeNull();
     expect(fixture.nativeElement.querySelector('#review-import')).toBeNull();expect(c.error()).not.toBe('');
   });
+  it('renders readable job fields while raw extraction is collapsed, without inventing missing facts',()=>{
+    const {c,fixture}=mount('synthetic-1');const d=detail();
+    d.item.extracted={company:'Example (post-mentioned)',role:'Fresher Backend Developer',location:'Hanoi',technologies:['C#'],
+      contact:{email:'jobs@example.invalid'},vacancies:[{title:'Fresher Backend Developer',requirements:null}]};
+    c.detail.set(d);fixture.detectChanges();const el:HTMLElement=fixture.nativeElement;
+    expect(el.querySelector('.job-heading')?.textContent).toContain('Fresher Backend Developer');
+    expect(el.querySelector('app-discovery-job-information')?.textContent).toContain('jobs@example.invalid');
+    expect(el.querySelector('app-discovery-job-information')?.textContent).toContain('Chưa có bằng chứng');
+    expect(el.querySelector<HTMLDetailsElement>('.technical')?.open).toBe(false);
+    expect(el.textContent).toContain('UNKNOWN');expect(el.textContent).not.toContain('[object Object]');
+  });
+  it('updates human decision immediately from save receipt without an additional stale detail GET',()=>{
+    const {c,api,fixture}=mount('synthetic-1');c.draft(c.detail()!).notes='Checked original';
+    c.saveReview('CONFIRMED');fixture.detectChanges();
+    expect(c.detail()?.humanReview?.version).toBe(1);expect(api.discoveryItem).toHaveBeenCalledTimes(1);
+    expect(fixture.nativeElement.textContent).toContain('CONFIRMED');
+  });
+  it('sends an explicit local calendar-day window to the server and shows all review states in list',()=>{
+    const {c,api,fixture}=mount();c.collectedDate='2026-10-26';c.filter();
+    const params=(api.discovery.mock.calls as unknown as [Record<string,string>][]).at(-1)![0];
+    expect(new Date(params['collectedFrom']).getDate()).toBe(26);
+    expect(new Date(params['collectedBefore']).getDate()).toBe(27);
+    expect(fixture.nativeElement.querySelector('tbody')?.textContent).toContain('UNREVIEWED');
+  });
 });

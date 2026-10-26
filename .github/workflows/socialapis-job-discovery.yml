@@ -19,6 +19,14 @@ on:
         description: FIRST run only - initialize empty discovery state
         type: boolean
         default: false
+      auto_admin_sync:
+        description: One-request 26 Oct demo; encrypted checkpoints and automatic import-only Admin sync
+        type: boolean
+        default: false
+      sync_only:
+        description: Retry only saved observation import; ZERO SocialAPIs requests (requires auto_admin_sync)
+        type: boolean
+        default: false
       resume_continuation:
         description: Resume saved core cursor with matching query/date/profile; never fall back to page 1
         type: boolean
@@ -61,9 +69,11 @@ concurrency:
 
 jobs:
   discover:
-    if: github.ref == 'refs/heads/main' && inputs.confirm_live && inputs.confirm_free_no_cash && inputs.confirm_artifact_data
+    if: github.ref == 'refs/heads/main' && ((inputs.confirm_live && inputs.confirm_free_no_cash && (inputs.confirm_artifact_data || inputs.auto_admin_sync)) || (inputs.auto_admin_sync && inputs.sync_only))
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      DISCOVERY_AUTO_ADMIN_SYNC: ${{ inputs.auto_admin_sync }}
     defaults:
       run:
         working-directory: tools/browser-job-discovery
@@ -119,7 +129,26 @@ jobs:
           run-id: ${{ steps.checkpoint.outputs.run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: tools/browser-job-discovery/.debug
+      - name: Decrypt restored checkpoint (legacy plaintext remains supported)
+        if: steps.checkpoint.outputs.initialize != 'true'
+        env:
+          DISCOVERY_CHECKPOINT_KEY: ${{ secrets.DISCOVERY_CHECKPOINT_KEY }}
+        run: node src/cli.mjs --orchestrate unseal
+      - name: Verify private checkpoint key and production import readiness before any provider request
+        if: inputs.auto_admin_sync
+        env:
+          DISCOVERY_ADMIN_ORIGIN: https://portfolio-api-forn.onrender.com
+          DISCOVERY_IMPORT_KEY: ${{ secrets.DISCOVERY_IMPORT_KEY }}
+          DISCOVERY_CHECKPOINT_KEY: ${{ secrets.DISCOVERY_CHECKPOINT_KEY }}
+        run: node src/cli.mjs --orchestrate sync-ready
+      - name: Retry only saved Admin synchronization
+        if: inputs.auto_admin_sync && inputs.sync_only
+        env:
+          DISCOVERY_ADMIN_ORIGIN: https://portfolio-api-forn.onrender.com
+          DISCOVERY_IMPORT_KEY: ${{ secrets.DISCOVERY_IMPORT_KEY }}
+        run: node src/cli.mjs --orchestrate sync
       - name: Validate profile and display maximum credit exposure before HTTP
+        if: '!inputs.sync_only'
         env:
           INITIALIZE_STATE: ${{ steps.checkpoint.outputs.initialize }}
           ARTIFACT_RECEIPT: ${{ steps.checkpoint.outputs.artifact_id }}
@@ -134,45 +163,66 @@ jobs:
           DISCOVERY_MAX_CREDITS: ${{ inputs.max_credits }}
           DISCOVERY_POLICY: ${{ inputs.policy }}
           RESUME_CONTINUATION: ${{ inputs.resume_continuation }}
+          DISCOVERY_IMPORT_KEY: ${{ secrets.DISCOVERY_IMPORT_KEY }}
+          DISCOVERY_CHECKPOINT_KEY: ${{ secrets.DISCOVERY_CHECKPOINT_KEY }}
         run: node src/cli.mjs --orchestrate init
+      - name: Encrypt initialized checkpoint for automatic sync
+        if: inputs.auto_admin_sync && !inputs.sync_only
+        env:
+          DISCOVERY_CHECKPOINT_KEY: ${{ secrets.DISCOVERY_CHECKPOINT_KEY }}
+        run: node src/cli.mjs --orchestrate seal
       - name: Persist initialized state before any HTTP
+        if: '!inputs.sync_only'
         uses: actions/upload-artifact@v4
         with:
           name: socialapis-discovery-checkpoint
-          path: tools/browser-job-discovery/.debug/socialapis-discovery.json
+          path: tools/browser-job-discovery/.debug/socialapis-discovery.json${{ inputs.auto_admin_sync && '.enc' || '' }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 90
       - uses: ./.github/actions/socialapis-discovery-page
+        if: '!inputs.sync_only'
         with:
           slot: '1'
           api_key: ${{ secrets.SOCIALAPIS_API_KEY }}
+          checkpoint_key: ${{ secrets.DISCOVERY_CHECKPOINT_KEY }}
+          import_key: ${{ secrets.DISCOVERY_IMPORT_KEY }}
       - uses: ./.github/actions/socialapis-discovery-page
+        if: '!inputs.sync_only && !inputs.auto_admin_sync'
         with:
           slot: '2'
           api_key: ${{ secrets.SOCIALAPIS_API_KEY }}
       - uses: ./.github/actions/socialapis-discovery-page
+        if: '!inputs.sync_only && !inputs.auto_admin_sync'
         with:
           slot: '3'
           api_key: ${{ secrets.SOCIALAPIS_API_KEY }}
       - uses: ./.github/actions/socialapis-discovery-page
+        if: '!inputs.sync_only && !inputs.auto_admin_sync'
         with:
           slot: '4'
           api_key: ${{ secrets.SOCIALAPIS_API_KEY }}
       - uses: ./.github/actions/socialapis-discovery-page
+        if: '!inputs.sync_only && !inputs.auto_admin_sync'
         with:
           slot: '5'
           api_key: ${{ secrets.SOCIALAPIS_API_KEY }}
       - uses: ./.github/actions/socialapis-discovery-page
+        if: '!inputs.sync_only && !inputs.auto_admin_sync'
         with:
           slot: '6'
           api_key: ${{ secrets.SOCIALAPIS_API_KEY }}
       - name: Final workflow metrics
         run: node src/cli.mjs --orchestrate summary
+      - name: Encrypt final state
+        if: inputs.auto_admin_sync
+        env:
+          DISCOVERY_CHECKPOINT_KEY: ${{ secrets.DISCOVERY_CHECKPOINT_KEY }}
+        run: node src/cli.mjs --orchestrate seal
       - uses: actions/upload-artifact@v4
         with:
           name: socialapis-discovery-state
-          path: tools/browser-job-discovery/.debug/socialapis-discovery.json
+          path: tools/browser-job-discovery/.debug/socialapis-discovery.json${{ inputs.auto_admin_sync && '.enc' || '' }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 90

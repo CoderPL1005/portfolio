@@ -7,6 +7,12 @@ inputs:
   api_key:
     required: true
     description: Secret available only to the HTTP step
+  checkpoint_key:
+    default: ''
+    description: AES-256 key for private automatic-sync checkpoints
+  import_key:
+    default: ''
+    description: Import-only machine credential, never a personal Admin token
 runs:
   using: composite
   steps:
@@ -14,12 +20,19 @@ runs:
       shell: bash
       working-directory: tools/browser-job-discovery
       run: node src/cli.mjs --orchestrate claim
+    - name: Encrypt claim for automatic sync
+      if: steps.claim.outputs.active == 'true' && env.DISCOVERY_AUTO_ADMIN_SYNC == 'true'
+      shell: bash
+      working-directory: tools/browser-job-discovery
+      env:
+        DISCOVERY_CHECKPOINT_KEY: ${{ inputs.checkpoint_key }}
+      run: node src/cli.mjs --orchestrate seal
     - id: reservation
       if: steps.claim.outputs.active == 'true'
       uses: actions/upload-artifact@v4
       with:
         name: socialapis-page-${{ github.run_id }}-${{ inputs.slot }}-claim
-        path: tools/browser-job-discovery/.debug/socialapis-discovery.json
+        path: tools/browser-job-discovery/.debug/socialapis-discovery.json${{ env.DISCOVERY_AUTO_ADMIN_SYNC == 'true' && '.enc' || '' }}
         include-hidden-files: true
         if-no-files-found: error
         retention-days: 90
@@ -34,19 +47,35 @@ runs:
         SOCIALAPIS_LIVE_ENABLED: 'true'
         SOCIALAPIS_FREE_PLAN_CONFIRMED: 'true'
         SOCIALAPIS_NO_CASH_CONFIRMED: 'true'
-        SOCIALAPIS_PUBLIC_ARTIFACT_CONSENT: 'true'
+        SOCIALAPIS_PUBLIC_ARTIFACT_CONSENT: ${{ env.DISCOVERY_AUTO_ADMIN_SYNC != 'true' }}
+        SOCIALAPIS_PRIVATE_CHECKPOINT_CONFIRMED: ${{ env.DISCOVERY_AUTO_ADMIN_SYNC }}
       run: node src/cli.mjs --orchestrate page
+    - name: Encrypt completed response observations before synchronization
+      if: success() && steps.claim.outputs.active == 'true' && env.DISCOVERY_AUTO_ADMIN_SYNC == 'true'
+      shell: bash
+      working-directory: tools/browser-job-discovery
+      env:
+        DISCOVERY_CHECKPOINT_KEY: ${{ inputs.checkpoint_key }}
+      run: node src/cli.mjs --orchestrate seal
     - id: result
       if: success() && steps.claim.outputs.active == 'true'
       uses: actions/upload-artifact@v4
       with:
         name: socialapis-page-${{ github.run_id }}-${{ inputs.slot }}-result
-        path: tools/browser-job-discovery/.debug/socialapis-discovery.json
+        path: tools/browser-job-discovery/.debug/socialapis-discovery.json${{ env.DISCOVERY_AUTO_ADMIN_SYNC == 'true' && '.enc' || '' }}
         include-hidden-files: true
         if-no-files-found: error
         retention-days: 90
+    - name: Automatically import saved observations, never refetch provider
+      if: success() && steps.result.outputs.artifact-id != '' && env.DISCOVERY_AUTO_ADMIN_SYNC == 'true'
+      shell: bash
+      working-directory: tools/browser-job-discovery
+      env:
+        DISCOVERY_ADMIN_ORIGIN: https://portfolio-api-forn.onrender.com
+        DISCOVERY_IMPORT_KEY: ${{ inputs.import_key }}
+      run: node src/cli.mjs --orchestrate sync
     - name: Confirm persistence or fail closed
-      if: steps.claim.outputs.active == 'true'
+      if: always() && steps.claim.outputs.active == 'true' && steps.result.outputs.artifact-id != ''
       shell: bash
       working-directory: tools/browser-job-discovery
       env:

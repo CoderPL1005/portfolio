@@ -22,7 +22,8 @@ public sealed record DiscoveryReviewImport(int SchemaVersion, string Provider, s
 public sealed record ImportDiscoveryReviewCommand(DiscoveryReviewImport Bundle) : IRequest<DiscoveryImportResult>;
 public sealed record DiscoveryImportResult(int Inserted, int Unchanged);
 public sealed record GetDiscoveryReviewQuery(int Page = 1, int PageSize = 20, string? ContentStatus = null,
-    string? TargetStatus = null, string? RunId = null, bool? IdentityWarning = null, bool? DuplicatesOnly = null, string? ReviewState = null) : IRequest<DiscoveryReviewList>;
+    string? TargetStatus = null, string? RunId = null, bool? IdentityWarning = null, bool? DuplicatesOnly = null, string? ReviewState = null,
+    DateTimeOffset? CollectedFrom = null, DateTimeOffset? CollectedBefore = null) : IRequest<DiscoveryReviewList>;
 public sealed record GetDiscoveryCandidateQuery(Guid Id) : IRequest<DiscoveryReviewDetail>;
 public sealed record DiscoveryReviewDetail(Guid Id, string RunId, string Query, int PageNumber, DateTimeOffset IngestedAt,
     int DuplicateCount, DiscoveryReviewItem Item, HumanReviewSummary HumanReview);
@@ -134,6 +135,7 @@ public sealed class GetDiscoveryReviewValidator : IRequestValidator<GetDiscovery
         if (r.ContentStatus is not null && !DiscoveryReviewRules.ContentStatuses.Contains(r.ContentStatus)) f.Add(new("contentStatus", "Invalid content status."));
         if (r.TargetStatus is not null && !DiscoveryReviewRules.TargetStatuses.Contains(r.TargetStatus)) f.Add(new("targetStatus", "Invalid target status."));
         if (r.RunId?.Length > 100) f.Add(new("runId", "Invalid run ID."));
+        if (r.CollectedFrom >= r.CollectedBefore) f.Add(new("collectedFrom", "Invalid collection date range."));
         if (r.ReviewState is not null && !new[] { "REVIEWED", "UNREVIEWED", "CONFIRMED", "CORRECTED", "UNCERTAIN" }.Contains(r.ReviewState)) f.Add(new("reviewState", "Invalid review filter."));
         return Task.FromResult<IReadOnlyCollection<ValidationFailure>>(f);
     }
@@ -144,6 +146,8 @@ public sealed class GetDiscoveryReviewHandler(IApplicationDbContext db) : IReque
     {
         var all = db.DiscoveryCandidates.AsNoTracking(); var q = all;
         if (r.RunId is not null) q = q.Where(c => c.RunId == r.RunId);
+        if (r.CollectedFrom.HasValue) q = q.Where(c => c.IngestedAt >= r.CollectedFrom.Value);
+        if (r.CollectedBefore.HasValue) q = q.Where(c => c.IngestedAt < r.CollectedBefore.Value);
         if (r.ContentStatus is not null) q = q.Where(c => c.ContentStatus == r.ContentStatus);
         if (r.TargetStatus is not null) q = q.Where(c => c.TargetStatus == r.TargetStatus);
         if (r.IdentityWarning.HasValue) q = q.Where(c => c.IdentityWarning == r.IdentityWarning.Value);
@@ -156,7 +160,8 @@ public sealed class GetDiscoveryReviewHandler(IApplicationDbContext db) : IReque
             await q.CountAsync(c => c.ContentStatus == "INVALID_RECRUITMENT", ct), await q.CountAsync(c => c.ContentStatus == "NEEDS_REVIEW", ct),
             await q.CountAsync(c => c.TargetStatus == "TARGET_MATCH", ct), await q.CountAsync(c => c.IdentityWarning, ct),
             await q.CountAsync(c => c.ContentGroupHash != null && all.Count(d => d.ContentGroupHash == c.ContentGroupHash) > 1, ct));
-        var rows = await q.OrderByDescending(c => c.IngestedAt).ThenBy(c => c.RunId).ThenBy(c => c.PageNumber).ThenBy(c => c.ItemIndex)
+        var rows = await q.OrderByDescending(c => c.TargetStatus == "TARGET_MATCH" && !db.DiscoveryCandidateReviews.Any(v => v.CandidateId == c.Id))
+            .ThenByDescending(c => c.IngestedAt).ThenBy(c => c.RunId).ThenBy(c => c.PageNumber).ThenBy(c => c.ItemIndex)
             .Skip((r.Page - 1) * r.PageSize).Take(r.PageSize).ToListAsync(ct);
         var hashes = rows.Where(c => c.ContentGroupHash != null).Select(c => c.ContentGroupHash!).Distinct().ToArray();
         var groups = await all.Where(c => hashes.Contains(c.ContentGroupHash!)).GroupBy(c => c.ContentGroupHash).Select(g => new { Hash = g.Key, Count = g.Count() }).ToListAsync(ct);
