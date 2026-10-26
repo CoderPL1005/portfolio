@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "demoId": "discovery-demo-2026-10-26",
+  "query": "Fresher .NET Hà Nội",
+  "startTime": "2026-10-26",
+  "endTime": "2026-10-26",
+  "maxRequests": 1,
+  "maxCredits": 1,
+  "policy": {
+    "mode": "development",
+    "profile": {
+      "technologies": [".NET", "C#", "ASP.NET Core", "EF Core"],
+      "locations": ["Hà Nội"],
+      "seniorities": ["Intern", "Fresher", "Junior"]
+    }
+  }
+}

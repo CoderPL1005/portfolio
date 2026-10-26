@@ -1,0 +1,94 @@
+name: Discovery one-shot demo trigger (no schedule)
+
+# Adding the marker to main once is the only automatic activation event.
+# No push to source files, deployments, or subsequent marker edits can run the demo.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/discovery/demo-once-2026-10-26.arm'
+
+permissions:
+  contents: write  # create the immutable-attempt claim tag before dispatch
+  actions: write   # dispatch the existing, safeguarded manual workflow
+
+concurrency:
+  group: discovery-demo-2026-10-26-one-shot
+  cancel-in-progress: false
+
+jobs:
+  dispatch-once:
+    if: github.ref == 'refs/heads/main' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require first addition of the exact demo marker
+        id: marker
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = '.github/discovery/demo-once-2026-10-26.arm';
+            const before = context.payload.before;
+            if (!before || /^0+$/u.test(before)) throw new Error('PUSH_BASE_UNAVAILABLE');
+            const comparison = await github.rest.repos.compareCommits({
+              ...context.repo, base: before, head: context.sha
+            });
+            const added = comparison.data.files?.some(f => f.filename === marker && f.status === 'added');
+            if (!added) {
+              core.notice('No newly added one-shot marker: no dispatch and no provider request.');
+              core.setOutput('added', 'false');
+              return;
+            }
+            core.setOutput('added', 'true');
+
+      - uses: actions/checkout@v4
+        if: steps.marker.outputs.added == 'true'
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        if: steps.marker.outputs.added == 'true'
+        with:
+          node-version: 22.12.0
+
+      - name: Offline demo configuration tests (zero provider requests)
+        if: steps.marker.outputs.added == 'true'
+        run: node --test tools/browser-job-discovery/test/demo-once-config.test.mjs
+
+      - name: Validate pinned demo configuration
+        id: config
+        if: steps.marker.outputs.added == 'true'
+        run: node tools/browser-job-discovery/src/demo-once-config.mjs
+
+      - name: Reserve one-shot claim and dispatch existing guarded workflow
+        if: steps.marker.outputs.added == 'true'
+        uses: actions/github-script@v7
+        env:
+          DISPATCH_INPUTS: ${{ steps.config.outputs.inputs }}
+        with:
+          script: |
+            const tag = 'discovery-demo-2026-10-26-claimed';
+            const inputs = JSON.parse(process.env.DISPATCH_INPUTS);
+            // Atomic, persistent claim BEFORE dispatch. If dispatch fails,
+            // do not auto-retry or risk a second provider request.
+            try {
+              await github.rest.git.createRef({
+                ...context.repo, ref: `refs/tags/${tag}`, sha: context.sha
+              });
+            } catch (error) {
+              if (error.status === 422) {
+                try {
+                  await github.rest.git.getRef({ ...context.repo, ref: `tags/${tag}` });
+                  core.notice('One-shot claim already exists. Skipping dispatch.');
+                  return;
+                } catch { /* Not a confirmed duplicate; fail closed. */ }
+              }
+              throw error;
+            }
+            await github.rest.actions.createWorkflowDispatch({
+              ...context.repo,
+              workflow_id: 'socialapis-job-discovery.yml',
+              ref: 'main',
+              inputs
+            });
+            core.notice('One guarded workflow_dispatch created. No schedule or automatic retry.');
