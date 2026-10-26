@@ -7,7 +7,9 @@ const PROVIDER_ACTION = './.github/actions/socialapis-discovery-page';
 const BARRIER = 'Offline unit and configuration tests (no provider secret)';
 export const HISTORY_LIMITS = Object.freeze({ pages: 5, runs: 100, perPage: 20, metadataPages: 3, metadataPerPage: 100 });
 // Reviewed workflow source only. Unknown revisions must not become evidence of
-// zero HTTP merely because their steps use familiar display names.
+// zero HTTP merely because their steps use familiar display names. These
+// sources are reviewed to have NO SocialAPIs execution path outside the six
+// PROVIDER_ACTION steps (init/sync/readiness/claim-tag scripts do not call it).
 export const REVIEWED_WORKFLOW_HASHES = new Set([
   'b444787eaa084d3a23672b305f0228b7ffd7c60cc58bc3ab4055fc11467477cf', // 7e057ca (legacy)
   '73f5fcbdbe72f31ecdf63cd1551de56e15f78c00888b9c77132a5a3706409495', // e82298e
@@ -46,7 +48,7 @@ async function executionEvidence(github, repo, run) {
   const workflow=parse(source),definitions=workflow.jobs.discover.steps;
   const jobs=await metadata(params=>github.rest.actions.listJobsForWorkflowRun({...repo,run_id:run.id,filter:'all',...params}),'jobs');
   if(jobs.length!==1 || jobs[0].name!=='discover' || jobs[0].run_id!==run.id || jobs[0].status!=='completed' ||
-    jobs[0].run_attempt!==1 || !Array.isArray(jobs[0].steps))fail('CHECKPOINT_JOB_EVIDENCE_UNVERIFIED');
+    jobs[0].run_attempt!==1 || jobs[0].conclusion!==run.conclusion || !Array.isArray(jobs[0].steps))fail('CHECKPOINT_JOB_EVIDENCE_UNVERIFIED');
   const steps=jobs[0].steps.filter(s=>s.name!=='Set up job' && s.name!=='Complete job' && !s.name.startsWith('Post '));
   if(steps.length!==definitions.length || steps.some((s,i)=>s.name!==stepName(definitions[i]) || s.status!=='completed' ||
     !Number.isSafeInteger(s.number) || i>0 && s.number<=steps[i-1].number))fail('CHECKPOINT_JOB_EVIDENCE_UNVERIFIED');
@@ -59,6 +61,11 @@ async function executionEvidence(github, repo, run) {
     // steps explicitly skipped, proves this workflow could not reach HTTP.
     preHttp:run.conclusion==='failure' && failed>=0 && failed<=barrier &&
       steps.slice(0,failed).every(s=>s.conclusion==='success') && steps.slice(failed+1).every(s=>s.conclusion==='skipped'),
+    // A later non-provider failure is also conclusive when complete metadata
+    // proves EVERY reviewed provider action was skipped. Absence of artifacts
+    // alone is never proof, nor is a cancelled/unknown/possibly started action.
+    zeroProvider:run.conclusion==='failure' && failed>barrier && steps[barrier].conclusion==='success' &&
+      steps.every(s=>['success','failure','skipped'].includes(s.conclusion)) && providers.every(s=>s.conclusion==='skipped'),
     startedSlots:providers.flatMap((s,i)=>s.conclusion==='skipped'?[]:[i+1])
   };
 }
@@ -73,6 +80,7 @@ function selectArtifact(artifacts,run,evidence){
     if(!m || m[1]!==String(run.id))fail('CHECKPOINT_ARTIFACT_PROVENANCE_INVALID');
     return {...a,slot:Number(m[2]),kind:m[3]};
   });
+  if(evidence.zeroProvider && pages.length)fail('CHECKPOINT_CONTRADICTORY_EXECUTION_EVIDENCE');
   pages.sort((a,b)=>b.slot-a.slot || Number(b.kind==='result')-Number(a.kind==='result'));
   const selected=pages[0] ?? related.find(a=>a.name==='socialapis-discovery-state') ?? related.find(a=>a.name==='socialapis-discovery-checkpoint');
   if(!selected)return null;
@@ -118,8 +126,8 @@ export async function locateCheckpoint({github,context,initialize=false,attempt=
         const evidence=await executionEvidence(github,context.repo,run);
         const selected=selectArtifact(artifacts,run,evidence);
         if(selected)return {...selected,skipped_runs:JSON.stringify(skipped)};
-        if(!evidence.preHttp)fail('CHECKPOINT_NO_ARTIFACT_HTTP_UNPROVEN');
-        skipped.push({runId:String(run.id),reason:'VERIFIED_PRE_HTTP_FAILURE'});
+        if(!evidence.preHttp && !evidence.zeroProvider)fail('CHECKPOINT_NO_ARTIFACT_HTTP_UNPROVEN');
+        skipped.push({runId:String(run.id),reason:evidence.preHttp?'VERIFIED_PRE_HTTP_FAILURE':'VERIFIED_ZERO_PROVIDER_FAILURE'});
       }
       if(seen>total)fail('CHECKPOINT_HISTORY_CHANGED_OR_INCOMPLETE');
       if(seen===total){

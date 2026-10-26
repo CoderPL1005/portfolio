@@ -44,6 +44,63 @@ test('missing artifacts plus unknown/skipped/cancelled steps never skip to older
     assert.ok(!f.calls.some(c=>c.name==='artifacts'&&c.run_id===100));
   }
 });
+
+// Reproduce the operator-reported failure points with synthetic GitHub metadata;
+// these fixtures are not downloaded job metadata from the actual runs.
+for(const [id,mode] of [[40385642761,'ZERO_PROVIDER_INIT_FAILURE'],[40386421921,'ZERO_PROVIDER_RECOVERY_FAILURE']])
+test(`verified zero-provider failure pattern ${id} skips to prior checkpoint after the offline barrier`,async()=>{
+  const record=run(id,{run_number:199});
+  const f=historyFixture({runs:[run(200),record,run(100)],modes:{[id]:mode},artifacts:{100:pair()}});
+  const selected=await locate(f);
+  assert.equal(selected.run_id,'100');assert.equal(selected.artifact_id,'456');
+  assert.deepEqual(JSON.parse(selected.skipped_runs),[{runId:String(id),reason:'VERIFIED_ZERO_PROVIDER_FAILURE'}]);
+});
+
+test('both zero-provider failures preserve the older terminal result and all accounting for separate reconciliation',async()=>{
+  const prior=40216232001,original=terminalState(),bytes=JSON.stringify(original);
+  const f=historyFixture({runs:[run(200),run(40386421921,{run_number:199}),run(40385642761,{run_number:198}),run(prior,{run_number:100})],
+    modes:{40386421921:'ZERO_PROVIDER_RECOVERY_FAILURE',40385642761:'ZERO_PROVIDER_INIT_FAILURE',[prior]:'PROVIDER'},artifacts:{[prior]:pair(prior)}});
+  const selected=await locate(f);
+  assert.equal(selected.run_id,String(prior));assert.equal(selected.artifact_name,`socialapis-page-${prior}-1-result`);
+  assert.equal(selected.claim_artifact_id,'123');assert.equal(JSON.parse(selected.skipped_runs).length,2);
+  assert.equal(JSON.stringify(original),bytes); // locator does not load/edit state or acknowledge anything
+  assert.ok(f.calls.every(c=>['repository','runs','artifacts','jobs','source'].includes(c.name)));
+});
+
+test('post-barrier failures require ALL provider steps explicitly skipped, never missing/started/ambiguous',async()=>{
+  const record=run(199),valid=jobsFor(record,'ZERO_PROVIDER_INIT_FAILURE');
+  for(const conclusion of ['success','failure','cancelled','timed_out','neutral',null,undefined]){
+    const jobs=structuredClone(valid),provider=jobs[0].steps.findLast(s=>s.name==='Run ./.github/actions/socialapis-discovery-page');
+    provider.conclusion=conclusion;
+    const f=historyFixture({runs:[run(200),record,run(100)],artifacts:{100:pair()},jobRows:{199:jobs}});
+    await assert.rejects(()=>locate(f),/NO_ARTIFACT_HTTP_UNPROVEN/u);
+    assert.ok(!f.calls.some(c=>c.name==='artifacts'&&c.run_id===100));
+  }
+  for(const mutate of [
+    j=>j[0].steps.splice(j[0].steps.findIndex(s=>s.name==='Run ./.github/actions/socialapis-discovery-page'),1),
+    j=>j[0].steps.find(s=>s.name==='Run ./.github/actions/socialapis-discovery-page').status='in_progress',
+    j=>j[0].conclusion='success',
+    j=>j[0].steps.find(s=>s.name==='Offline unit and configuration tests (no provider secret)').conclusion='cancelled'
+  ]){
+    const jobs=structuredClone(valid);mutate(jobs);
+    const f=historyFixture({runs:[run(200),record,run(100)],artifacts:{100:pair()},jobRows:{199:jobs}});
+    await assert.rejects(()=>locate(f),/CHECKPOINT_/u);assert.ok(!f.calls.some(c=>c.run_id===100));
+  }
+});
+
+test('zero-provider claim never overrides unreviewed alternate HTTP paths, unavailable metadata or artifact evidence',async()=>{
+  const record=run(199),base={runs:[run(200),record,run(100)],modes:{199:'ZERO_PROVIDER_INIT_FAILURE'},artifacts:{100:pair()}};
+  for(const patch of [
+    {sources:{[record.head_sha]:source.replace('run: node src/cli.mjs --orchestrate fresh-init','run: node src/cli.mjs --orchestrate page')}},
+    {jobRows:{199:[]}},
+    {artifacts:{...base.artifacts,199:[artifact(789,'socialapis-page-199-1-claim')]}},
+    {artifacts:{...base.artifacts,199:[artifact(789,'socialapis-discovery-checkpoint',{expired:true})]}},
+    {failMethod:'jobs'}
+  ]){
+    const f=historyFixture({...base,...patch});await assert.rejects(()=>locate(f),/CHECKPOINT_/u);
+    assert.ok(!f.calls.some(c=>c.name==='artifacts'&&c.run_id===100));
+  }
+});
 test('metadata can prove offline failure only for reviewed source and complete matching step/job evidence',async()=>{
   const record=run(199),valid=jobsFor(record,'PRE_HTTP_FAILURE');
   const cases=[

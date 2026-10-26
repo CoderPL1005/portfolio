@@ -12,10 +12,14 @@ export function artifact(id,name,options={}){return {id,name,expired:false,...op
 export function jobsFor(record,mode='PRE_REQUEST_CHECKPOINT',startedSlots=[1]){
   const barrier=definitions.findIndex(s=>s.run==='npm test');
   const checkpoint=definitions.findIndex(s=>s.name==='Persist initialized state before any HTTP');
+  const failureName={ZERO_PROVIDER_INIT_FAILURE:'Initialize isolated fresh session from audit evidence only',
+    ZERO_PROVIDER_RECOVERY_FAILURE:'Validate development safeguards and locate previous checkpoint'}[mode];
+  const failedAt=failureName?definitions.findIndex(s=>s.name===failureName):-1;
   let slot=0;
   const steps=definitions.map((d,index)=>{
     let conclusion=index<=checkpoint?'success':'skipped';
     if(mode==='PRE_HTTP_FAILURE')conclusion=index<barrier?'success':index===barrier?'failure':'skipped';
+    if(failureName)conclusion=index<failedAt?'success':index===failedAt?'failure':'skipped';
     if(mode==='UNPROVEN')conclusion='skipped';
     if(d.uses==='./.github/actions/socialapis-discovery-page' && mode==='PROVIDER')conclusion=startedSlots.includes(++slot)?'failure':'skipped';
     return {name:d.name??`Run ${d.uses??d.run.split('\n')[0]}`,number:index+2,status:'completed',conclusion};
