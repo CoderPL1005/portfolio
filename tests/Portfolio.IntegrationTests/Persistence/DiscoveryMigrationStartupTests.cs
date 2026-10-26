@@ -33,6 +33,11 @@ public sealed class DiscoveryMigrationStartupTests
                     await using var insert=new NpgsqlCommand("INSERT INTO \"__EFMigrationsHistory\" (\"MigrationId\",\"ProductVersion\") VALUES (@id,'8.0.11')",admin);
                     insert.Parameters.AddWithValue("id",migration);await insert.ExecuteNonQueryAsync();
                 }
+                // SearchPath alone does not set NpgsqlHistoryRepository.TableSchema.
+                // Prove EF sees the seeded schema before exercising the concurrency path.
+                Assert.Contains(DiscoveryReleaseMigration.Predecessor,await seed.Database.GetAppliedMigrationsAsync());
+                Assert.Equal(new[]{DiscoveryReleaseMigration.Candidates,DiscoveryReleaseMigration.Reviews},
+                    await seed.Database.GetPendingMigrationsAsync());
             }
             var probe=new MigrationLockProbe(cs.ConnectionString);
             await using var first=Context(cs.ConnectionString,probe);
@@ -52,9 +57,27 @@ public sealed class DiscoveryMigrationStartupTests
     }
     private static ApplicationDbContext Context(string cs,IInterceptor? interceptor=null)
     {
-        var options=new DbContextOptionsBuilder<ApplicationDbContext>().UseNpgsql(cs,x=>x.UseVector());
+        var schema=new NpgsqlConnectionStringBuilder(cs).SearchPath;
+        if(string.IsNullOrWhiteSpace(schema))throw new InvalidOperationException("An isolated test schema is required.");
+        var options=new DbContextOptionsBuilder<ApplicationDbContext>().UseNpgsql(cs,x=>
+        {
+            x.UseVector();
+            x.MigrationsHistoryTable("__EFMigrationsHistory",schema);
+        });
         if(interceptor is not null)options.AddInterceptors(interceptor);
         return new(options.Options);
+    }
+    [Fact]
+    public void Isolated_fixture_qualifies_history_for_both_creation_and_existence_checks()
+    {
+        const string schema="discovery_startup_offline";
+        using var db=Context($"Host=127.0.0.1;Port=1;Database=offline_design_time;Search Path={schema}");
+        var history=db.GetService<IHistoryRepository>();
+        Assert.Contains($"{schema}.\"__EFMigrationsHistory\"",history.GetCreateScript());
+        var existsSql=Assert.IsType<string>(history.GetType().GetProperty("ExistsSql",
+            System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic)!.GetValue(history));
+        Assert.Contains("n.nspname='"+schema+"'",existsSql);
+        Assert.DoesNotContain("n.nspname='public'",existsSql);
     }
     private sealed class MigrationLockProbe(string connectionString):DbCommandInterceptor
     {
@@ -66,7 +89,8 @@ public sealed class DiscoveryMigrationStartupTests
         public override async ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(DbCommand command,CommandEventData data,InterceptionResult<int> result,CancellationToken ct=default)
         {
             if(command.CommandText==DiscoveryReleaseMigration.LockSql && Interlocked.Increment(ref locks)==2)SecondAttempting.TrySetResult();
-            if(command.CommandText.Contains("CREATE TABLE discovery_",StringComparison.Ordinal) || command.CommandText.Contains("INSERT INTO \"__EFMigrationsHistory\"",StringComparison.Ordinal))
+            if(command.CommandText.Contains("CREATE TABLE discovery_",StringComparison.Ordinal) ||
+                (command.CommandText.StartsWith("INSERT INTO ",StringComparison.Ordinal) && command.CommandText.Contains("\"__EFMigrationsHistory\"",StringComparison.Ordinal)))
             {
                 Assert.NotNull(command.Transaction);
                 await using var other=new NpgsqlConnection(connectionString);await other.OpenAsync(ct);
