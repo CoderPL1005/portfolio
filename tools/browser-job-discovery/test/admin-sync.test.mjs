@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {encryptCheckpoint,decryptCheckpoint,syncConfiguration,preflightAdminSync,syncReviews} from '../src/admin-sync.mjs';
-import {beginExecution,claimPage,performPage,acknowledgePersistence,accountingFingerprint,workflowMetrics} from '../src/pagination-orchestrator.mjs';
+import {beginExecution,claimPage,performPage,acknowledgePersistence,workflowMetrics,calendarDay} from '../src/pagination-orchestrator.mjs';
 import {resolveOneRequestPolicy} from '../src/candidate-technology-profile.mjs';
 import {mkdtemp,mkdir,readFile,writeFile,rm} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
@@ -18,9 +18,7 @@ const policy={portfolioSnapshot:{schemaVersion:1,source:'PORTFOLIO_PUBLIC_API_EX
 test('V1 producer to import contract: mixed batch, vacancy matching, repost dedup, encrypted persistence and sync-only recovery',async()=>{
   const now=new Date(),resolved=resolveOneRequestPolicy(policy,preferences);
   const state=beginExecution({jobs:[]},resolved,'81001',{now});
-  const globalBudget={maxRequests31Days:20,maxCredits31Days:20,source:'OPERATOR_VERIFIED_FREE_ACCOUNT',freePlan:true,noAutoTopUp:true,
-    freeCreditsRemaining:1,verifiedAt:now.toISOString(),ledgerFingerprint:accountingFingerprint([])};
-  state.oneRequestExecution={workflowRunId:'81001',globalBudget,querySelection:resolved.querySelection};
+  state.oneRequestExecution={workflowRunId:'81001',querySelection:resolved.querySelection};
   const dotnet='Hiring Fresher .NET Backend Developer\nRequirements: Build REST APIs using .NET; 0–1 years experience\nLocation: Hanoi';
   const row=(id,text,url=`https://facebook.com/fixture/posts/${id}`)=>({basic_info:{post_id:id,post_text:text,url},engagement:{},media:{},author:{}});
   const wire={data:{items:[row('8101',dotnet),row('8102','Hiring Intern Python Backend Developer\nRequirements: Python and FastAPI; build REST APIs; no experience required\nLocation: Hanoi'),
@@ -67,18 +65,17 @@ test('V1 producer to import contract: mixed batch, vacancy matching, repost dedu
   }
 });
 
-test('actual V1 CLI plans one Backend query without the old date lock and refuses unverified global balance before HTTP',async()=>{
+test('actual manual V1 CLI needs no balance JSON or rolling quota, preserving eight historic attempts today',async()=>{
   const directory=fileURLToPath(new URL('../',import.meta.url));await mkdir(join(directory,'.debug'),{recursive:true});
   const local=await mkdtemp(join(directory,'.debug','v1-init-')),output=join(local,'state.json');
   const guard='data:text/javascript,'+encodeURIComponent(`import net from 'node:net';net.Socket.prototype.connect=()=>{throw Error('NETWORK_FORBIDDEN')};globalThis.fetch=()=>{throw Error('NETWORK_FORBIDDEN')};`);
-  const budget={source:'OPERATOR_VERIFIED_FREE_ACCOUNT',freePlan:true,noAutoTopUp:true,freeCreditsRemaining:1,verifiedAt:new Date().toISOString(),ledgerFingerprint:accountingFingerprint([])};
   const env={...process.env,DISCOVERY_STATE_FILE:output,INITIALIZE_STATE:'true',GITHUB_RUN_ID:'81002',DISCOVERY_AUTO_ADMIN_SYNC:'true',DISCOVERY_ONE_REQUEST_V1:'true',
     DISCOVERY_CHECKPOINT_KEY:secret,DISCOVERY_IMPORT_KEY:secret,DISCOVERY_ADMIN_ORIGIN:config.origin,DISCOVERY_QUERY:'',RESUME_CONTINUATION:'false',
-    DISCOVERY_START_TIME:'2026-10-27',DISCOVERY_END_TIME:'2026-10-28',DISCOVERY_MAX_REQUESTS:'1',DISCOVERY_MAX_CREDITS:'1',DISCOVERY_POLICY:JSON.stringify(policy),
-    SOCIALAPIS_MAX_31_DAY_REQUESTS:'20',SOCIALAPIS_MAX_31_DAY_CREDITS:'20',SOCIALAPIS_FREE_BALANCE_EVIDENCE:JSON.stringify(budget)};
+    DISCOVERY_START_TIME:'2026-10-27',DISCOVERY_END_TIME:'2026-10-28',DISCOVERY_MAX_REQUESTS:'1',DISCOVERY_MAX_CREDITS:'1',DISCOVERY_POLICY:JSON.stringify(policy)};
+  for(const name of ['SOCIALAPIS_MAX_31_DAY_REQUESTS','SOCIALAPIS_MAX_31_DAY_CREDITS','SOCIALAPIS_FREE_BALANCE_EVIDENCE'])delete env[name];
   const invoke=(changes={})=>execFileSync(process.execPath,['--import',guard,'src/cli.mjs','--orchestrate','init'],{cwd:directory,env:{...env,...changes},stdio:'pipe'});
   try{
-    for(const change of [{SOCIALAPIS_FREE_BALANCE_EVIDENCE:''},{SOCIALAPIS_MAX_31_DAY_CREDITS:''},{DISCOVERY_MAX_REQUESTS:'2'},{DISCOVERY_MAX_CREDITS:'2'},
+    for(const change of [{DISCOVERY_MAX_REQUESTS:'2'},{DISCOVERY_MAX_CREDITS:'2'},
       {DISCOVERY_QUERY:'arbitrary query'},{RESUME_CONTINUATION:'true'},{DISCOVERY_AUTO_ADMIN_SYNC:'false'},
       {DISCOVERY_POLICY:JSON.stringify({profile:{technologies:['.NET'],locations:['Hanoi'],seniorities:['Junior']}})}])assert.throws(()=>invoke(change));
     invoke();const saved=JSON.parse(await readFile(output,'utf8'));
@@ -87,8 +84,17 @@ test('actual V1 CLI plans one Backend query without the old date lock and refuse
     assert.equal(saved.oneRequestExecution.querySelection.query,saved.orchestration.config.query);
     assert.ok(!/Junior|Frontend/iu.test(saved.orchestration.config.query));
     assert.equal(saved.oneRequestExecution.querySelection.coverage,'ONE_QUERY_ONLY_NOT_ENTIRE_POOL');
-    const before=JSON.stringify(saved);saved.oneRequestExecution.globalBudget.freeCreditsRemaining=0;assert.throws(()=>claimPage(saved));
-    saved.oneRequestExecution.globalBudget.freeCreditsRemaining=1;assert.equal(JSON.stringify(saved),before);
+    assert.equal(Object.hasOwn(saved.oneRequestExecution,'globalBudget'),false);
+    saved.requestLedger=Array.from({length:8},(_,index)=>({workflowRunId:String(70000+index),logicalExecutionId:`historical-${index}`,
+      day:calendarDay(),actualRequests:1,creditsDeducted:1,outcome:'CONFIRMED'}));
+    // Opaque legacy metadata remains stored, but can no longer block execution.
+    saved.oneRequestExecution.globalBudget={verifiedAt:'expired',ledgerFingerprint:'legacy',maxRequests31Days:8,maxCredits31Days:8};
+    saved.orchestration.stopReason='REQUEST_BUDGET';
+    await writeFile(output,JSON.stringify(saved));
+    invoke({INITIALIZE_STATE:'false',GITHUB_RUN_ID:'81009',SOCIALAPIS_FREE_BALANCE_EVIDENCE:'not-json',SOCIALAPIS_MAX_31_DAY_REQUESTS:'8',SOCIALAPIS_MAX_31_DAY_CREDITS:'8'});
+    const restarted=JSON.parse(await readFile(output,'utf8'));assert.deepEqual(restarted.requestLedger,saved.requestLedger);
+    assert.equal(claimPage(restarted),true);assert.equal(restarted.requestLedger.length,9);
+    assert.throws(()=>claimPage(restarted),/AMBIGUOUS_PAGE/u);
   }finally{await rm(local,{recursive:true,force:true});}
 });
 

@@ -144,9 +144,6 @@ jobs:
       - name: Validate profile and display maximum credit exposure before HTTP
         if: "!inputs.sync_only && inputs.fresh_session_id == ''"
         env:
-          SOCIALAPIS_MAX_31_DAY_REQUESTS: ${{ vars.SOCIALAPIS_MAX_31_DAY_REQUESTS }}
-          SOCIALAPIS_MAX_31_DAY_CREDITS: ${{ vars.SOCIALAPIS_MAX_31_DAY_CREDITS }}
-          SOCIALAPIS_FREE_BALANCE_EVIDENCE: ${{ vars.SOCIALAPIS_FREE_BALANCE_EVIDENCE }}
           DISCOVERY_ADMIN_ORIGIN: https://portfolio-api-forn.onrender.com
           INITIALIZE_STATE: ${{ steps.checkpoint.outputs.initialize }}
           ARTIFACT_RECEIPT: ${{ steps.checkpoint.outputs.artifact_id }}
@@ -192,9 +189,6 @@ jobs:
       - name: Initialize isolated fresh session from audit evidence only
         if: inputs.fresh_session_id != '' && !inputs.sync_only
         env:
-          SOCIALAPIS_MAX_31_DAY_REQUESTS: ${{ vars.SOCIALAPIS_MAX_31_DAY_REQUESTS }}
-          SOCIALAPIS_MAX_31_DAY_CREDITS: ${{ vars.SOCIALAPIS_MAX_31_DAY_CREDITS }}
-          SOCIALAPIS_FREE_BALANCE_EVIDENCE: ${{ vars.SOCIALAPIS_FREE_BALANCE_EVIDENCE }}
           DISCOVERY_ADMIN_ORIGIN: https://portfolio-api-forn.onrender.com
           DISCOVERY_FRESH_ACTIVATION_SHA: ${{ steps.fresh_activation.outputs.sha }}
           ARTIFACT_RECEIPT: ${{ steps.checkpoint.outputs.artifact_id }}

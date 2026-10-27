@@ -145,7 +145,7 @@ export function classifyProfile(job, profile, targetPreferences) {
 export function beginExecution(state, input, workflowRunId, { productionGuard, resumeContinuation = false, now = new Date() } = {}) {
   const config = configuration(input);
   if (config.mode !== 'development' && config.mode !== 'production') throw new Stop('INVALID_MODE');
-  if (config.mode === 'production' && (typeof productionGuard !== 'function' || productionGuard() !== true)) throw new Stop('MONTHLY_FREE_BALANCE_UNVERIFIED_SCHEDULE_DISABLED');
+  if (config.mode === 'production' && (typeof productionGuard !== 'function' || productionGuard() !== true)) throw new Stop('PRODUCTION_EXECUTION_NOT_ENABLED');
   if (!Array.isArray(state.jobs) || state.jobs.some(j => j.provider !== 'SOCIALAPIS' || !j.id || j.sourceIdentity !== `SOCIALAPIS:${j.id}`) ||
       new Set(state.jobs.map(j => j.sourceIdentity)).size !== state.jobs.length) throw new Stop('INVALID_REPLAY_STORE');
   if(state.historicalJobs!==undefined && (!Array.isArray(state.historicalJobs)||state.historicalJobs.some(j=>j.provider!=='SOCIALAPIS'||!j.id||j.sourceIdentity!==`SOCIALAPIS:${j.id}`)||
@@ -224,29 +224,6 @@ export function workflowMetrics(state) {
       actualRequests: logicalAttempts.some(p => p.actualRequests === null) ? null : logicalAttempts.reduce((sum,p) => sum+(p.actualRequests ?? 0),0),
       creditsDeducted: logicalAttempts.some(p => p.creditsDeducted === null) ? null : logicalAttempts.reduce((sum,p) => sum+(p.creditsDeducted ?? 0),0) } };
 }
-export const accountingFingerprint = ledger => digest(JSON.stringify(ledger.map(a => ({workflowRunId:a.workflowRunId,
-  logicalExecutionId:a.logicalExecutionId,day:a.day,actualRequests:a.actualRequests,creditsDeducted:a.creditsDeducted}))));
-
-// Trusted operator configuration, not dispatch inputs. No default allowance and
-// no inference of provider balance from the opaque Credits-Used header.
-export function assertFreshBudget(ledger, budget, now = new Date()) {
-  if(!budget || ![budget.maxRequests31Days,budget.maxCredits31Days].every(n=>Number.isSafeInteger(n)&&n>0))
-    throw new Stop('GLOBAL_31_DAY_BUDGET_UNVERIFIED');
-  const age=now.getTime()-Date.parse(budget.verifiedAt);
-  if(budget.source!=='OPERATOR_VERIFIED_FREE_ACCOUNT'||budget.freePlan!==true||budget.noAutoTopUp!==true||
-    !Number.isFinite(age)||age<0||age>24*60*60*1000||!Number.isSafeInteger(budget.freeCreditsRemaining)||budget.freeCreditsRemaining<1||
-    budget.ledgerFingerprint!==accountingFingerprint(ledger))throw new Stop('FREE_BALANCE_UNVERIFIED_OR_STALE');
-  const today=calendarDay(now),start=new Date(today+'T00:00:00Z');start.setUTCDate(start.getUTCDate()-30);
-  const first=start.toISOString().slice(0,10);let requests=0,credits=0;
-  for(const a of ledger){
-    if(typeof a.day!=='string'||!/^\d{4}-\d{2}-\d{2}$/u.test(a.day)||!Number.isFinite(Date.parse(a.day+'T00:00:00Z'))||
-      new Date(a.day+'T00:00:00Z').toISOString().slice(0,10)!==a.day||a.day>today||a.actualRequests!==1||
-      !Number.isFinite(a.creditsDeducted)||a.creditsDeducted<0||a.creditsDeducted>1)throw new Stop('GLOBAL_LEDGER_USAGE_UNVERIFIED');
-    if(a.day>=first){requests+=a.actualRequests;credits+=a.creditsDeducted;}
-  }
-  if(requests+1>budget.maxRequests31Days||credits+1>budget.maxCredits31Days)throw new Stop('GLOBAL_31_DAY_BUDGET_EXHAUSTED');
-  return {windowStart:first,windowEnd:today,requests,credits,reservedRequests:1,reservedCredits:1};
-}
 
 export function claimPage(state, now = new Date(), { productionGuard } = {}) {
   const run = state.orchestration; const config = run.config;
@@ -255,12 +232,12 @@ export function claimPage(state, now = new Date(), { productionGuard } = {}) {
   if (run.stopReason) return false;
   if(state.oneRequestExecution?.workflowRunId===run.workflowRunId){
     if(config.maxRequests!==1||config.maxCredits!==1)throw new Stop('V1_ONE_REQUEST_CONFIGURATION_REQUIRED');
-    assertFreshBudget(state.requestLedger,state.oneRequestExecution.globalBudget,now);
   }
-  if(state.freshSession?.workflowRunId===run.workflowRunId)assertFreshBudget(state.requestLedger,state.freshSession.globalBudget,now);
   if (config.mode === 'production') {
+    // Future production hook only. Manual V1 always resolves development mode
+    // and counts reservations per workflow, never against a daily/monthly cap.
     if (state.requestLedger.filter(p => p.day === calendarDay(now)).length >= 6) { stopExecution(run, 'DAILY_REQUEST_BUDGET'); return false; }
-    if (typeof productionGuard !== 'function' || productionGuard() !== true) throw new Stop('MONTHLY_FREE_BALANCE_UNVERIFIED_SCHEDULE_DISABLED');
+    if (typeof productionGuard !== 'function' || productionGuard() !== true) throw new Stop('PRODUCTION_EXECUTION_NOT_ENABLED');
   }
   if (currentAttempts(state).length >= config.maxRequests) { stopExecution(run, 'REQUEST_BUDGET'); return false; }
   if (currentAttempts(state).reduce((sum, p) => sum + (p.creditsDeducted ?? 0), 0) + 1 > config.maxCredits) { stopExecution(run, 'CREDIT_BUDGET'); return false; }
@@ -333,12 +310,13 @@ export async function performPage(state, { transport, now = new Date(), receipt,
   if(fresh&&!captureReviews)throw new Stop('FRESH_REVIEW_CAPTURE_REQUIRED');
   if (run.phase !== 'CLAIMED' || !/^[1-9]\d*$/u.test(String(receipt ?? ''))) throw new Stop('DURABLE_CLAIM_RECEIPT_REQUIRED');
   const attempt = state.requestLedger[run.attemptIndex];
+  if(!attempt || attempt.workflowRunId!==run.workflowRunId || attempt.logicalExecutionId!==run.logicalExecutionId ||
+    attempt.outcome!=='RESERVED_AMBIGUOUS_UNTIL_COMPLETED' || attempt.actualRequests!==null || attempt.creditsDeducted!==null)
+    throw new Stop('DURABLE_CLAIM_ALREADY_USED_OR_AMBIGUOUS');
   if (attempt.day !== calendarDay(now)) throw new Stop('RESERVATION_DAY_CHANGED_NO_REQUEST');
-  if(fresh)assertFreshBudget(state.requestLedger.slice(0,run.attemptIndex),state.freshSession.globalBudget,now);
   if(state.oneRequestExecution?.workflowRunId===run.workflowRunId){
     if(!captureReviews||run.config.maxRequests!==1||run.config.maxCredits!==1||run.plan.pageNumber!==1||run.plan.cursor!==null)
       throw new Stop('V1_ONE_REQUEST_CONFIGURATION_REQUIRED');
-    assertFreshBudget(state.requestLedger.slice(0,run.attemptIndex),state.oneRequestExecution.globalBudget,now);
   }
   run.phase = 'IN_FLIGHT'; // Synchronous in-process claim; durable file is still CLAIMED.
   attempt.claimArtifactReceipt=String(receipt);

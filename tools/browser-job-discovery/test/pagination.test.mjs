@@ -178,7 +178,7 @@ test('historical states retain identities, raw body/hash/dates and extraction co
 test('production six/day counts conservative reservations in Vietnam calendar, unattended gate fails closed', () => {
   assert.equal(calendarDay(new Date('2026-10-21T17:00:00Z')), '2026-10-22');
   assert.equal(calendarDay(new Date('2026-10-21T16:59:59Z')), '2026-10-21');
-  assert.throws(() => state({ mode: 'production' }), /MONTHLY_FREE_BALANCE_UNVERIFIED/u);
+  assert.throws(() => state({ mode: 'production' }), /PRODUCTION_EXECUTION_NOT_ENABLED/u);
   const s = beginExecution({ jobs: [], requestLedger: Array.from({length: 6}, () => ({ day: '2026-10-22', actualRequests: null })) },
     { ...config, mode: 'production' }, '100', { productionGuard: () => true });
   assert.equal(claimPage(s, now, { productionGuard: () => true }), false);

@@ -51,15 +51,12 @@ test('V1 manual workflow has exactly one provider slot, explicit consent and a o
   assert.equal(job.steps.find(s => s.uses?.startsWith('actions/setup-node')).with['node-version'], '22.12.0');
   assert.doesNotMatch(workflowText + actionText, /ROLLING_REQUEST_CAP|schedule:|curl |wget |continue-on-error|retry:/u);
   const freshInit=job.steps.find(s=>s.run==='node src/cli.mjs --orchestrate fresh-init');
-  assert.equal(freshInit.env.SOCIALAPIS_MAX_31_DAY_REQUESTS,'${{ vars.SOCIALAPIS_MAX_31_DAY_REQUESTS }}');
-  assert.equal(freshInit.env.SOCIALAPIS_MAX_31_DAY_CREDITS,'${{ vars.SOCIALAPIS_MAX_31_DAY_CREDITS }}');
-  assert.equal(freshInit.env.SOCIALAPIS_FREE_BALANCE_EVIDENCE,'${{ vars.SOCIALAPIS_FREE_BALANCE_EVIDENCE }}');
   assert.ok(freshInit.if.includes("inputs.fresh_session_id != ''"));
   const legacyInit=job.steps.find(s=>s.run==='node src/cli.mjs --orchestrate init');
   for(const step of [freshInit,legacyInit]){
-    assert.equal(step.env.SOCIALAPIS_MAX_31_DAY_REQUESTS,'${{ vars.SOCIALAPIS_MAX_31_DAY_REQUESTS }}');
-    assert.equal(step.env.SOCIALAPIS_FREE_BALANCE_EVIDENCE,'${{ vars.SOCIALAPIS_FREE_BALANCE_EVIDENCE }}');
+    assert.doesNotMatch(JSON.stringify(step.env),/FREE_BALANCE_EVIDENCE|MAX_31_DAY/u);
   }
+  assert.doesNotMatch(workflowText,/FREE_BALANCE_EVIDENCE|MAX_31_DAY|verifiedAt|ledgerFingerprint/u);
   assert.equal(job.env?.SOCIALAPIS_API_KEY, undefined); assert.equal(discoveryWorkflow.env?.SOCIALAPIS_API_KEY, undefined);
   assert.equal(job.steps.filter(s => s.env?.SOCIALAPIS_API_KEY).length, 0);
   const calls = job.steps.filter(s => s.uses === './.github/actions/socialapis-discovery-page');
@@ -193,6 +190,26 @@ function invoke(action, env, fake) {
   const guard = 'data:text/javascript,' + encodeURIComponent(`import net from 'node:net'; net.Socket.prototype.connect=()=>{throw Error('NETWORK_FORBIDDEN');}; ${fake ?? ''}`);
   return execFileSync(process.execPath,['--import',guard,'src/cli.mjs','--orchestrate',action],{cwd:directory,encoding:'utf8',stdio:'pipe',env:{...process.env,...env}});
 }
+
+test('persisted failed or unknown-cost page cannot be executed twice with the same claim across CLI processes',()=>{
+  for(const response of ["throw Error('synthetic network failure');",
+    "return Response.json({error:{code:'INSUFFICIENT_CREDITS'}},{status:402,headers:{'X-SocialAPIs-Credits-Deducted':'0'}});",
+    `return Response.json(${JSON.stringify(payload)});`]){
+    const t=temp(),counter=join(t.local,'provider-calls.txt');
+    const env={DISCOVERY_STATE_FILE:t.output,INITIALIZE_STATE:'true',GITHUB_RUN_ID:'88001',DISCOVERY_QUERY:'Backend Hanoi',
+      DISCOVERY_POLICY:JSON.stringify({profile}),DISCOVERY_MAX_REQUESTS:'1',DISCOVERY_MAX_CREDITS:'1',ARTIFACT_RECEIPT:'123',
+      SOCIALAPIS_API_KEY:'synthetic-single-claim-key',SOCIALAPIS_LIVE_ENABLED:'true',SOCIALAPIS_FREE_PLAN_CONFIRMED:'true',
+      SOCIALAPIS_NO_CASH_CONFIRMED:'true',SOCIALAPIS_PUBLIC_ARTIFACT_CONSENT:'true'};
+    const fake=`import{appendFileSync}from'node:fs';globalThis.fetch=async()=>{appendFileSync(${JSON.stringify(counter)},'x');${response}};`;
+    try{
+      invoke('init',env);invoke('claim',env);invoke('page',env,fake);
+      const before=readFileSync(t.output,'utf8');assert.equal(JSON.parse(before).requestLedger[0].actualRequests,1);
+      assert.throws(()=>invoke('page',env,fake),error=>error.stderr.toString().includes('DURABLE_CLAIM_ALREADY_USED_OR_AMBIGUOUS'));
+      assert.equal(readFileSync(counter,'utf8'),'x');assert.equal(readFileSync(t.output,'utf8'),before);
+      assert.throws(()=>invoke('claim',env),error=>error.stderr.toString().includes('AMBIGUOUS_PAGE_NO_AUTOMATIC_REFETCH'));
+    }finally{t.dispose();}
+  }
+});
 
 test('CLI honors explicit dates, falls back to policy when input blank, and reports genuinely unset dates without today defaults',()=>{
   for(const scenario of [

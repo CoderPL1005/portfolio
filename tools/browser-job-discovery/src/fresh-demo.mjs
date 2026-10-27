@@ -1,6 +1,6 @@
 import {createHash} from 'node:crypto';
 import {Stop} from './core.mjs';
-import {beginExecution,reconcileTerminalFailure,acknowledgePersistence,assertFreshBudget} from './pagination-orchestrator.mjs';
+import {beginExecution,reconcileTerminalFailure,acknowledgePersistence} from './pagination-orchestrator.mjs';
 
 const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 export function freshClaimName(id){
@@ -10,7 +10,7 @@ export function freshClaimName(id){
 
 // Only the operational session is empty. Request accounting comes from a
 // verified historical result, never from an empty runner cache or new namespace.
-export function createFreshSession(previous,input,{sessionId,workflowRunId,activationSha,proof,freeConfirmed,noCashConfirmed,globalBudget,now=new Date()}={}){
+export function createFreshSession(previous,input,{sessionId,workflowRunId,activationSha,proof,freeConfirmed,noCashConfirmed,now=new Date()}={}){
   const claimTag=freshClaimName(sessionId);
   if(!/^[a-f0-9]{40}$/u.test(activationSha??'')||!/^[1-9]\d*$/u.test(String(workflowRunId??'')))throw new Stop('FRESH_ACTIVATION_REQUIRED');
   if(!freeConfirmed||!noCashConfirmed)throw new Stop('FRESH_FREE_CREDIT_CONFIRMATION_REQUIRED');
@@ -40,12 +40,11 @@ export function createFreshSession(previous,input,{sessionId,workflowRunId,activ
       r.actualRequests===a.actualRequests&&r.creditsDeducted===a.creditsDeducted);
     if(!closed||a.actualRequests!==1||!Number.isFinite(a.creditsDeducted)||a.creditsDeducted<0||a.creditsDeducted>1)throw new Stop('FRESH_AUDIT_AMBIGUOUS');
   }
-  const budgetAudit=assertFreshBudget(copy.requestLedger,globalBudget,now);
   const historicalJobs=[...new Map([...(copy.historicalJobs??[]),...copy.jobs].map(job=>[job.sourceIdentity,job])).values()];
   const state={evidenceKind:'SOCIALAPIS_DISCOVERY_STATE',jobs:[],historicalJobs,discoveryYieldHistory:copy.discoveryYieldHistory??[],
     discoveryReviews:copy.discoveryReviews??[],requestLedger:copy.requestLedger,
     terminalReconciliations:copy.terminalReconciliations??[],
-    freshSession:{version:1,id:sessionId,workflowRunId:String(workflowRunId),claimTag,activationSha,globalBudget:structuredClone(globalBudget),budgetAudit,auditSourceFingerprint:sourceFingerprint,
+    freshSession:{version:1,id:sessionId,workflowRunId:String(workflowRunId),claimTag,activationSha,auditSourceFingerprint:sourceFingerprint,
       sourceArtifactId:proof?.artifactId??null,sourceWorkflowRunId:oldRun.workflowRunId,
       historicalRequests:copy.requestLedger.reduce((n,a)=>n+a.actualRequests,0),
       historicalCredits:copy.requestLedger.reduce((n,a)=>n+a.creditsDeducted,0),historicalRegistryFingerprint:hash(previous.jobs)}};

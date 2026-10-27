@@ -7,7 +7,7 @@ import {join,resolve,relative,isAbsolute} from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {parse} from 'yaml';
 import {createFreshSession,freshClaimName} from '../src/fresh-demo.mjs';
-import {beginExecution,claimPage,performPage,acknowledgePersistence,accountingFingerprint,assertFreshBudget,calendarDay} from '../src/pagination-orchestrator.mjs';
+import {beginExecution,claimPage,performPage,acknowledgePersistence,calendarDay} from '../src/pagination-orchestrator.mjs';
 import {encryptCheckpoint,decryptCheckpoint,syncReviews,syncConfiguration} from '../src/admin-sync.mjs';
 
 const config={query:'Fresher .NET Hanoi',profile:{technologies:['ASP.NET Core'],locations:['Hanoi'],seniorities:['Fresher','Junior','Intern']},maxRequests:1,maxCredits:1};
@@ -25,35 +25,30 @@ function previous(){
   return s;
 }
 const options=s=>({sessionId:'fresh-offline-demo-01',workflowRunId:'200',activationSha:'a'.repeat(40),freeConfirmed:true,noCashConfirmed:true,
-  globalBudget:{maxRequests31Days:100,maxCredits31Days:100,source:'OPERATOR_VERIFIED_FREE_ACCOUNT',freePlan:true,noAutoTopUp:true,
-    freeCreditsRemaining:1,verifiedAt:new Date().toISOString(),ledgerFingerprint:accountingFingerprint(s.requestLedger??[])},
   proof:{artifactId:'456',claimArtifactId:'123',artifactKind:'RESULT',provenance:'ACTIONS_RESULT',workflowRunId:'100',
     artifactName:'socialapis-page-100-1-result',attemptIndex:0,stateFingerprint:createHash('sha256').update(JSON.stringify(s)).digest('hex')}});
 const fresh=s=>createFreshSession(s,config,options(s));
 
-test('global fresh budget includes historic HTTP/credits in 31 calendar days, never workflow dispatch counts',()=>{
-  const s=previous(),now=new Date('2026-10-27T05:00:00Z');s.requestLedger[0].day='2026-09-27';
-  const budget={...options(s).globalBudget,maxRequests31Days:1,maxCredits31Days:1,verifiedAt:now.toISOString()};
-  assert.throws(()=>assertFreshBudget(s.requestLedger,budget,now),/BUDGET_EXHAUSTED/u);
-  s.requestLedger[0].day='2026-09-26';budget.ledgerFingerprint=accountingFingerprint(s.requestLedger);
-  assert.equal(assertFreshBudget(s.requestLedger,budget,now).requests,0);
-  for(const change of [{maxRequests31Days:undefined},{maxCredits31Days:undefined},{freeCreditsRemaining:0},{source:'UNKNOWN'},
-    {noAutoTopUp:false},{freePlan:false},{ledgerFingerprint:'0'.repeat(64)},{verifiedAt:'2026-10-25T00:00:00Z'},{verifiedAt:'2026-10-28T00:00:00Z'}])
-    assert.throws(()=>assertFreshBudget(s.requestLedger,{...budget,...change},now));
-  for(const change of [{actualRequests:null},{creditsDeducted:null},{day:'unknown'},{day:'2026-10-28'}]){
-    const ledger=[{...s.requestLedger[0],...change}];
-    assert.throws(()=>assertFreshBudget(ledger,{...budget,ledgerFingerprint:accountingFingerprint(ledger)},now),/LEDGER_USAGE_UNVERIFIED/u);
-  }
+test('manual fresh run permits eight confirmed attempts today without budget evidence and preserves history',()=>{
+  const old=previous();old.orchestration.phase='READY';old.orchestration.stopReason='REQUEST_BUDGET';
+  const original=old.requestLedger[0];
+  old.requestLedger=Array.from({length:8},(_,index)=>({...structuredClone(original),workflowRunId:String(90+index),
+    day:calendarDay(),actualRequests:1,creditsDeducted:1,outcome:'CONFIRMED'}));
+  const o=options(old);
+  const s=createFreshSession(old,config,o);assert.deepEqual(s.requestLedger,old.requestLedger);
+  assert.equal(s.freshSession.historicalRequests,8);assert.equal(s.freshSession.historicalCredits,8);
+  assert.equal(claimPage(s),true);assert.equal(s.requestLedger.length,9);
 });
-test('global caps are separate and revalidated before claim and HTTP; missing evidence cannot authorize fresh init',async()=>{
-  const old=previous(),o=options(old);
-  for(const patch of [{globalBudget:undefined},{globalBudget:{...o.globalBudget,maxRequests31Days:1}},
-    {globalBudget:{...o.globalBudget,maxCredits31Days:1}},{globalBudget:{...o.globalBudget,freeCreditsRemaining:0}}])
-    assert.throws(()=>createFreshSession(old,config,{...o,...patch}));
-  const s=fresh(old);s.freshSession.globalBudget.freeCreditsRemaining=0;assert.throws(()=>claimPage(s));assert.equal(s.requestLedger.length,1);
-  const t=fresh(old);claimPage(t);t.freshSession.globalBudget.freeCreditsRemaining=0;
-  await assert.rejects(()=>performPage(t,{receipt:'789',captureReviews:true,transport:()=>assert.fail('NO_NETWORK')}),/BALANCE_UNVERIFIED/u);
+
+test('a failed provider attempt cannot reuse its durable claim for a second HTTP call',async()=>{
+  const s=fresh(previous());let calls=0;
+  await execute(s,null,async()=>{calls++;throw Error('synthetic connection loss');});
+  assert.equal(s.orchestration.phase,'CLAIMED');
+  await assert.rejects(()=>performPage(s,{receipt:'789',secret,captureReviews:true,enabled:true,freePlanConfirmed:true,noCashConfirmed:true,
+    transport:async()=>{calls++;return Response.json({});}}),/AMBIGUOUS_PAGE|CLAIM_ALREADY_USED/u);
+  assert.equal(calls,1);
 });
+
 
 test('fresh session isolates operational jobs/cursor, preserving historical dedup/yield/accounting and original evidence',()=>{
   const old=previous(),bytes=JSON.stringify(old),s=fresh(old);
@@ -163,8 +158,6 @@ test('fresh CLI initializes offline through existing entrypoint, no missing-stat
     DISCOVERY_QUERY:config.query,DISCOVERY_START_TIME:'',DISCOVERY_END_TIME:'',INITIALIZE_STATE:'false',RESUME_CONTINUATION:'false',
     DISCOVERY_IMPORT_KEY:'b'.repeat(64),DISCOVERY_CHECKPOINT_KEY:'a'.repeat(64),DISCOVERY_ADMIN_ORIGIN:'https://portfolio-api-forn.onrender.com',
     ARTIFACT_RECEIPT:'456',CLAIM_ARTIFACT_RECEIPT:'123',ARTIFACT_NAME:'socialapis-page-100-1-result',ARTIFACT_RUN_ID:'100'};
-  Object.assign(env,{SOCIALAPIS_MAX_31_DAY_REQUESTS:String(o.globalBudget.maxRequests31Days),SOCIALAPIS_MAX_31_DAY_CREDITS:String(o.globalBudget.maxCredits31Days),
-    SOCIALAPIS_FREE_BALANCE_EVIDENCE:JSON.stringify(o.globalBudget)});
   const invoke=(action='fresh-init',extra={})=>execFileSync(process.execPath,['--import',guard,'src/cli.mjs','--orchestrate',action],{cwd:root,env:{...env,...extra},stdio:'pipe',encoding:'utf8'});
   try{
     assert.throws(invoke);writeFileSync(file,JSON.stringify(s));const stdout=invoke(),saved=JSON.parse(readFileSync(file,'utf8'));
