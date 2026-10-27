@@ -14,6 +14,16 @@ function actionsResultEvidence(state) {
     workflowRunId:process.env.ARTIFACT_RUN_ID,claimArtifactId:process.env.CLAIM_ARTIFACT_RECEIPT,
     attemptIndex:state.orchestration.attemptIndex,stateFingerprint:hash(JSON.stringify(state))};
 }
+function freshAuditEvidence(state){
+  // ARTIFACT_RUN_ID is the real upload run returned by the trusted locator.
+  // Only checkpoints use a separate saved logical ID; result proofs retain
+  // their actual provider workflow/slot identity for reconciliation.
+  if(['socialapis-discovery-state','socialapis-discovery-checkpoint'].includes(process.env.ARTIFACT_NAME))
+    return {artifactKind:'CHECKPOINT',provenance:'ACTIONS_CHECKPOINT',artifactName:process.env.ARTIFACT_NAME,
+      artifactId:process.env.ARTIFACT_RECEIPT,artifactUploadRunId:process.env.ARTIFACT_RUN_ID,
+      workflowRunId:state.orchestration.workflowRunId,stateFingerprint:hash(JSON.stringify(state))};
+  return {...actionsResultEvidence(state),artifactId:process.env.ARTIFACT_RECEIPT};
+}
 // Offline recovery uses an immutable source + operator-provided observed result
 // metadata. It never downloads, overwrites evidence, or performs a provider call.
 async function reconcileLocalResult() {
@@ -104,7 +114,7 @@ export async function paginationCli(args) {
     const start=dateSelection('DISCOVERY_START_TIME',resolved.startTime),end=dateSelection('DISCOVERY_END_TIME',resolved.endTime);
     state=createFreshSession(state,{...resolved,startTime:start.value,endTime:end.value,maxRequests:1,maxCredits:1},{
       sessionId:process.env.DISCOVERY_FRESH_SESSION_ID,workflowRunId:process.env.GITHUB_RUN_ID,activationSha:process.env.DISCOVERY_FRESH_ACTIVATION_SHA,
-      proof:{...actionsResultEvidence(state),artifactId:receipt},
+      proof:freshAuditEvidence(state),
       freeConfirmed:process.env.SOCIALAPIS_FREE_PLAN_CONFIRMED==='true',noCashConfirmed:process.env.SOCIALAPIS_NO_CASH_CONFIRMED==='true'});
     state.orchestration.dateFilterAudit={startTime:state.orchestration.config.startTime,endTime:state.orchestration.config.endTime,
       startInputState:start.inputState,endInputState:end.inputState,startSource:start.source,endSource:end.source,providerFreshnessVerified:false};
