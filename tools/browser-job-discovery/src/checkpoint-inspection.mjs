@@ -160,18 +160,15 @@ async function readBounded(response,limit){
 
 // The only network capability: fixed GitHub GETs and one signed artifact GET.
 // Authorization is never forwarded to the signed storage URL; no automatic redirects/retries.
-export async function inspectFromGitHub({token,key,transport=fetch}={}){
-  try{
-    if(typeof token!=='string'||!token||typeof key!=='string'||!/^[a-f0-9]{64}$/iu.test(key))return fail('CHECKPOINT_CREDENTIALS_UNAVAILABLE');
-    const signal=AbortSignal.timeout(60_000);
+function githubReads(token,transport,signal){
     const headers={Authorization:`Bearer ${token}`,Accept:'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28'};
     const base=`https://api.github.com/repos/${TARGET.repo}`;
     const get=path=>transport(base+path,{method:'GET',headers,signal,redirect:'manual',credentials:'omit'});
-    const json=async path=>{const response=await get(path);if(response.status!==200)throw new Error('READ_FAILED');
-      return JSON.parse((await readBounded(response,64*1024)).toString('utf8'));};
-    const repository=await json('');
-    const github={getArtifact:()=>json(`/actions/artifacts/${TARGET.artifactId}`),downloadArtifact:async()=>{
-      const response=await get(`/actions/artifacts/${TARGET.artifactId}/zip`);
+    const json=async(path,limit=64*1024)=>{const response=await get(path);if(response.status!==200)throw new Error('READ_FAILED');
+      return JSON.parse((await readBounded(response,limit)).toString('utf8'));};
+    const downloadArtifact=async artifactId=>{
+      if(![TARGET.artifactId,...Object.values(COMPARISON_PINS)].includes(artifactId))throw new Error('READ_FAILED');
+      const response=await get(`/actions/artifacts/${artifactId}/zip`);
       if(response.status===200)return readBounded(response,MAX_ARCHIVE);
       if(response.status!==302)throw new Error('READ_FAILED');
       const url=new URL(response.headers.get('location'));
@@ -180,7 +177,360 @@ export async function inspectFromGitHub({token,key,transport=fetch}={}){
       const archive=await transport(url.href,{method:'GET',signal,redirect:'error',credentials:'omit'});
       if(archive.status!==200)throw new Error('READ_FAILED');
       return readBounded(archive,MAX_ARCHIVE);
-    }};
-    return await inspectArtifact({github,repository,key});
+    };
+    return {json,downloadArtifact};
+}
+export async function inspectFromGitHub({token,key,transport=fetch}={}){
+  try{
+    if(typeof token!=='string'||!token||typeof key!=='string'||!/^[a-f0-9]{64}$/iu.test(key))return fail('CHECKPOINT_CREDENTIALS_UNAVAILABLE');
+    const api=githubReads(token,transport,AbortSignal.timeout(60_000)),repository=await api.json('');
+    return await inspectArtifact({github:{getArtifact:()=>api.json(`/actions/artifacts/${TARGET.artifactId}`),
+      downloadArtifact:()=>api.downloadArtifact(TARGET.artifactId)},repository,key});
   }catch{return fail('CHECKPOINT_INSPECTION_FAILED');}
+}
+
+const COMPARISON_PINS=Object.freeze({claim:12723661427,result:12723771007,originalFinal:12723681280,syncFinal:12725991974});
+const COMPARISON_ROLES=Object.freeze(Object.keys(COMPARISON_PINS));
+const SNAPSHOT_ROLES=Object.freeze(['result','originalFinal','syncFinal']);
+const DIGEST=/^sha256:[a-f0-9]{64}$/u;
+const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
+const comparisonFailure=code=>({...fail(code),eligibility:'NOT_YET_DETERMINABLE'});
+
+// Versioned semantic hash: object keys sorted, arrays/text never normalized.
+// Independent of archive bytes and the existing insertion-order state fingerprint.
+function canonical(value,depth=0){
+  if(depth>100)throw new Error('COMPARISON_DEPTH_LIMIT');
+  if(typeof value==='number'&&!Number.isFinite(value))throw new Error('COMPARISON_NONFINITE_VALUE');
+  if(Array.isArray(value))return value.map(v=>canonical(v,depth+1));
+  if(object(value))return Object.fromEntries(Object.keys(value).sort().map(k=>[k,canonical(value[k],depth+1)]));
+  return value;
+}
+const semanticHash=value=>sha(JSON.stringify(canonical(value)));
+const equal=(a,b)=>a===undefined||b===undefined?a===b:semanticHash(a)===semanticHash(b);
+function comparisonArtifactValid(a,role,repository){
+  const run=role==='syncFinal'?TARGET.uploader:TARGET.logical;
+  const name=role==='claim'?`socialapis-page-${TARGET.logical}-1-claim`:
+    role==='result'?`socialapis-page-${TARGET.logical}-1-result`:'socialapis-discovery-state';
+  return repository?.id===1349147313&&repository.full_name===TARGET.repo&&object(a)&&a.id===COMPARISON_PINS[role]&&
+    a.name===name&&a.expired===false&&id(a.workflow_run?.id)===run&&a.workflow_run?.repository_id===repository.id&&
+    Number.isSafeInteger(a.size_in_bytes)&&a.size_in_bytes>0&&a.size_in_bytes<=MAX_ARCHIVE&&DIGEST.test(a.digest??'');
+}
+function comparisonShape(s){
+  return object(s)&&object(s.orchestration)&&Array.isArray(s.orchestration.pages)&&Array.isArray(s.requestLedger)&&s.requestLedger.every(object)&&
+    Array.isArray(s.jobs)&&s.jobs.every(object)&&Array.isArray(s.discoveryReviews)&&s.discoveryReviews.every(object)&&
+    (s.historicalJobs===undefined||Array.isArray(s.historicalJobs)&&s.historicalJobs.every(object))&&
+    Array.isArray(s.terminalReconciliations)&&s.terminalReconciliations.every(object);
+}
+const active=s=>s.requestLedger[s.orchestration.attemptIndex];
+function closedEntry(s,a,index){
+  return a.outcome==='CONFIRMED'||s.terminalReconciliations.some(r=>r.attemptIndex===index&&r.workflowRunId===a.workflowRunId&&
+    r.actualRequests===a.actualRequests&&r.creditsDeducted===a.creditsDeducted);
+}
+function ledgerKnown(s){
+  return s.requestLedger.every((a,index)=>a.actualRequests===1&&Number.isFinite(a.creditsDeducted)&&a.creditsDeducted>=0&&a.creditsDeducted<=1&&
+    (index===9||closedEntry(s,a,index)));
+}
+function protectedLedger(s){
+  return s.requestLedger.map((row,index)=>{if(index!==9)return row;const {outcome,...rest}=row;return rest;});
+}
+function protectedState(s){
+  const copy=structuredClone(s);
+  delete copy.adminSync;delete copy.workflowMetrics;delete copy.orchestration.phase;
+  if(copy.requestLedger[9])delete copy.requestLedger[9].outcome;
+  const page=copy.orchestration.pages.at(-1);
+  if(page){delete page.outcome;delete page.artifactReceipt;}
+  return copy;
+}
+function contentValid(s){
+  // The same identity may deliberately appear in both current and historical
+  // collections. Preserve and compare each collection; never merge them here.
+  for(const collection of [s.jobs,s.historicalJobs??[]]){
+    const identities=new Set();
+    for(const j of collection){
+    if(j.provider!=='SOCIALAPIS'||typeof j.id!=='string'||!j.id||j.sourceIdentity!==`SOCIALAPIS:${j.id}`||
+      identities.has(j.sourceIdentity)||!['title','employer','location','requirements','body'].every(k=>typeof j[k]==='string'))return false;
+    identities.add(j.sourceIdentity);
+    // Existing JobPostExtractor hash contract; raw full-state equality is also
+    // checked so normalization cannot conceal a changed body.
+    const material=[j.title,j.employer,j.location,j.requirements,j.body].join('\n').replace(/\r\n?/gu,'\n').normalize('NFC').trim();
+    if(j.contentHash!==sha(material))return false;
+    }
+  }
+  const bundles=new Set();
+  for(const b of s.discoveryReviews){
+    if(!Array.isArray(b.items))return false;
+    const identity=JSON.stringify([b.runId,b.query,b.pageNumber]);if(bundles.has(identity))return false;bundles.add(identity);
+    for(const [i,item] of b.items.entries()){
+      if(!object(item)||item.itemIndex!==i)return false;
+      if(item.rawContent===null){if(item.contentHash!==null)return false;}
+      else if(typeof item.rawContent!=='string'||item.contentHash!==sha(item.rawContent))return false;
+    }
+  }
+  return true;
+}
+
+// Schemas describe known technical metadata only. Unknown keys are never
+// printed, and are not blanket-exempted even below a familiar root object.
+const LEAF=true;
+const SYNC_SCHEMA={mode:LEAF,workflowRunId:LEAF,observationRunId:LEAF,executingWorkflowRunId:LEAF,completedAt:LEAF,observationCount:LEAF,
+  summaries:[{runId:LEAF,pageNumber:LEAF,inserted:LEAF,unchanged:LEAF}]};
+const CLASSIFICATIONS={TARGET_MATCH:LEAF,FALLBACK_MATCH:LEAF,POTENTIAL_MATCH:LEAF,INSUFFICIENT_DATA:LEAF,NOT_MATCHED:LEAF};
+const METRICS_SCHEMA=Object.fromEntries(('workflowRunId logicalExecutionId status continuationAvailable profileVersion profileFingerprint '+
+  'canonicalOpportunities newlyDiscoveredOpportunities newRelevantOpportunities newRelevantOpportunitiesPerCredit freshnessUnknown freshnessUnverified '+
+  'actualRequests knownActualRequests reservedAttempts uncertainAttempts totalDeductedCredits knownDeductedCredits stopReason '+
+  'uniqueRelevantVacancies newRelevantVacancies overlapAcrossPages').split(' ').map(k=>[k,LEAF]));
+Object.assign(METRICS_SCHEMA,{adminSync:SYNC_SCHEMA,
+  querySelection:{query:LEAF,rankingBasis:LEAF,score:LEAF,profileFingerprint:LEAF,preferencesFingerprint:LEAF,version:LEAF,
+    evidenceLevel:LEAF,targetPreferencesFingerprint:LEAF,candidateCount:LEAF,coverage:LEAF},
+  reviewSummary:{observations:LEAF,withVacancies:LEAF,classifications:CLASSIFICATIONS,freshnessUnknown:LEAF},
+  queryDepths:[{normalizedQueryFingerprint:LEAF,pagesSurveyed:LEAF,maximumPageNumber:LEAF,conclusion:LEAF}],
+  storage:{inserted:LEAF,updated:LEAF,unchanged:LEAF,totalCandidates:LEAF},
+  logicalExecution:{completedPages:LEAF,uniqueRelevantVacancies:LEAF,newRelevantVacancies:LEAF,newRelevantOpportunities:LEAF,actualRequests:LEAF,creditsDeducted:LEAF}});
+function metadataKnown(value,schema){
+  if(value===null||value===undefined)return true;
+  if(schema===LEAF)return ['string','number','boolean'].includes(typeof value);
+  if(Array.isArray(schema))return Array.isArray(value)&&value.every(v=>metadataKnown(v,schema[0]));
+  return object(value)&&Object.keys(value).every(k=>Object.hasOwn(schema,k)&&metadataKnown(value[k],schema[k]));
+}
+function syncMetadataKnown(value){
+  if(!metadataKnown(value,SYNC_SCHEMA))return false;
+  if(value===null||value===undefined)return true;
+  const observationId=v=>id(v)||typeof v==='string'&&/^fresh-[a-z0-9][a-z0-9-]{7,63}$/u.test(v);
+  for(const k of ['workflowRunId','executingWorkflowRunId'])if(value[k]!==undefined&&value[k]!==null&&!id(value[k]))return false;
+  if(value.observationRunId!==undefined&&!observationId(value.observationRunId))return false;
+  if(value.mode!==undefined&&!['current','recovery'].includes(value.mode))return false;
+  if(value.completedAt!==undefined&&(typeof value.completedAt!=='string'||!Number.isFinite(Date.parse(value.completedAt))))return false;
+  if(value.observationCount!==undefined&&(!Number.isSafeInteger(value.observationCount)||value.observationCount<0))return false;
+  return (value.summaries??[]).every(row=>
+    (row.runId===undefined||observationId(row.runId))&&['pageNumber','inserted','unchanged'].every(k=>
+      row[k]===undefined||Number.isSafeInteger(row[k])&&row[k]>=0));
+}
+function differences(a,b,path='',out=[]){
+  if(equal(a,b))return out;
+  if(Array.isArray(a)&&Array.isArray(b)&&a.length===b.length){a.forEach((v,i)=>differences(v,b[i],`${path}[${i}]`,out));return out;}
+  if(object(a)&&object(b)){
+    for(const k of new Set([...Object.keys(a),...Object.keys(b)]))differences(a[k],b[k],path?`${path}.${k}`:k,out);
+    return out;
+  }
+  out.push(path);return out;
+}
+function comparePair(base,next){
+  const last=base.orchestration.pages.length-1;
+  const allowed=new Set(['orchestration.phase',`orchestration.pages[${last}].outcome`,
+    `orchestration.pages[${last}].artifactReceipt`,'requestLedger[9].outcome']);
+  const paths=differences(base,next),ackPaths=[],adminSyncPaths=[],metricsPaths=[];let unclassifiedChanges=0;
+  const syncKnown=syncMetadataKnown(base.adminSync)&&syncMetadataKnown(next.adminSync);
+  const metricsKnown=metadataKnown(base.workflowMetrics,METRICS_SCHEMA)&&metadataKnown(next.workflowMetrics,METRICS_SCHEMA)&&
+    syncMetadataKnown(base.workflowMetrics?.adminSync)&&syncMetadataKnown(next.workflowMetrics?.adminSync);
+  for(const path of paths){
+    if(allowed.has(path))ackPaths.push(path);
+    else if((path==='adminSync'||path.startsWith('adminSync.'))&&syncKnown)adminSyncPaths.push(path);
+    else if((path==='workflowMetrics'||path.startsWith('workflowMetrics.'))&&metricsKnown)metricsPaths.push(path);
+    else unclassifiedChanges++;
+  }
+  return {ackPaths,adminSyncPaths,metricsPaths,
+    adminSyncChanged:!equal(base.adminSync,next.adminSync),metricsChanged:!equal(base.workflowMetrics,next.workflowMetrics),
+    unclassifiedChanges,allDifferencesFingerprint:semanticHash(paths),
+    adminSyncFingerprints:[semanticHash(base.adminSync??null),semanticHash(next.adminSync??null)],
+    metricsFingerprints:[semanticHash(base.workflowMetrics??null),semanticHash(next.workflowMetrics??null)]};
+}
+function attemptBinding(s,reference,claimRole=false){
+  const run=s.orchestration,a=active(s),r=active(reference);
+  if(run.workflowRunId!==TARGET.logical||run.attemptIndex!==9||s.requestLedger.length!==10||!a||
+    a.workflowRunId!==TARGET.logical||s.requestLedger.slice(0,10).filter(v=>v.workflowRunId===TARGET.logical).length!==1)return false;
+  for(const field of ['workflowRunId','logicalExecutionId','query','allocation','pageNumber','startTime','endTime','inputCursor','inputCursorFingerprint']){
+    if(!equal(a[field],r[field]))return false;
+  }
+  if(a.pageNumber!==1||a.allocation!=='CORE'||run.logicalExecutionId!==a.logicalExecutionId)return false;
+  if(!equal(run.config?.startTime,a.startTime)||!equal(run.config?.endTime,a.endTime))return false;
+  if(claimRole)return run.phase==='CLAIMED'&&a.actualRequests===null&&a.creditsDeducted===null&&
+    a.outcome==='RESERVED_AMBIGUOUS_UNTIL_COMPLETED'&&run.pages.length===0;
+  if(run.pages.length!==1)return false;
+  const p=run.pages[0];
+  return ['workflowRunId','query','allocation','pageNumber','actualRequests','creditsDeducted'].every(k=>equal(p[k],a[k]))&&
+    (p.logicalExecutionId===undefined||p.logicalExecutionId===a.logicalExecutionId);
+}
+function historyComplete(h){
+  return h?.source==='AUTHENTICATED_GITHUB_GET'&&h.complete===true&&h.stable===true&&h.sourceProvenanceVerified===true&&Array.isArray(h.runs)&&
+    h.runs.some(r=>r.id===TARGET.uploader)&&new Set(h.runs.map(r=>r.id)).size===h.runs.length&&h.runs.every(r=>id(r.id)&&r.status==='completed'&&r.runAttempt===1&&
+      ['success','failure'].includes(r.conclusion)&&Array.isArray(r.providerSteps)&&[1,6].includes(r.providerSteps.length)&&
+      r.providerSteps.every(s=>s.status==='completed'&&s.conclusion==='skipped'));
+}
+
+export function compareAcknowledgedCheckpoints(input){
+  try{
+    const {snapshots,artifacts,repository,archiveDigests,plaintextDigests,history}=input??{};
+    if(!Array.isArray(artifacts)||artifacts.length!==4||new Set(artifacts.map(a=>a?.id)).size!==4||
+      !COMPARISON_ROLES.every(role=>comparisonArtifactValid(artifacts.find(a=>a.id===COMPARISON_PINS[role]),role,repository)))
+      return comparisonFailure('ARTIFACT_PROVENANCE_INVALID');
+    if(!COMPARISON_ROLES.every(role=>archiveDigests?.[COMPARISON_PINS[role]]===artifacts.find(a=>a.id===COMPARISON_PINS[role]).digest))
+      return comparisonFailure('ARTIFACT_DIGEST_MISMATCH');
+    if(!object(snapshots)||Object.keys(snapshots).length!==4||!COMPARISON_ROLES.every(role=>comparisonShape(snapshots[role])))return comparisonFailure('CHECKPOINT_SCHEMA_INVALID');
+    const {claim,result,originalFinal,syncFinal}=snapshots,completed=SNAPSHOT_ROLES.map(role=>snapshots[role]);
+    const checks={sameAttempt:COMPARISON_ROLES.every(role=>attemptBinding(snapshots[role],result,role==='claim')),
+      historicalLedgerEqual:completed.every(s=>equal(protectedLedger(s),protectedLedger(result)))&&
+        equal(claim.requestLedger.slice(0,9),result.requestLedger.slice(0,9)),
+      terminalReconciliationsEqual:COMPARISON_ROLES.every(role=>equal(snapshots[role].terminalReconciliations,result.terminalReconciliations)),
+      historicalTerminalValid:COMPARISON_ROLES.every(role=>{
+        const s=snapshots[role],row=s.requestLedger[6];
+        return row?.outcome==='FAILED_OR_AMBIGUOUS'&&s.terminalReconciliations.some(r=>r.attemptIndex===6&&
+          r.workflowRunId===row.workflowRunId&&r.actualRequests===row.actualRequests&&r.creditsDeducted===row.creditsDeducted&&
+          id(r.artifactId)&&id(r.claimArtifactId)&&r.artifactId!==r.claimArtifactId&&/^[a-f0-9]{64}$/u.test(r.stateFingerprint??''));
+      }),
+      accountingEqual:completed.every(s=>ledgerKnown(s))&&completed.every(s=>equal(s.requestLedger.map(a=>[a.actualRequests,a.creditsDeducted]),
+        result.requestLedger.map(a=>[a.actualRequests,a.creditsDeducted]))),
+      jobsEqual:completed.every(s=>equal(s.jobs,result.jobs)),historicalJobsEqual:completed.every(s=>equal(s.historicalJobs,result.historicalJobs)),
+      observationsEqual:completed.every(s=>equal(s.discoveryReviews,result.discoveryReviews)),contentHashesValid:completed.every(contentValid),
+      laterHistoryVerified:historyComplete(history)};
+    let missingClaim=false,receiptsValid=true;
+    for(const s of completed){
+      const a=active(s);if(!a){receiptsValid=false;continue;}
+      if(a.claimArtifactReceipt===undefined||a.claimArtifactName===undefined)missingClaim=true;
+      if(a.claimArtifactReceipt!==undefined&&a.claimArtifactReceipt!==String(COMPARISON_PINS.claim)||
+        a.claimArtifactName!==undefined&&a.claimArtifactName!==`socialapis-page-${TARGET.logical}-1-claim`)receiptsValid=false;
+    }
+    checks.receiptsValid=receiptsValid;
+    const finalPage=originalFinal.orchestration.pages.at(-1),resultPage=result.orchestration.pages.at(-1),syncPage=syncFinal.orchestration.pages.at(-1);
+    checks.originalAcknowledged=originalFinal.orchestration.phase==='READY'&&active(originalFinal)?.outcome==='CONFIRMED'&&
+      finalPage?.outcome==='CONFIRMED'&&finalPage?.artifactReceipt===String(COMPARISON_PINS.result);
+    if(finalPage?.artifactReceipt!==undefined&&finalPage.artifactReceipt!==String(COMPARISON_PINS.result))checks.receiptsValid=false;
+    checks.completedSource=result.orchestration.phase==='COMPLETED_UNCONFIRMED'&&active(result)?.outcome==='COMPLETED_UNCONFIRMED'&&
+      resultPage?.outcome==='COMPLETED_UNCONFIRMED'&&resultPage.artifactReceipt===undefined;
+    checks.syncPreservesSource=syncFinal.orchestration.phase===result.orchestration.phase&&
+      active(syncFinal)?.outcome===active(result)?.outcome&&syncPage?.outcome===resultPage?.outcome&&syncPage?.artifactReceipt===resultPage?.artifactReceipt;
+    const comparisons={resultToOriginalFinal:comparePair(result,originalFinal),resultToSyncFinal:comparePair(result,syncFinal)};
+    const contradiction=Object.entries(checks).some(([k,v])=>k!=='laterHistoryVerified'&&!v);
+    const unclassified=Object.values(comparisons).some(c=>c.unclassifiedChanges>0);
+    const eligibility=contradiction?'NO':missingClaim||!checks.laterHistoryVerified||unclassified?'NOT_YET_DETERMINABLE':'YES';
+    const rows=SNAPSHOT_ROLES.map(role=>{
+      const s=snapshots[role],a=active(s),known=s.requestLedger.every(r=>Number.isFinite(r.actualRequests)&&Number.isFinite(r.creditsDeducted));
+      return {role,artifactId:String(COMPARISON_PINS[role]),phase:label(s.orchestration.phase,phases),
+        status:label(s.orchestration.status,statuses),
+        stopReason:s.orchestration.stopReason===null?null:label(s.orchestration.stopReason,[...stopReasons,'REQUEST_BUDGET','CREDIT_BUDGET','DAILY_REQUEST_BUDGET']),
+        activeOutcome:label(a?.outcome,outcomes),workflowRunId:id(s.orchestration.workflowRunId),
+        attemptIndex:Number.isSafeInteger(s.orchestration.attemptIndex)&&s.orchestration.attemptIndex>=0?s.orchestration.attemptIndex:null,
+        actualRequests:known?s.requestLedger.reduce((n,v)=>n+v.actualRequests,0):null,
+        creditsDeducted:known?s.requestLedger.reduce((n,v)=>n+v.creditsDeducted,0):null,
+        claimReceipt:id(a?.claimArtifactReceipt),lastPageReceipt:id(s.orchestration.pages.at(-1)?.artifactReceipt),
+        lastPageOutcome:label(s.orchestration.pages.at(-1)?.outcome,outcomes),
+        workflowSlot:s.requestLedger.slice(0,10).filter(row=>row.workflowRunId===TARGET.logical).length,
+        pageNumber:Number.isSafeInteger(s.orchestration.pages.at(-1)?.pageNumber)?s.orchestration.pages.at(-1).pageNumber:null,
+        lastPageFingerprint:semanticHash(s.orchestration.pages.at(-1)??null),
+        archiveDigest:archiveDigests[COMPARISON_PINS[role]],
+        plaintextFingerprint:/^[a-f0-9]{64}$/u.test(plaintextDigests?.[role]??'')?plaintextDigests[role]:null,
+        stateFingerprint:fingerprint(s),canonicalFingerprint:semanticHash(s),ledgerFingerprint:semanticHash(s.requestLedger),
+        jobsFingerprint:semanticHash(s.jobs),historicalJobsFingerprint:semanticHash(s.historicalJobs??null),
+        observationsFingerprint:semanticHash(s.discoveryReviews),terminalReconciliationsFingerprint:semanticHash(s.terminalReconciliations),
+        registryCount:s.jobs.length,observationCount:s.discoveryReviews.reduce((n,b)=>n+(Array.isArray(b.items)?b.items.length:0),0)};
+    });
+    const resultReport={ok:true,eligibility,fingerprintVersion:'CANONICAL_JSON_V1',protectedFingerprint:semanticHash(protectedState(result)),
+      ledgerRowsCompared:Math.max(...completed.map(s=>s.requestLedger.length)),snapshots:rows,checks,comparisons,
+      artifactProvenance:COMPARISON_ROLES.map(role=>{
+        const a=artifacts.find(v=>v.id===COMPARISON_PINS[role]);
+        const timestamp=v=>typeof v==='string'&&Number.isFinite(Date.parse(v))?new Date(v).toISOString():null;
+        return {role,id:String(a.id),name:a.name,uploaderRunId:id(a.workflow_run.id),repositoryId:repository.id,
+          digest:a.digest,expired:false,createdAt:timestamp(a.created_at),expiresAt:timestamp(a.expires_at)};
+      }),
+      laterHistory:{verified:checks.laterHistoryVerified,runCount:Array.isArray(history?.runs)?history.runs.length:null,
+        fingerprint:object(history)?semanticHash(history):null},
+      reasons:[...(contradiction?['PROTECTED_STATE_OR_ACK_INVARIANT_FAILED']:[]),...(missingClaim?['CLAIM_BINDING_MISSING']:[]),
+        ...(!checks.laterHistoryVerified?['LATER_HISTORY_NOT_VERIFIED']:[]),...(unclassified?['UNCLASSIFIED_SNAPSHOT_DIFFERENCES']:[])],
+      recoveryExecuted:false};
+    return Buffer.byteLength(JSON.stringify(resultReport))<=MAX_OUTPUT?resultReport:comparisonFailure('OUTPUT_LIMIT_EXCEEDED');
+  }catch{return comparisonFailure('CHECKPOINT_SCHEMA_INVALID');}
+}
+
+export async function inspectAcknowledgedCheckpoints({github,key}={}){
+  try{
+    if(typeof key!=='string'||!/^[a-f0-9]{64}$/iu.test(key))return comparisonFailure('CHECKPOINT_CREDENTIALS_UNAVAILABLE');
+    const repository=await github.getRepository(),artifacts=[];
+    for(const role of COMPARISON_ROLES){
+      const a=await github.getArtifact(COMPARISON_PINS[role]);
+      if(!comparisonArtifactValid(a,role,repository))return comparisonFailure('ARTIFACT_PROVENANCE_INVALID');
+      artifacts.push(a);
+    }
+    const snapshots={},archiveDigests={},plaintextDigests={};
+    for(const [index,role] of COMPARISON_ROLES.entries()){
+      let ciphertext,plaintext;
+      try{
+        const archive=await github.downloadArtifact(COMPARISON_PINS[role]);
+        if(!Buffer.isBuffer(archive)||archive.length>MAX_ARCHIVE)return comparisonFailure('CHECKPOINT_ARCHIVE_INVALID');
+        const archiveDigest=`sha256:${sha(archive)}`;archiveDigests[COMPARISON_PINS[role]]=archiveDigest;
+        if(archiveDigest!==artifacts[index].digest)return comparisonFailure('ARTIFACT_DIGEST_MISMATCH');
+        try{ciphertext=ciphertextFromZip(archive);}catch{return comparisonFailure('CHECKPOINT_ARCHIVE_INVALID');}
+        try{plaintext=decryptCheckpoint(ciphertext,key);}catch{return comparisonFailure('CHECKPOINT_DECRYPTION_FAILED');}
+        plaintextDigests[role]=sha(plaintext);
+        try{snapshots[role]=JSON.parse(plaintext.toString('utf8'));}catch{return comparisonFailure('CHECKPOINT_SCHEMA_INVALID');}
+      }finally{plaintext?.fill(0);ciphertext?.fill(0);}
+    }
+    let history;
+    try{history=await github.getHistoryEvidence();}catch{history=undefined;}
+    return compareAcknowledgedCheckpoints({repository,artifacts,snapshots,archiveDigests,plaintextDigests,history});
+  }catch{return comparisonFailure('CHECKPOINT_INSPECTION_FAILED');}
+}
+
+// Builds evidence only from bounded authenticated REST reads. The pure comparator
+// consumes this internal port, never a workflow-provided assertion of authority.
+async function laterHistory(api){
+  const {REVIEWED_WORKFLOW_HASHES,workflowHash,HISTORY_LIMITS}=await import('./checkpoint-history.mjs');
+  const {parse}=await import('yaml');
+  const query='/actions/workflows/socialapis-job-discovery.yml/runs?branch=main&event=workflow_dispatch&per_page=20&page=';
+  const list=async()=>{
+    const runs=[];let total,last=Infinity;
+    for(let page=1;page<=HISTORY_LIMITS.pages;page++){
+      const data=await api.json(query+page,512*1024);
+      if(!Array.isArray(data.workflow_runs)||data.workflow_runs.length>20||!Number.isSafeInteger(data.total_count)||data.total_count<1||
+        total!==undefined&&total!==data.total_count)throw new Error('HISTORY_UNVERIFIED');
+      total=data.total_count;
+      for(const run of data.workflow_runs){
+        if(!id(run.id)||!Number.isSafeInteger(run.run_number)||run.run_number>=last||runs.length>=HISTORY_LIMITS.runs)throw new Error('HISTORY_UNVERIFIED');
+        last=run.run_number;runs.push(run);
+        if(String(run.id)===TARGET.logical)return {total,runs};
+      }
+      if(data.workflow_runs.length!==20)throw new Error('HISTORY_UNVERIFIED');
+    }
+    throw new Error('HISTORY_UNVERIFIED');
+  };
+  const before=await list(),records=[];
+  for(const run of before.runs){
+    if(run.path!=='.github/workflows/socialapis-job-discovery.yml'||run.head_branch!=='main'||run.event!=='workflow_dispatch'||
+      run.head_repository?.full_name!==TARGET.repo||run.run_attempt!==1||run.status!=='completed'||
+      !['success','failure'].includes(run.conclusion)||!/^[a-f0-9]{40}$/u.test(run.head_sha??''))throw new Error('HISTORY_UNVERIFIED');
+    const file=await api.json(`/contents/.github/workflows/socialapis-job-discovery.yml?ref=${run.head_sha}`,128*1024);
+    if(file.encoding!=='base64'||typeof file.content!=='string'||file.content.length>90_000)throw new Error('HISTORY_UNVERIFIED');
+    const source=Buffer.from(file.content,'base64').toString('utf8');
+    if(!REVIEWED_WORKFLOW_HASHES.has(workflowHash(source)))throw new Error('HISTORY_UNVERIFIED');
+    const defs=parse(source)?.jobs?.discover?.steps;
+    if(!Array.isArray(defs))throw new Error('HISTORY_UNVERIFIED');
+    const jobs=[];let count;
+    for(let page=1;page<=HISTORY_LIMITS.metadataPages;page++){
+      const data=await api.json(`/actions/runs/${run.id}/jobs?filter=all&per_page=100&page=${page}`,512*1024);
+      if(!Array.isArray(data.jobs)||!Number.isSafeInteger(data.total_count)||count!==undefined&&count!==data.total_count)throw new Error('HISTORY_UNVERIFIED');
+      count=data.total_count;jobs.push(...data.jobs);if(jobs.length===count)break;
+      if(data.jobs.length!==100||page===HISTORY_LIMITS.metadataPages)throw new Error('HISTORY_UNVERIFIED');
+    }
+    if(jobs.length!==1)throw new Error('HISTORY_UNVERIFIED');
+    const job=jobs[0];
+    if(job.name!=='discover'||job.run_id!==run.id||job.run_attempt!==1||job.status!=='completed'||job.conclusion!==run.conclusion||!Array.isArray(job.steps))throw new Error('HISTORY_UNVERIFIED');
+    const steps=job.steps.filter(s=>s.name!=='Set up job'&&s.name!=='Complete job'&&!s.name.startsWith('Post '));
+    if(steps.length!==defs.length||steps.some((s,i)=>s.status!=='completed'||!Number.isSafeInteger(s.number)||i>0&&s.number<=steps[i-1].number||
+      s.name!==(defs[i].name??`Run ${defs[i].uses??defs[i].run.split('\n')[0]}`)))throw new Error('HISTORY_UNVERIFIED');
+    const providerSteps=steps.filter((_s,i)=>defs[i].uses==='./.github/actions/socialapis-discovery-page').map(s=>({status:s.status,conclusion:s.conclusion}));
+    if(![1,6].includes(providerSteps.length))throw new Error('HISTORY_UNVERIFIED');
+    if(String(run.id)!==TARGET.logical)records.push({id:String(run.id),status:run.status,runAttempt:run.run_attempt,conclusion:run.conclusion,providerSteps});
+  }
+  const after=await list();
+  // Full run metadata equality also detects transitions during inspection.
+  return {source:'AUTHENTICATED_GITHUB_GET',complete:true,sourceProvenanceVerified:true,
+    stable:equal(before,after),runs:records};
+}
+
+export async function inspectAcknowledgedFromGitHub({token,key,transport=fetch,historyReader}={}){
+  try{
+    if(typeof token!=='string'||!token||typeof key!=='string'||!/^[a-f0-9]{64}$/iu.test(key))return comparisonFailure('CHECKPOINT_CREDENTIALS_UNAVAILABLE');
+    const api=githubReads(token,transport,AbortSignal.timeout(240_000));
+    return await inspectAcknowledgedCheckpoints({key,github:{getRepository:()=>api.json(''),
+      getArtifact:artifactId=>api.json(`/actions/artifacts/${artifactId}`),downloadArtifact:api.downloadArtifact,
+      getHistoryEvidence:()=>historyReader?historyReader():laterHistory(api)}});
+  }catch{return comparisonFailure('CHECKPOINT_INSPECTION_FAILED');}
 }

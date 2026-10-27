@@ -1,0 +1,49 @@
+name: Verify original acknowledged Discovery checkpoint
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: private-checkpoint-comparison
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    if: github.repository == 'CoderPL1005/portfolio' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.12.0
+      - name: Install locked diagnostic dependencies without lifecycle scripts
+        working-directory: tools/browser-job-discovery
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Compare fixed encrypted checkpoints (metadata only)
+        uses: actions/github-script@v7
+        env:
+          DISCOVERY_CHECKPOINT_KEY: ${{ secrets.DISCOVERY_CHECKPOINT_KEY }}
+          GH_READ_TOKEN: ${{ github.token }}
+        with:
+          retries: 0
+          script: |
+            try {
+              const { pathToFileURL } = await import('node:url');
+              const moduleUrl = pathToFileURL(`${process.env.GITHUB_WORKSPACE}/tools/browser-job-discovery/src/checkpoint-inspection.mjs`);
+              const { inspectAcknowledgedFromGitHub } = await import(moduleUrl.href);
+              const result = await inspectAcknowledgedFromGitHub({
+                token: process.env.GH_READ_TOKEN,
+                key: process.env.DISCOVERY_CHECKPOINT_KEY
+              });
+              console.log(JSON.stringify(result));
+              if (!result.ok) core.setFailed('CHECKPOINT_COMPARISON_FAILED');
+            } catch {
+              core.setFailed('CHECKPOINT_COMPARISON_FAILED');
+            }
