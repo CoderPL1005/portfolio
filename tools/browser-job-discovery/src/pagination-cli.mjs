@@ -157,8 +157,12 @@ export async function paginationCli(args) {
     acknowledgePersistence(state, receipt, actionsResultEvidence(state));
   } else if(action==='sync'){
     // Only saved observations are replayed. This branch never constructs a provider adapter.
-    const summaries=await syncReviews(state,syncConfiguration());
-    console.log(JSON.stringify({adminSync:summaries,providerRequests:0}));
+    if(!/^[1-9]\d*$/u.test(process.env.GITHUB_RUN_ID??'') ||
+      process.env.DISCOVERY_SYNC_ONLY!==undefined && !['true','false'].includes(process.env.DISCOVERY_SYNC_ONLY))throw new Stop('ADMIN_SYNC_EXECUTION_INVALID');
+    const recovery=process.env.DISCOVERY_SYNC_ONLY==='true';
+    await syncReviews(state,syncConfiguration(),undefined,{mode:recovery?'recovery':'current',executingWorkflowRunId:process.env.GITHUB_RUN_ID,
+      targetWorkflowRunId:process.env.DISCOVERY_SYNC_WORKFLOW_RUN_ID||undefined});
+    console.log(JSON.stringify({adminSync:state.adminSync,providerRequests:0}));
   }
   state.workflowMetrics = workflowMetrics(state);
   await mkdir(directory, { recursive: true });

@@ -110,6 +110,8 @@ test('automatic sync demo validates readiness before HTTP, persists ciphertext b
   }
   const replay=steps.find(s=>s.name==='Retry only saved Admin synchronization');
   assert.equal(replay.if,'inputs.auto_admin_sync && inputs.sync_only');assert.equal(replay.env.SOCIALAPIS_API_KEY,undefined);
+  assert.equal(replay.env.DISCOVERY_SYNC_ONLY,'true');assert.equal(replay.env.DISCOVERY_SYNC_WORKFLOW_RUN_ID,'${{ inputs.sync_workflow_run_id }}');
+  assert.equal(parts[sync].env.DISCOVERY_SYNC_ONLY,'false');assert.equal(parts[sync].env.DISCOVERY_SYNC_WORKFLOW_RUN_ID,'');
   assert.doesNotMatch(workflowText+actionText,/ADMIN_TOKEN|ADMIN_PASSWORD|schedule:/u);
   assert.equal(parts.find(s=>s.run==='node src/cli.mjs --orchestrate page').env.SOCIALAPIS_PRIVATE_CHECKPOINT_CONFIRMED,'${{ env.DISCOVERY_AUTO_ADMIN_SYNC }}');
 });

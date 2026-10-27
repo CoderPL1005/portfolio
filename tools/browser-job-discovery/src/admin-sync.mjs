@@ -54,16 +54,47 @@ async function request(config, path, bundle, transport) {
 export async function preflightAdminSync(config, transport=fetch) {
   if((await request(config,'/api/v1/discovery-sync/ready',null,transport))?.ready!==true)throw new Stop('ADMIN_SYNC_NOT_READY');
 }
-export async function syncReviews(state, config, transport=fetch) {
+// Scope comes from saved execution metadata and its request ledger, never from
+// the new recovery dispatch ID or the presence/order of historical bundles.
+export function resolveReviewSyncScope(state,{mode='current',executingWorkflowRunId,targetWorkflowRunId}={}) {
+  const workflowId=value=>typeof value==='string' && /^[1-9]\d*$/u.test(value);
+  const saved=state.orchestration?.workflowRunId;
+  if(!workflowId(saved) || !['current','recovery'].includes(mode) ||
+    executingWorkflowRunId!==undefined && !workflowId(executingWorkflowRunId) ||
+    mode==='current' && (targetWorkflowRunId!==undefined || executingWorkflowRunId!==undefined && executingWorkflowRunId!==saved) ||
+    targetWorkflowRunId!==undefined && !workflowId(targetWorkflowRunId))throw new Stop('ADMIN_SYNC_RUN_ID_INVALID_OR_INCONSISTENT');
+  const workflowRunId=targetWorkflowRunId??saved;
+  const fresh=state.freshSession;
+  if(fresh!==undefined && (!workflowId(fresh?.workflowRunId) || typeof fresh.id!=='string' || !/^fresh-[a-z0-9][a-z0-9-]{7,63}$/u.test(fresh.id)))
+    throw new Stop('ADMIN_SYNC_FRESH_ID_INVALID');
+  const observationRunId=fresh?.workflowRunId===workflowRunId?fresh.id:workflowRunId;
   if(!Array.isArray(state.discoveryReviews))throw new Stop('NO_CAPTURED_REVIEW_OBSERVATIONS');
+  if(observationRunId!==workflowRunId && state.discoveryReviews.some(b=>b?.runId===workflowRunId))throw new Stop('ADMIN_SYNC_RUN_ID_AMBIGUOUS');
+  const bundles=state.discoveryReviews.filter(b=>b?.runId===observationRunId);
+  if(!bundles.length)throw new Stop('NO_CAPTURED_REVIEW_OBSERVATIONS_FOR_RUN');
+  if(!Array.isArray(state.requestLedger) || new Set(bundles.map(b=>JSON.stringify([b.query,b.pageNumber]))).size!==bundles.length)
+    throw new Stop('ADMIN_SYNC_RUN_PROVENANCE_INVALID');
+  for(const b of bundles){
+    const attempts=state.requestLedger.filter(a=>a?.workflowRunId===workflowRunId && a.query===b.query && a.pageNumber===b.pageNumber);
+    if(b.schemaVersion!==1 || b.provider!=='SOCIALAPIS' || typeof b.query!=='string' || !b.query.trim() || b.query.length>300 || b.query.includes('\0') ||
+      !Number.isInteger(b.pageNumber)||b.pageNumber<1||b.pageNumber>6||!Array.isArray(b.items)||b.items.length>200 ||
+      attempts.length!==1 || attempts[0].actualRequests!==1 || !Number.isFinite(attempts[0].creditsDeducted) || attempts[0].creditsDeducted<0 ||
+      !['CONFIRMED','COMPLETED_UNCONFIRMED','FAILED_OR_AMBIGUOUS'].includes(attempts[0].outcome))throw new Stop('ADMIN_SYNC_RUN_PROVENANCE_INVALID');
+  }
+  if(!bundles.some(b=>b.items.length))throw new Stop('NO_CAPTURED_REVIEW_OBSERVATIONS_FOR_RUN');
+  return {scope:{mode,workflowRunId,observationRunId,executingWorkflowRunId:executingWorkflowRunId??null},
+    bundles:bundles.sort((a,b)=>a.pageNumber-b.pageNumber)};
+}
+export async function syncReviews(state, config, transport=fetch, options={}) {
+  const {scope,bundles}=resolveReviewSyncScope(state,options);
   const summaries=[];
-  for(const bundle of state.discoveryReviews){
+  for(const bundle of bundles){
     const result=await request(config,'/api/v1/discovery-sync/import',bundle,transport);
     if(!Number.isInteger(result?.inserted)||!Number.isInteger(result?.unchanged)||result.inserted<0||result.unchanged<0||
       result.inserted+result.unchanged!==bundle.items.length)throw new Stop('ADMIN_SYNC_RECEIPT_INVALID');
     summaries.push({runId:bundle.runId,pageNumber:bundle.pageNumber,inserted:result.inserted,unchanged:result.unchanged});
   }
   // No mutation of registry/ledger or Human Review. Repeating uses identical payloads.
-  state.adminSync={completedAt:new Date().toISOString(),summaries};
+  state.adminSync={...scope,completedAt:new Date().toISOString(),observationCount:bundles.reduce((sum,b)=>sum+b.items.length,0),summaries};
   return summaries;
 }

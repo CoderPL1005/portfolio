@@ -71,6 +71,8 @@ runs:
       shell: bash
       working-directory: tools/browser-job-discovery
       env:
+        DISCOVERY_SYNC_ONLY: 'false'
+        DISCOVERY_SYNC_WORKFLOW_RUN_ID: ''
         DISCOVERY_ADMIN_ORIGIN: https://portfolio-api-forn.onrender.com
         DISCOVERY_IMPORT_KEY: ${{ inputs.import_key }}
       run: node src/cli.mjs --orchestrate sync

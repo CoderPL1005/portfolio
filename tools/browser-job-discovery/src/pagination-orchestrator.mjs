@@ -199,7 +199,7 @@ export function workflowMetrics(state) {
     reviewSummary:{observations:observations.length,withVacancies:observations.filter(i=>i.extracted?.vacancies?.length).length,
       classifications:Object.fromEntries(['TARGET_MATCH','FALLBACK_MATCH','POTENTIAL_MATCH','INSUFFICIENT_DATA','NOT_MATCHED'].map(c=>[c,observations.filter(i=>i.targetMatching.status===c).length])),
       freshnessUnknown:observations.filter(i=>i.publishedAt===null).length},
-    adminSync:state.adminSync??null,
+    adminSync:state.adminSync?.workflowRunId===run.workflowRunId?state.adminSync:null,
     status: run.status, continuationAvailable: run.status!=='STOPPED_TERMINAL' && !!run.continuation && !['CLAIMED','IN_FLIGHT'].includes(run.phase),
     profileVersion:run.config.profile.technologyProfile?.version??'legacy-operator-profile',
     profileFingerprint:run.config.profile.technologyProfile?.fingerprint??fingerprint(run.config.profile),

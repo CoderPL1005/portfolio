@@ -27,6 +27,10 @@ on:
         description: Retry only saved observation import; ZERO SocialAPIs requests (requires auto_admin_sync)
         type: boolean
         default: false
+      sync_workflow_run_id:
+        description: Optional saved workflow ID for explicit historical sync_only recovery; blank retries the saved execution
+        type: string
+        default: ''
       fresh_session_id:
         description: Optional NEW fresh-<unique-id>, isolated candidates/cursor; preserves global audit; burns a new one-shot claim
         type: string
@@ -106,9 +110,12 @@ jobs:
         uses: actions/github-script@v7
         env:
           INITIALIZE_STATE: ${{ inputs.initialize_state }}
+          SYNC_ONLY: ${{ inputs.sync_only }}
+          SYNC_WORKFLOW_RUN_ID: ${{ inputs.sync_workflow_run_id }}
         with:
           retries: 0
           script: |
+            if (process.env.SYNC_WORKFLOW_RUN_ID && process.env.SYNC_ONLY !== 'true') throw new Error('HISTORICAL_SYNC_REQUIRES_SYNC_ONLY');
             const { pathToFileURL } = await import('node:url');
             const { locateCheckpoint } = await import(pathToFileURL(`${process.env.GITHUB_WORKSPACE}/tools/browser-job-discovery/src/checkpoint-history.mjs`).href);
             const found = await locateCheckpoint({ github, context,
@@ -138,6 +145,8 @@ jobs:
       - name: Retry only saved Admin synchronization
         if: inputs.auto_admin_sync && inputs.sync_only
         env:
+          DISCOVERY_SYNC_ONLY: 'true'
+          DISCOVERY_SYNC_WORKFLOW_RUN_ID: ${{ inputs.sync_workflow_run_id }}
           DISCOVERY_ADMIN_ORIGIN: https://portfolio-api-forn.onrender.com
           DISCOVERY_IMPORT_KEY: ${{ secrets.DISCOVERY_IMPORT_KEY }}
         run: node src/cli.mjs --orchestrate sync

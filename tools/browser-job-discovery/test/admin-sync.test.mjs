@@ -115,6 +115,70 @@ test('optional saved real capture through current Backend pipeline; fixture Port
   });
 
 const secret='a'.repeat(64),config=syncConfiguration({DISCOVERY_ADMIN_ORIGIN:'https://portfolio-api-forn.onrender.com',DISCOVERY_IMPORT_KEY:secret});
+
+function scopedCheckpoint(){
+  const bundle=(runId,count)=>({schemaVersion:1,provider:'SOCIALAPIS',runId,query:'Backend Hanoi',pageNumber:1,
+    items:Array.from({length:count},(_,itemIndex)=>({itemIndex,targetMatching:{status:'INSUFFICIENT_DATA'},publishedAt:null,extracted:{vacancies:[]}}))});
+  return {orchestration:{workflowRunId:'40482593764'},freshSession:{workflowRunId:'40470000000',id:'fresh-demo-20261027-a2'},
+    requestLedger:['40482593764','40479573219','40470000000'].map(workflowRunId=>({workflowRunId,query:'Backend Hanoi',pageNumber:1,
+      actualRequests:1,creditsDeducted:1,outcome:'CONFIRMED'})),
+    discoveryReviews:[bundle('40479573219',8),bundle('fresh-demo-20261027-a2',5),bundle('40482593764',5)]};
+}
+
+test('normal sync sends only five current observations from an eighteen-item cumulative checkpoint',async()=>{
+  const state=scopedCheckpoint(),before=structuredClone(state),sent=[];
+  const transport=async(url,options)=>{assert.equal(url.pathname,'/api/v1/discovery-sync/import');const body=JSON.parse(options.body);sent.push(body);
+    return Response.json({data:{inserted:body.items.length,unchanged:0}});};
+  await syncReviews(state,config,transport,{executingWorkflowRunId:'40482593764'});
+  assert.deepEqual(sent,[before.discoveryReviews[2]]);assert.deepEqual(state.discoveryReviews,before.discoveryReviews);
+  assert.deepEqual(state.requestLedger,before.requestLedger);
+  assert.equal(state.adminSync.workflowRunId,'40482593764');assert.equal(state.adminSync.observationRunId,'40482593764');
+});
+
+test('sync-only retries saved execution, not its new launcher, and permits only validated explicit historical targets',async()=>{
+  const state=scopedCheckpoint(),sent=[];
+  const transport=async(_url,options)=>{const b=JSON.parse(options.body);sent.push(b.runId);return Response.json({data:{inserted:0,unchanged:b.items.length}});};
+  await syncReviews(state,config,transport,{mode:'recovery',executingWorkflowRunId:'99999999999'});
+  assert.deepEqual(sent,['40482593764']);sent.length=0;
+  await syncReviews(state,config,transport,{mode:'recovery',executingWorkflowRunId:'99999999999',targetWorkflowRunId:'40479573219'});
+  assert.deepEqual(sent,['40479573219']);assert.equal(state.adminSync.executingWorkflowRunId,'99999999999');
+  assert.equal(state.adminSync.workflowRunId,'40479573219');sent.length=0;
+  await syncReviews(state,config,transport,{mode:'recovery',targetWorkflowRunId:'40470000000'});
+  assert.deepEqual(sent,['fresh-demo-20261027-a2']);
+});
+
+test('missing, conflicting or ambiguous identities and empty scopes fail before any import',async()=>{
+  for(const mutate of [s=>delete s.orchestration,s=>s.orchestration.workflowRunId='',s=>s.orchestration.workflowRunId='not-a-workflow',
+    s=>delete s.requestLedger,s=>s.requestLedger=[],s=>delete s.freshSession.workflowRunId,
+    s=>s.freshSession.id='',s=>s.discoveryReviews=s.discoveryReviews.slice(0,2),s=>s.discoveryReviews[2].items=[],
+    s=>s.discoveryReviews.push(structuredClone(s.discoveryReviews[2])),s=>s.discoveryReviews[2].query='unrelated query',
+    s=>s.requestLedger.push(structuredClone(s.requestLedger[0])),s=>s.requestLedger[0].creditsDeducted=null,
+    s=>{s.freshSession.workflowRunId='40482593764';},s=>delete s.freshSession]){
+    // Removing unrelated fresh metadata is valid; use its former workflow as
+    // the target to prove a historical fresh identity is never guessed.
+    const state=scopedCheckpoint();mutate(state);const before=structuredClone(state);let calls=0;
+    const options=state.freshSession===undefined?{mode:'recovery',targetWorkflowRunId:'40470000000'}:{};
+    await assert.rejects(()=>syncReviews(state,config,async()=>{calls++;return Response.json({});},options),/SYNC_|OBSERVATIONS/u);
+    assert.equal(calls,0);assert.deepEqual(state,before);
+  }
+  for(const options of [{executingWorkflowRunId:'40479573219'},{targetWorkflowRunId:'40479573219'},
+    {mode:'recovery',targetWorkflowRunId:'11111111111'},{mode:'unexpected'},{mode:'recovery',targetWorkflowRunId:'fresh-demo-20261027-a2'}]){
+    let calls=0;await assert.rejects(()=>syncReviews(scopedCheckpoint(),config,async()=>{calls++;return Response.json({});},options),/SYNC_|OBSERVATIONS/u);
+    assert.equal(calls,0);
+  }
+});
+
+test('every selected page is validated before importing; valid pages retain execution scope and canonical page order',async()=>{
+  const state=scopedCheckpoint(),page2={...structuredClone(state.discoveryReviews[2]),pageNumber:2};
+  state.discoveryReviews.unshift(page2);let calls=0;
+  const transport=async(_url,options)=>{calls++;const b=JSON.parse(options.body);return Response.json({data:{inserted:0,unchanged:b.items.length}});};
+  await assert.rejects(()=>syncReviews(state,config,transport),/RUN_PROVENANCE_INVALID/u);assert.equal(calls,0);
+  state.requestLedger.push({...state.requestLedger[0],pageNumber:2});
+  const before=structuredClone(state);const summaries=await syncReviews(state,config,transport);
+  assert.deepEqual(summaries.map(b=>[b.runId,b.pageNumber]),[['40482593764',1],['40482593764',2]]);
+  assert.equal(calls,2);assert.equal(state.adminSync.observationCount,10);
+  assert.deepEqual(state.discoveryReviews,before.discoveryReviews);assert.deepEqual(state.requestLedger,before.requestLedger);
+});
 test('private checkpoint is authenticated ciphertext, never JD plaintext; wrong key/tampering fail closed',()=>{
   const bytes=Buffer.from(JSON.stringify({contact:'private@example.invalid',rawContent:'PRIVATE_JD'}));
   const encrypted=encryptCheckpoint(bytes,secret);
@@ -131,7 +195,7 @@ test('sync configuration prevents sending scoped secret to arbitrary origin or u
 });
 test('all invalid/mismatch and duplicate observations survive strict rejection; sync retry never calls provider',async()=>{
   const s=beginExecution({evidenceKind:'SOCIALAPIS_DISCOVERY_STATE',jobs:[]},{query:'Fresher .NET Hà Nội',
-    profile:{technologies:['ASP.NET Core'],locations:['Hanoi'],seniorities:['Fresher']},maxRequests:1,maxCredits:1},'synthetic-sync');
+    profile:{technologies:['ASP.NET Core'],locations:['Hanoi'],seniorities:['Fresher']},maxRequests:1,maxCredits:1},'91000');
   const originalKey=process.env.SOCIALAPIS_API_KEY;process.env.SOCIALAPIS_API_KEY='synthetic-sync-provider-key';
   const row={basic_info:{post_id:'123',post_text:'Hiring Senior Java Developer in Hanoi',url:'https://facebook.com/fixture/posts/pfbidUnverified'}};
   let providerCalls=0;
@@ -162,7 +226,7 @@ test('readiness is checked without provider or writes; rejected/invalid receipt 
   let calls=0;await preflightAdminSync(config,async(url,options)=>{calls++;assert.equal(options.method,'GET');assert.ok(url.pathname.endsWith('/ready'));return Response.json({data:{ready:true}});});
   assert.equal(calls,1);
   await assert.rejects(()=>preflightAdminSync(config,async()=>new Response('',{status:401})),/SYNC_FAILED/u);
-  const s={discoveryReviews:[{items:[{}]}]};
+  const s=scopedCheckpoint();
   await assert.rejects(()=>syncReviews(s,config,async()=>Response.json({data:{inserted:0,unchanged:0}})),/RECEIPT_INVALID/u);
   assert.equal(s.adminSync,undefined);
   await assert.rejects(()=>preflightAdminSync(config,async()=>new Response('x'.repeat(5000))),/SYNC_FAILED/u);
@@ -186,19 +250,33 @@ test('one-request automatic-sync demo rejects changed request/date/cursor settin
 test('existing CLI seals/restores exact historical state offline and sync replay cannot trigger any provider HTTP',async()=>{
   const directory=fileURLToPath(new URL('../',import.meta.url));await mkdir(join(directory,'.debug'),{recursive:true});
   const local=await mkdtemp(join(directory,'.debug','sync-test-')),output=join(local,'socialapis-discovery.json');
+  const saved=scopedCheckpoint(),counter=join(local,'sync-calls.txt');
   const state=beginExecution({evidenceKind:'SOCIALAPIS_DISCOVERY_STATE',jobs:[]},
-    {query:'fixture',profile:{technologies:['ASP.NET Core'],locations:['Hanoi'],seniorities:['Fresher']},maxRequests:1,maxCredits:1},'synthetic-sync-cli');
-  state.discoveryReviews=[{schemaVersion:1,provider:'SOCIALAPIS',runId:'synthetic-sync-cli',query:'fixture',pageNumber:1,items:[]}];
-  const env={...process.env,DISCOVERY_STATE_FILE:output,DISCOVERY_CHECKPOINT_KEY:secret,DISCOVERY_ADMIN_ORIGIN:config.origin,DISCOVERY_IMPORT_KEY:secret};
-  const guard='data:text/javascript,'+encodeURIComponent(`import net from 'node:net';net.Socket.prototype.connect=()=>{throw Error('NETWORK_FORBIDDEN')};
+    {query:'Backend Hanoi',profile:{technologies:['ASP.NET Core'],locations:['Hanoi'],seniorities:['Fresher']},maxRequests:1,maxCredits:1},'40482593764');
+  state.discoveryReviews=saved.discoveryReviews;state.requestLedger=saved.requestLedger;state.freshSession=saved.freshSession;
+  const env={...process.env,DISCOVERY_STATE_FILE:output,DISCOVERY_CHECKPOINT_KEY:secret,DISCOVERY_ADMIN_ORIGIN:config.origin,DISCOVERY_IMPORT_KEY:secret,
+    DISCOVERY_AUTO_ADMIN_SYNC:'true',DISCOVERY_SYNC_ONLY:'true',DISCOVERY_SYNC_WORKFLOW_RUN_ID:'',GITHUB_RUN_ID:'99999999999',EXPECTED_SYNC_RUN_ID:'40482593764'};
+  const guard='data:text/javascript,'+encodeURIComponent(`import net from 'node:net';import{appendFileSync}from'node:fs';net.Socket.prototype.connect=()=>{throw Error('NETWORK_FORBIDDEN')};
     globalThis.fetch=async (url,options)=>{if(url.hostname!=='portfolio-api-forn.onrender.com'||url.pathname!=='/api/v1/discovery-sync/import')throw Error('UNEXPECTED_ENDPOINT');
-      if(options.method!=='POST')throw Error('UNEXPECTED_METHOD');return Response.json({data:{inserted:0,unchanged:0}});};`);
-  const invoke=action=>execFileSync(process.execPath,['--import',guard,'src/cli.mjs','--orchestrate',action],{cwd:directory,encoding:'utf8',stdio:'pipe',env});
+      if(options.method!=='POST')throw Error('UNEXPECTED_METHOD');const b=JSON.parse(options.body);if(b.runId!==process.env.EXPECTED_SYNC_RUN_ID)throw Error('UNRELATED_IMPORT');
+      appendFileSync(${JSON.stringify(counter)},b.runId+'\\n');return Response.json({data:{inserted:0,unchanged:b.items.length}});};`);
+  const invoke=(action,extra={})=>execFileSync(process.execPath,['--import',guard,'src/cli.mjs','--orchestrate',action],{cwd:directory,encoding:'utf8',stdio:'pipe',env:{...env,...extra}});
   try{
     const bytes=Buffer.from(JSON.stringify(state));await writeFile(output,bytes);invoke('seal');
     assert.deepEqual(decryptCheckpoint(await readFile(output+'.enc'),secret),bytes);
     await rm(output);invoke('unseal');assert.deepEqual(await readFile(output),bytes);
     const stdout=invoke('sync');assert.match(stdout,/"providerRequests":0/u);assert.ok(!stdout.includes(secret));
+    invoke('sync');
     const after=JSON.parse(await readFile(output,'utf8'));assert.deepEqual(after.requestLedger,state.requestLedger);assert.deepEqual(after.jobs,state.jobs);
+    assert.deepEqual(after.discoveryReviews,state.discoveryReviews);assert.equal(after.adminSync.observationRunId,'40482593764');
+    assert.equal(after.adminSync.executingWorkflowRunId,'99999999999');assert.equal(after.adminSync.observationCount,5);
+    assert.deepEqual((await readFile(counter,'utf8')).trim().split('\n'),['40482593764','40482593764']);
+    assert.throws(()=>invoke('sync',{DISCOVERY_SYNC_ONLY:'false'}),e=>e.stderr.toString().includes('RUN_ID_INVALID_OR_INCONSISTENT'));
+    assert.throws(()=>invoke('sync',{GITHUB_RUN_ID:''}),e=>e.stderr.toString().includes('ADMIN_SYNC_EXECUTION_INVALID'));
+    invoke('sync',{DISCOVERY_SYNC_ONLY:'false',GITHUB_RUN_ID:'40482593764'});
+    invoke('sync',{DISCOVERY_SYNC_WORKFLOW_RUN_ID:'40479573219',EXPECTED_SYNC_RUN_ID:'40479573219'});
+    const recovered=JSON.parse(await readFile(output,'utf8'));assert.equal(recovered.adminSync.workflowRunId,'40479573219');
+    assert.equal(recovered.workflowMetrics.adminSync,null);assert.deepEqual(recovered.requestLedger,state.requestLedger);
+    assert.deepEqual((await readFile(counter,'utf8')).trim().split('\n'),['40482593764','40482593764','40482593764','40479573219']);
   }finally{await rm(local,{recursive:true,force:true});}
 });

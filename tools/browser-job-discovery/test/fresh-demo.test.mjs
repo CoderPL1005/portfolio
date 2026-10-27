@@ -124,7 +124,9 @@ test('one mock HTTP page retains raw/normalized JSON privately, strict dedup and
     return Response.json({data:{inserted:first?bundle.items.length:0,unchanged:first?0:bundle.items.length}});};
   const c=syncConfiguration({DISCOVERY_ADMIN_ORIGIN:'https://portfolio-api-forn.onrender.com',DISCOVERY_IMPORT_KEY:'b'.repeat(64)});
   const ledger=structuredClone(s.requestLedger);await syncReviews(s,c,sync);await syncReviews(s,c,sync);
-  assert.equal(syncCalls,4);assert.deepEqual(s.requestLedger,ledger);
+  assert.equal(syncCalls,2);assert.deepEqual(s.requestLedger,ledger);
+  assert.deepEqual([...seen],[s.freshSession.id]);assert.equal(s.discoveryReviews.length,2);
+  assert.equal(s.adminSync.workflowRunId,s.freshSession.workflowRunId);assert.equal(s.adminSync.observationRunId,s.freshSession.id);
 });
 test('timeout is ambiguous, no retry/new session; unknown charge retains private response but cannot resume',async()=>{
   const s=fresh(previous());await execute(s,null,async()=>{throw Error('SENSITIVE_NETWORK_ERROR');});
