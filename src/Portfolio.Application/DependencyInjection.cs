@@ -52,6 +52,11 @@ public static class DependencyInjection
         services.AddScoped<IRequestHandler<GetDiscoveryCandidateQuery, DiscoveryReviewDetail>, GetDiscoveryCandidateHandler>();
         services.AddScoped<IRequestHandler<PlanDiscoveryDemoResetQuery, DiscoveryDemoResetPlan>, PlanDiscoveryDemoResetHandler>();
         services.AddScoped<IRequestValidator<PlanDiscoveryDemoResetQuery>, PlanDiscoveryDemoResetValidator>();
+        services.AddScoped<IRequestHandler<GetDiscoveryCleanupRunsQuery, IReadOnlyList<DiscoveryRunSummary>>, GetDiscoveryCleanupRunsHandler>();
+        services.AddScoped<IRequestHandler<ExportDiscoveryCleanupBackupCommand, DiscoveryCleanupBackup>, ExportDiscoveryCleanupBackupHandler>();
+        services.AddScoped<IRequestHandler<DeleteDiscoveryRunsCommand, DiscoveryCleanupResult>, DeleteDiscoveryRunsHandler>();
+        services.AddScoped<IRequestHandler<GetJobDataResetPlanQuery, JobDataResetPlan>, GetJobDataResetPlanHandler>();
+        services.AddScoped<IRequestHandler<ResetAllJobDataCommand, JobDataResetResult>, ResetAllJobDataHandler>();
 
         // Registration order defines the pipeline: validation -> logging -> handler.
         services.AddTransient(typeof(IRequestBehavior<,>), typeof(ValidationBehavior<,>));

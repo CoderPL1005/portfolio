@@ -1,4 +1,3 @@
-using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using Portfolio.Application.Common.Abstractions.Messaging;
@@ -8,7 +7,7 @@ using Portfolio.Application.Common.Exceptions;
 
 namespace Portfolio.Application.Features.JobHunting;
 
-// Read-only planning only. No endpoint in this feature executes deletion.
+// This endpoint remains read-only; deletion uses the separate backed-up cleanup command.
 public sealed record PlanDiscoveryDemoResetQuery(string[] RunIds) : IRequest<DiscoveryDemoResetPlan>;
 public sealed record DiscoveryDemoResetPlan(bool DryRun, string[] RunIds, int TotalJobPostings, int TotalObservations,
     int ScopedObservations, int ScopedReviews, int ScopedReviewEvents, string Fingerprint, string Action,
@@ -29,16 +28,10 @@ public sealed class PlanDiscoveryDemoResetHandler(IApplicationDbContext db) : IR
     {
         if (!PlanDiscoveryDemoResetValidator.Valid(r)) throw new ValidationException([new("runIds", "Invalid discovery reset scope.")]);
         var scope = r.RunIds.Order(StringComparer.Ordinal).ToArray();
-        var rows = await db.DiscoveryCandidates.AsNoTracking().Where(c => scope.Contains(c.RunId)).OrderBy(c => c.Id)
-            .Select(c => new { c.Id, c.RunId, c.PayloadHash }).ToListAsync(ct);
-        var ids = rows.Select(c => c.Id).ToArray();
-        var reviews = await db.DiscoveryCandidateReviews.AsNoTracking().Where(c => ids.Contains(c.CandidateId)).OrderBy(c => c.CandidateId)
-            .Select(c => new { c.CandidateId, c.Version }).ToListAsync(ct);
-        var events = await db.DiscoveryCandidateReviewEvents.AsNoTracking().Where(c => ids.Contains(c.CandidateId)).OrderBy(c => c.Id)
-            .Select(c => new { c.Id, c.CandidateId, c.Version }).ToListAsync(ct);
-        var fingerprint = DiscoveryReviewRules.Hash(JsonSerializer.Serialize(new { scope, rows, reviews, events }, DiscoveryReviewRules.Json));
+        var snapshot = await DiscoveryCleanup.ReadAsync(db, scope, ct);
+        var fingerprint = DiscoveryCleanup.Hash(snapshot);
         return new(true, scope, await db.JobPostings.CountAsync(ct), await db.DiscoveryCandidates.CountAsync(ct),
-            rows.Count, reviews.Count, events.Count, fingerprint,
-            rows.Count == 0 ? "SKIP_DELETE_EMPTY_SCOPE" : "BACKUP_AND_RECONFIRM_EXACT_SCOPE_BEFORE_DELETE", true);
+            snapshot.Candidates.Length, snapshot.Reviews.Length, snapshot.ReviewEvents.Length, fingerprint,
+            snapshot.Candidates.Length == 0 ? "SKIP_DELETE_EMPTY_SCOPE" : "BACKUP_AND_RECONFIRM_EXACT_SCOPE_BEFORE_DELETE", true);
     }
 }

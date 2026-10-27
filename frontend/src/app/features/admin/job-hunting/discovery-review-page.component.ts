@@ -7,11 +7,12 @@ import { combineLatest } from 'rxjs';
 import { JobHuntingService } from './job-hunting.service';
 import { DiscoveryReviewDetail, DiscoveryReviewList, DiscoveryQualityReport, ReviewHistory, HumanReviewWrite } from './discovery-review.models';
 import { DiscoveryQualityComponent } from './discovery-quality.component';
+import { DiscoveryCleanupComponent } from './discovery-cleanup.component';
 import { DiscoveryJobInformationComponent, discoveryTitle, evidenceText } from './discovery-job-information.component';
 import { safeAdminError } from '../shared/admin-api';
 
 @Component({
-  selector: 'app-discovery-review-page', standalone: true, imports: [FormsModule, RouterLink, DatePipe, JsonPipe, DiscoveryQualityComponent, DiscoveryJobInformationComponent],
+  selector: 'app-discovery-review-page', standalone: true, imports: [FormsModule, RouterLink, DatePipe, JsonPipe, DiscoveryQualityComponent, DiscoveryJobInformationComponent,DiscoveryCleanupComponent],
   styleUrl: './discovery-review-page.component.css',
   template: `
     <main class="admin-page discovery-page space-y-5">
@@ -67,6 +68,8 @@ import { safeAdminError } from '../shared/admin-api';
           </section>
         </section>
       }@else if(!detailMode()){
+        <button type="button" (click)="cleanupOpen.set(!cleanupOpen())">Reset All Job Data</button>
+        @if(cleanupOpen()){<app-discovery-cleanup (changed)="load()" />}
         <details class="import-fallback rounded border p-4"><summary>Import thủ công dự phòng</summary>
           <label for="review-import" class="block font-semibold">Review export JSON từ local (không cần cho automatic sync)</label>
           <input id="review-import" type="file" accept=".json,application/json" [disabled]="importing()" (change)="chooseFile($event)" />
@@ -100,6 +103,7 @@ export class DiscoveryReviewPageComponent {
   private api = inject(JobHuntingService); private route = inject(ActivatedRoute); private destroyRef = inject(DestroyRef);
   list = signal<DiscoveryReviewList | null>(null); detail = signal<DiscoveryReviewDetail | null>(null);
   detailMode = signal(false);
+  cleanupOpen=signal(false);
   error = signal(''); message = signal(''); loading = signal(false); importing = signal(false); selected = signal<File | null>(null);
   contentStatus = ''; targetStatus = ''; runId = ''; collectedDate = ''; identityOnly = false; duplicatesOnly = false; page = 1;
   title=discoveryTitle; text=evidenceText;

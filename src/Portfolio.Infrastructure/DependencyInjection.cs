@@ -104,6 +104,7 @@ public static class DependencyInjection
         services.AddSingleton<IJobApplicationConflictDetector, NpgsqlJobApplicationConflictDetector>();
         services.AddSingleton<ICanonicalCvConflictDetector, NpgsqlCanonicalCvConflictDetector>();
         services.AddSingleton<IDiscoveryReviewConflictDetector, NpgsqlDiscoveryReviewConflictDetector>();
+        services.AddScoped<IDiscoveryCleanupTransactionFactory, NpgsqlDiscoveryCleanupTransactionFactory>();
         services.AddScoped<IJobApplicationCreationTransactionFactory, NpgsqlJobApplicationCreationTransactionFactory>();
         services.AddScoped<IApplicationPackageFinalizationTransactionFactory, NpgsqlApplicationPackageFinalizationTransactionFactory>();
         services.AddSingleton<IApplicationPackageConflictDetector, NpgsqlApplicationPackageConflictDetector>();
