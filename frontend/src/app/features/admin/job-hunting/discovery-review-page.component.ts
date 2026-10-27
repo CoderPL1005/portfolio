@@ -7,95 +7,119 @@ import { combineLatest } from 'rxjs';
 import { JobHuntingService } from './job-hunting.service';
 import { DiscoveryReviewDetail, DiscoveryReviewList, DiscoveryQualityReport, ReviewHistory, HumanReviewWrite } from './discovery-review.models';
 import { DiscoveryQualityComponent } from './discovery-quality.component';
-import { DiscoveryCleanupComponent } from './discovery-cleanup.component';
 import { DiscoveryJobInformationComponent, discoveryTitle, evidenceText } from './discovery-job-information.component';
 import { safeAdminError } from '../shared/admin-api';
 
 @Component({
-  selector: 'app-discovery-review-page', standalone: true, imports: [FormsModule, RouterLink, DatePipe, JsonPipe, DiscoveryQualityComponent, DiscoveryJobInformationComponent,DiscoveryCleanupComponent],
+  selector: 'app-discovery-review-page', standalone: true, imports: [FormsModule, RouterLink, DatePipe, JsonPipe, DiscoveryQualityComponent, DiscoveryJobInformationComponent],
   styleUrl: './discovery-review-page.component.css',
   template: `
-    <main class="admin-page discovery-page space-y-5">
-      <header class="page-header"><div><p class="eyebrow">JOB HUNTING / DISCOVERY</p><h1>Discovery Review</h1>
-        <p>Kiểm tra cơ hội và đối chiếu nhận định classifier với quyết định của bạn.</p></div>
+    <main class="admin-page discovery-page">
+      <header class="page-header"><div><p class="eyebrow">JOB HUNTING / DISCOVERY</p><h1>Cơ hội việc làm</h1>
+        <p>Khám phá bài tuyển dụng và đánh giá cơ hội theo mục tiêu của bạn.</p></div>
         <button class="admin-button" type="button" (click)="load()" [disabled]="loading() || savingReview()">Làm mới</button></header>
       <p class="notice">Facebook chỉ là nguồn phát hiện. Phân loại không xác minh công ty và không cho phép tự động ứng tuyển.</p>
-      @if(error()){<p role="alert" class="rounded border border-red-400 p-3">{{error()}}</p>}
+      @if(error()){<p role="alert" class="admin-error feedback">{{error()}}</p>}
       @if(message()){<p role="status">{{message()}}</p>}
       @if(loading()){<p role="status">Đang tải…</p>}
       @if(detail(); as d){
-        <a routerLink="/admin/job-hunting/discovery" class="underline">← Danh sách</a>
-        <section class="detail-layout space-y-3 rounded border p-4">
+        <a routerLink="/admin/job-hunting/discovery" class="back-link">← Tất cả cơ hội</a>
+        <section class="detail-layout">
           <header class="job-heading"><h2>{{title(d.item.extracted)}}</h2><p>{{text(d.item.extracted['company']) || 'Chưa xác định công ty'}} · {{text(d.item.extracted['location']) || 'Chưa xác định địa điểm'}}</p>
-            <p>Thu thập {{d.item.evaluatedAt | date:'medium'}} · Ngày đăng: {{d.item.publishedAt ? (d.item.publishedAt | date:'medium') : 'UNKNOWN'}}</p></header>
-          @if(safeLink(d.item.sourceUrl); as link){<a [href]="link" target="_blank" rel="noopener noreferrer" class="underline">URL nguồn (chưa xác minh)</a>}
-          @else{<p>Không có URL Facebook an toàn để mở.</p>}
-          <section class="job-facts"><h3>Thông tin công việc</h3><app-discovery-job-information [data]="d.item.extracted" /></section>
-          <details open class="original-post"><summary>Nội dung gốc</summary><pre class="whitespace-pre-wrap break-words" data-testid="raw-content">{{d.item.rawContent ?? 'Không lưu nội dung không an toàn/không có text.'}}</pre></details>
-          <h3 class="section-heading">Đánh giá AI / deterministic classifier</h3>
-          <h3 class="font-semibold">Content validity: {{d.item.contentValidity.status}}</h3>
-          <p>{{d.item.contentValidity.explanation}}</p><p>{{d.item.contentValidity.reasonCodes.join(', ')}}</p>
-          @for(s of d.item.contentValidity.evidenceSnippets; track $index){<blockquote class="border-l-2 pl-3">{{s}}</blockquote>}
-          <h3 class="font-semibold">Target matching: {{d.item.targetMatching.status}}</h3>
-          <p>{{d.item.targetMatching.explanation}}</p><p>{{d.item.targetMatching.reasonCodes.join(', ')}}</p>
-          @for(s of d.item.targetMatching.evidenceSnippets; track $index){<blockquote class="border-l-2 pl-3">{{s}}</blockquote>}
-          <p>Source warnings: {{d.item.sourceWarnings.join(', ') || 'Không'}} · Cùng nội dung: {{d.duplicateCount}}</p>
-          <p>Thiếu/chưa rõ: {{d.item.missingFields.join(', ') || 'Không ghi nhận'}}</p>
-          <p>Freshness: {{d.item.publishedAt ? 'UNVERIFIED_PROVIDER_TIMESTAMP' : 'UNKNOWN'}} · Import: STORED · Phát hiện: {{d.item.evaluatedAt | date:'medium'}}</p>
-          <details class="technical"><summary>Technical Details</summary><p>Run {{d.runId}} · trang {{d.pageNumber}} · item {{d.item.itemIndex}}</p><p>{{d.query}} · đồng bộ {{d.ingestedAt | date:'medium'}}</p>
-            <p>Provider ID: {{d.item.providerPostId ?? 'Thiếu'}} · Company verification: {{d.item.verificationStatus}}</p>
-            <pre class="overflow-auto whitespace-pre-wrap">{{d.item.extracted | json}}</pre>
-            <p>{{d.item.classifierVersion}} · Profile {{d.item.profileFingerprint ?? 'UNKNOWN'}} · Preferences {{d.item.preferencesFingerprint ?? 'UNKNOWN'}}</p></details>
-          <p>Chỉ xem xét; không tạo JobPosting, không ứng tuyển, không xác minh công ty.</p>
-          <section class="space-y-3 border-t pt-4" aria-label="Human review">
-            <h3 class="text-lg font-semibold">Human Review</h3><p>Classifier prediction vs Human decision</p>
-            <p>Classifier: {{d.item.contentValidity.status}} / {{d.item.targetMatching.status}}</p>
-            <p>Admin: {{d.humanReview?.status ?? 'UNREVIEWED'}} · version {{d.humanReview?.version ?? 0}} · {{d.humanReview?.contentStatus ?? 'Chưa có nhãn'}} / {{d.humanReview?.targetStatus ?? 'Chưa có nhãn'}}</p>
-            <p>{{d.humanReview?.notes}} · {{d.humanReview?.reviewedAt | date:'medium'}} · Admin {{d.humanReview?.reviewedByAdminId}}</p>
+            <p>{{d.item.publishedAt ? ('Ngày đăng: ' + (d.item.publishedAt | date:'medium')) : 'Chưa xác định ngày đăng'}}</p>
+            <div class="badges"><span class="status-badge">{{label(d.item.targetMatching.status)}}</span><span class="status-badge neutral">{{label(d.humanReview?.status ?? 'UNREVIEWED')}}</span></div></header>
+          <section class="detail-section job-facts"><h3>Thông tin tuyển dụng</h3><app-discovery-job-information [data]="d.item.extracted" /></section>
+          <section class="detail-section original-post"><h3>Nội dung bài đăng gốc</h3>
+            @if(safeLink(d.item.sourceUrl); as link){<a [href]="link" target="_blank" rel="noopener noreferrer" class="source-link">Mở bài viết Facebook ↗</a>}
+            @else{<p>Không có URL Facebook an toàn để mở.</p>}
+            <p class="muted">Nguồn bài đăng chưa được xác minh độc lập.</p>
+            <pre data-testid="raw-content">{{d.item.rawContent ?? 'Không lưu nội dung không an toàn/không có text.'}}</pre></section>
+          <section class="detail-section assessment"><h3>Đánh giá AI / bộ phân loại</h3>
+          <h4>Nội dung: {{label(d.item.contentValidity.status)}}</h4>
+          <p>{{d.item.contentValidity.explanation}}</p>
+          @for(s of d.item.contentValidity.evidenceSnippets; track $index){<blockquote>{{s}}</blockquote>}
+          <h4>Mức độ phù hợp: {{label(d.item.targetMatching.status)}}</h4>
+          <p>{{d.item.targetMatching.explanation}}</p>
+          @for(s of d.item.targetMatching.evidenceSnippets; track $index){<blockquote>{{s}}</blockquote>}
+          <p class="muted">Nhận định tự động không xác minh doanh nghiệp, ngày còn tuyển hoặc cho phép ứng tuyển.</p></section>
+          <section class="detail-section human-review admin-form" aria-label="Human review">
+            <h3>Đánh giá của bạn · Human Review</h3><p>Đối chiếu nhận định tự động với nội dung bạn đã kiểm tra.</p>
+            <div class="comparison"><div><h4>Nhận định classifier</h4><p>{{label(d.item.contentValidity.status)}} / {{label(d.item.targetMatching.status)}}</p></div>
+            <div><h4>Quyết định Admin</h4><p>{{label(d.humanReview?.status ?? 'UNREVIEWED')}} · phiên bản {{d.humanReview?.version ?? 0}}</p><p>{{label(d.humanReview?.contentStatus ?? '')}} / {{label(d.humanReview?.targetStatus ?? '')}}</p></div></div>
+            @if(d.humanReview?.notes){<p>{{d.humanReview?.notes}} · {{d.humanReview?.reviewedAt | date:'medium'}} · Admin {{d.humanReview?.reviewedByAdminId}}</p>}
             <p>Đánh giá nội dung không phải xác minh công ty hoặc cho phép ứng tuyển.</p>
-            <label class="block">Content decision <select [(ngModel)]="draft(d).contentStatus" [disabled]="savingReview()" class="rounded border p-2">@for(s of contentStatuses;track s){<option>{{s}}</option>}</select></label>
-            <label class="block">Target decision <select [(ngModel)]="draft(d).targetStatus" [disabled]="savingReview()" class="rounded border p-2">@for(s of targetStatuses;track s){<option>{{s}}</option>}</select></label>
-            <label class="block" for="human-notes">Lý do (bắt buộc)</label><textarea id="human-notes" [(ngModel)]="draft(d).notes" [disabled]="savingReview()" maxlength="2000" rows="3" class="w-full rounded border p-2"></textarea>
-            <div class="flex flex-wrap gap-3">
-              <button type="button" [disabled]="!draft(d).notes.trim() || savingReview() || reviewConflict()" (click)="saveReview('CONFIRMED')" class="rounded border p-3">Xác nhận prediction gốc</button>
-              <button type="button" [disabled]="!draft(d).notes.trim() || savingReview() || reviewConflict()" (click)="saveReview('CORRECTED')" class="rounded border p-3">Lưu sửa phân loại</button>
-              <button type="button" [disabled]="!draft(d).notes.trim() || savingReview() || reviewConflict()" (click)="saveReview('UNCERTAIN')" class="rounded border p-3">Chưa thể kết luận</button>
+            <div class="admin-form-grid"><label>Kết luận nội dung <select [(ngModel)]="draft(d).contentStatus" [disabled]="savingReview()">@for(s of contentStatuses;track s){<option [value]="s">{{label(s)}}</option>}</select></label>
+            <label>Kết luận phù hợp <select [(ngModel)]="draft(d).targetStatus" [disabled]="savingReview()">@for(s of targetStatuses;track s){<option [value]="s">{{label(s)}}</option>}</select></label></div>
+            <label for="human-notes">Lý do (bắt buộc)</label><textarea id="human-notes" [(ngModel)]="draft(d).notes" [disabled]="savingReview()" maxlength="2000" rows="3"></textarea>
+            <p class="muted">Xác nhận giữ nguyên nhận định gốc. Lưu sửa sử dụng hai kết luận đã chọn. Chưa thể kết luận không tạo nhãn xác nhận.</p>
+            <div class="admin-actions">
+              <button type="button" [disabled]="!draft(d).notes.trim() || savingReview() || reviewConflict()" (click)="saveReview('CONFIRMED')" class="admin-button primary">Xác nhận nhận định gốc</button>
+              <button type="button" [disabled]="!draft(d).notes.trim() || savingReview() || reviewConflict()" (click)="saveReview('CORRECTED')" class="admin-button">Lưu sửa phân loại</button>
+              <button type="button" [disabled]="!draft(d).notes.trim() || savingReview() || reviewConflict()" (click)="saveReview('UNCERTAIN')" class="admin-button">Chưa thể kết luận</button>
             </div>
-            @if(reviewConflict()){<p role="alert">Review đã thay đổi. Draft được giữ lại; tải lại quyết định trước khi tự lưu lần nữa.</p><button type="button" (click)="load()" [disabled]="loading()">Tải lại quyết định</button>}
-            <button type="button" (click)="loadHistory(1)" [disabled]="historyLoading()">Xem lịch sử review</button>
-            @if(history();as h){<ol>@for(e of h.items;track e.version){<li class="border-t py-2">v{{e.version}} · {{e.status}} · {{e.contentStatus ?? '—'}} / {{e.targetStatus ?? '—'}}<p>{{e.notes}}</p><p>{{e.reviewedAt | date:'medium'}} · Admin {{e.reviewedByAdminId}}</p></li>}</ol>
-              <p>{{h.total}} lần đánh giá</p><button (click)="loadHistory(h.page-1)" [disabled]="h.page<=1 || historyLoading()">Trước</button><button (click)="loadHistory(h.page+1)" [disabled]="h.page>=h.totalPages || historyLoading()">Sau</button>}
+            @if(reviewConflict()){<p role="alert">Review đã thay đổi. Draft được giữ lại; tải lại quyết định trước khi tự lưu lần nữa.</p><button type="button" class="admin-button" (click)="load()" [disabled]="loading()">Tải lại quyết định</button>}
+            <button type="button" class="admin-button" (click)="loadHistory(1)" [disabled]="historyLoading()">Xem lịch sử đánh giá</button>
+            @if(history();as h){<ol class="review-history">@for(e of h.items;track e.version){<li>v{{e.version}} · {{label(e.status)}} · {{label(e.contentStatus ?? '')}} / {{label(e.targetStatus ?? '')}}<p>{{e.notes}}</p><p>{{e.reviewedAt | date:'medium'}} · Admin {{e.reviewedByAdminId}}</p></li>}</ol>
+              <p>{{h.total}} lần đánh giá</p><div class="admin-actions"><button type="button" class="admin-button" (click)="loadHistory(h.page-1)" [disabled]="h.page<=1 || historyLoading()">Trước</button><button type="button" class="admin-button" (click)="loadHistory(h.page+1)" [disabled]="h.page>=h.totalPages || historyLoading()">Sau</button></div>}
           </section>
+          <details class="technical detail-section"><summary>Thông tin kỹ thuật · Technical Details</summary>
+            <p>Run {{d.runId}} · trang {{d.pageNumber}} · item {{d.item.itemIndex}}</p><p>{{d.query}} · đồng bộ {{d.ingestedAt | date:'medium'}}</p>
+            <p>Provider ID: {{d.item.providerPostId ?? 'Thiếu'}} · Company verification: {{d.item.verificationStatus}}</p>
+            <p>Content: {{d.item.contentValidity.reasonCodes.join(', ')}} · Target: {{d.item.targetMatching.reasonCodes.join(', ')}}</p>
+            <p>Source warnings: {{d.item.sourceWarnings.join(', ') || 'Không'}} · Cùng nội dung: {{d.duplicateCount}}</p>
+            <p>Thiếu/chưa rõ: {{d.item.missingFields.join(', ') || 'Không ghi nhận'}}</p>
+            <p>Freshness: {{d.item.publishedAt ? 'UNVERIFIED_PROVIDER_TIMESTAMP' : 'UNKNOWN'}} · Import: STORED · Phát hiện: {{d.item.evaluatedAt | date:'medium'}}</p>
+            <pre>{{d.item.extracted | json}}</pre>
+            <p>{{d.item.classifierVersion}} · Profile {{d.item.profileFingerprint ?? 'UNKNOWN'}} · Preferences {{d.item.preferencesFingerprint ?? 'UNKNOWN'}}</p>
+          </details>
         </section>
       }@else if(!detailMode()){
-        <button type="button" (click)="cleanupOpen.set(!cleanupOpen())">Reset All Job Data</button>
-        @if(cleanupOpen()){<app-discovery-cleanup (changed)="load()" />}
-        <details class="import-fallback rounded border p-4"><summary>Import thủ công dự phòng</summary>
-          <label for="review-import" class="block font-semibold">Review export JSON từ local (không cần cho automatic sync)</label>
-          <input id="review-import" type="file" accept=".json,application/json" [disabled]="importing()" (change)="chooseFile($event)" />
-          <button type="button" class="ml-3 rounded border px-3 py-2" [disabled]="!selected() || importing()" (click)="importFile()">{{importing() ? 'Đang nhập…' : 'Import để review'}}</button>
-          <p>Chỉ export đã kiểm soát, tối đa 8 MiB. Không upload credentials hoặc raw provider response.</p>
-        </details>
-        <section class="flex flex-wrap gap-3" aria-label="Bộ lọc">
-          <label>Human review <select [(ngModel)]="reviewState" (ngModelChange)="filter()"><option value="">Tất cả</option>@for(s of reviewStates;track s){<option>{{s}}</option>}</select></label>
-          <label>Content <select [(ngModel)]="contentStatus" (ngModelChange)="filter()" class="rounded border p-2"><option value="">Tất cả</option><option>VALID_RECRUITMENT</option><option>INVALID_RECRUITMENT</option><option>NEEDS_REVIEW</option></select></label>
-          <label>Target <select [(ngModel)]="targetStatus" (ngModelChange)="filter()" class="rounded border p-2"><option value="">Tất cả</option>@for(s of targetStatuses; track s){<option>{{s}}</option>}</select></label>
-          <label>Run <input [(ngModel)]="runId" class="rounded border p-2" maxlength="100" /></label><button type="button" (click)="filter()" class="rounded border px-3">Lọc</button>
-          <label>Ngày đồng bộ (giờ local) <input type="date" [(ngModel)]="collectedDate" (ngModelChange)="filter()" class="rounded border p-2" /></label>
-          <label><input type="checkbox" [(ngModel)]="identityOnly" (ngModelChange)="filter()" /> Identity warnings</label>
-          <label><input type="checkbox" [(ngModel)]="duplicatesOnly" (ngModelChange)="filter()" /> Cùng nội dung</label>
-        </section>
+        @if(list(); as data){@if(data.results.total > 0 && !loading()){
+          <section class="summary" aria-label="Tổng quan trong phạm vi lọc">
+            <div><strong>{{data.counts.total}}</strong><span>Tổng JD</span></div>
+            <div><strong>{{data.counts.targetMatch}}</strong><span>Phù hợp mục tiêu</span></div>
+            <div><strong>{{data.counts.needsReview}}</strong><span>Cần xem xét nội dung</span></div>
+          </section><p class="scope-note">Số liệu theo bộ lọc hiện tại; mỗi bài ghi nhận chưa chắc là một việc làm riêng biệt.</p>
+        }}
+        <nav class="admin-tabs filter-tabs" aria-label="Lọc cơ hội">
+          @for(tab of tabs;track tab.id){<button type="button" class="admin-button" [class.primary]="activeTab()===tab.id" [attr.aria-pressed]="activeTab()===tab.id" (click)="selectTab(tab.id)">{{tab.label}}</button>}
+        </nav>
+        <details class="advanced-filters"><summary>Bộ lọc bổ sung{{hasAdvancedFilters() ? ' · Đang áp dụng' : ''}}</summary>
+        <section class="filter-grid admin-form" aria-label="Bộ lọc bổ sung">
+          <label>Đánh giá của Admin <select [(ngModel)]="reviewState" (ngModelChange)="filter()"><option value="">Tất cả</option>@for(s of reviewStates;track s){<option [value]="s">{{label(s)}}</option>}</select></label>
+          <label>Nội dung <select [(ngModel)]="contentStatus" (ngModelChange)="filter()"><option value="">Tất cả</option>@for(s of contentStatuses;track s){<option [value]="s">{{label(s)}}</option>}</select></label>
+          <label>Mức độ phù hợp <select [(ngModel)]="targetStatus" (ngModelChange)="filter()"><option value="">Tất cả</option>@for(s of targetStatuses;track s){<option [value]="s">{{label(s)}}</option>}</select></label>
+          <label>Phiên thu thập <input [(ngModel)]="runId" maxlength="100" /></label>
+          <label>Ngày đồng bộ (giờ local) <input type="date" [(ngModel)]="collectedDate" (ngModelChange)="filter()" /></label>
+          <div class="checks"><label><input type="checkbox" [(ngModel)]="identityOnly" (ngModelChange)="filter()" /> Có cảnh báo nguồn</label>
+          <label><input type="checkbox" [(ngModel)]="duplicatesOnly" (ngModelChange)="filter()" /> Có nội dung trùng</label></div>
+          <div class="admin-actions"><button type="button" (click)="filter()" class="admin-button">Áp dụng</button><button type="button" (click)="clearFilters()" class="admin-button">Xóa bộ lọc</button></div>
+        </section></details>
         @if(list(); as data){
-          <p role="status">Tập đang lọc — Tổng {{data.counts.total}} · Valid {{data.counts.valid}} · Invalid {{data.counts.invalid}} · Needs review {{data.counts.needsReview}} · Target {{data.counts.targetMatch}} · Identity warnings {{data.counts.identityWarnings}} · Duplicate items {{data.counts.duplicateItems}}</p>
-          <p class="muted">Ưu tiên TARGET_MATCH chưa review. Giữ cả INVALID, NOT_MATCHED, malformed và duplicate. Import: STORED. Ngày UNKNOWN không chứng minh bài còn tuyển.</p>
-          <div class="candidate-list"><table class="w-full text-left"><thead><tr><th>Cơ hội / nguồn</th><th>Thời gian</th><th>Content / Target / Human</th><th>Reasons / warnings</th></tr></thead><tbody>
-            @for(d of data.results.items; track d.id){<tr><td><small>{{text(d.item.extracted['company']) || 'Chưa xác định công ty'}}</small><a [routerLink]="['/admin/job-hunting/discovery',d.id]">{{title(d.item.extracted)}}</a><p>{{text(d.item.extracted['location']) || 'Chưa rõ địa điểm'}} · {{seniority(d)}}</p><p>{{text(d.item.extracted['technologies']) || 'Chưa rõ công nghệ'}}</p><small>Run {{d.runId}} / {{d.pageNumber}} / {{d.item.itemIndex}}</small></td><td><small>Ngày đăng</small><p>{{d.item.publishedAt ? (d.item.publishedAt | date:'short') : 'UNKNOWN'}}</p><small>Thu thập</small><p>{{d.item.evaluatedAt | date:'short'}}</p></td><td><span [class.target]="d.item.targetMatching.status==='TARGET_MATCH'">{{d.item.targetMatching.status}}</span><span>{{d.item.contentValidity.status}}</span><strong>{{d.humanReview?.status ?? 'UNREVIEWED'}}</strong></td><td>{{d.item.contentValidity.reasonCodes.join(', ')}}<br />{{d.item.sourceWarnings.join(', ')}} @if(d.duplicateCount > 1){<span> · {{d.duplicateCount}} cùng nội dung</span>}</td></tr>}
-          </tbody></table></div>
-          @if(!data.results.total){<p>Chưa có observations trong tập đang lọc.</p>}
-          <nav aria-label="Phân trang" class="flex items-center gap-4"><button type="button" [disabled]="page <= 1 || loading()" (click)="changePage(-1)">Trước</button><span>Trang {{page}} / {{data.results.totalPages}}</span><button type="button" [disabled]="page >= data.results.totalPages || loading()" (click)="changePage(1)">Sau</button></nav>
+          @if(!loading() && !error()){
+            @if(data.results.total){
+              <section class="candidate-list" aria-label="Danh sách cơ hội">
+                @for(d of data.results.items;track d.id){<article class="job-card">
+                  <div class="badges"><span class="status-badge" [class.match]="d.item.targetMatching.status==='TARGET_MATCH'">{{label(d.item.targetMatching.status)}}</span><span class="status-badge neutral">{{label(d.humanReview?.status ?? 'UNREVIEWED')}}</span></div>
+                  <h2><a [routerLink]="['/admin/job-hunting/discovery',d.id]">{{title(d.item.extracted)}}</a></h2>
+                  <p class="company">{{text(d.item.extracted['company']) || 'Chưa xác định công ty'}}</p>
+                  <p class="muted">{{text(d.item.extracted['location']) || 'Chưa xác định địa điểm'}}</p>
+                  <div class="job-tags">@if(text(d.item.extracted['technologies']);as tech){<span>{{tech}}</span>}@if(seniority(d);as level){<span>{{level}}</span>}</div>
+                  <footer><span>{{d.item.publishedAt ? ('Ngày đăng: ' + (d.item.publishedAt | date:'shortDate')) : 'Chưa xác định ngày đăng'}}</span><a [routerLink]="['/admin/job-hunting/discovery',d.id]" [attr.aria-label]="'Xem chi tiết: ' + title(d.item.extracted)">Xem chi tiết →</a></footer>
+                </article>}
+              </section>
+              @if(data.results.totalPages>1){<nav aria-label="Phân trang" class="pagination"><button class="admin-button" type="button" [disabled]="page <= 1 || loading()" (click)="changePage(-1)">Trước</button><span>Trang {{page}} / {{data.results.totalPages}}</span><button class="admin-button" type="button" [disabled]="page >= data.results.totalPages || loading()" (click)="changePage(1)">Sau</button></nav>}
+            }@else{
+              <section class="empty-state" role="status"><p class="eyebrow">DISCOVERY</p><h2>{{hasFilters() ? 'Không có cơ hội khớp bộ lọc' : 'Chưa có cơ hội việc làm'}}</h2><p>{{hasFilters() ? 'Thử thay đổi bộ lọc để xem các bài tuyển dụng khác.' : 'Discovery chưa có kết quả. Các bài tuyển dụng được đồng bộ sẽ xuất hiện tại đây để bạn đánh giá.'}}</p>
+                @if(hasFilters()){<button type="button" class="admin-button" (click)="clearFilters()">Xóa bộ lọc</button>}
+              </section>
+            }
+          }
         }
-        <button type="button" (click)="loadMetrics()" [disabled]="metricsLoading()" class="rounded border p-3">Xem quality metrics (run đang nhập, không theo review filters)</button>
-        <app-discovery-quality [report]="metrics()" />
+        <details class="quality-section"><summary>Chất lượng phân loại</summary><p class="muted">Thống kê từ đánh giá của Admin theo phiên thu thập đang chọn, không theo các bộ lọc phân loại. Không đại diện toàn bộ thị trường.</p>
+          <button type="button" (click)="loadMetrics()" [disabled]="metricsLoading()" class="admin-button">{{metricsLoading() ? 'Đang tải thống kê…' : 'Xem thống kê chất lượng'}}</button>
+          <app-discovery-quality [report]="metrics()" />
+        </details>
       }
     </main>`
 })
@@ -103,11 +127,26 @@ export class DiscoveryReviewPageComponent {
   private api = inject(JobHuntingService); private route = inject(ActivatedRoute); private destroyRef = inject(DestroyRef);
   list = signal<DiscoveryReviewList | null>(null); detail = signal<DiscoveryReviewDetail | null>(null);
   detailMode = signal(false);
-  cleanupOpen=signal(false);
-  error = signal(''); message = signal(''); loading = signal(false); importing = signal(false); selected = signal<File | null>(null);
+  error = signal(''); message = signal(''); loading = signal(false);
   contentStatus = ''; targetStatus = ''; runId = ''; collectedDate = ''; identityOnly = false; duplicatesOnly = false; page = 1;
   title=discoveryTitle; text=evidenceText;
-  seniority(d:DiscoveryReviewDetail){return this.title(d.item.extracted).match(/\b(?:intern(?:ship)?|fresher|junior|middle|senior|lead)\b/gi)?.join(' / ') || 'Chưa rõ cấp độ';}
+  seniority(d:DiscoveryReviewDetail){return this.title(d.item.extracted).match(/\b(?:intern(?:ship)?|fresher|junior|middle|senior|lead)\b/gi)?.join(' / ') || '';}
+  readonly tabs = [{id:'all',label:'Tất cả'},{id:'matched',label:'Phù hợp'},{id:'needs-review',label:'Cần xem xét'},{id:'reviewed',label:'Đã đánh giá'}];
+  label(value:string):string {
+    const labels:Record<string,string>={TARGET_MATCH:'Phù hợp mục tiêu',FALLBACK_MATCH:'Cơ hội dự phòng',POTENTIAL_MATCH:'Có thể phù hợp',NOT_MATCHED:'Không phù hợp',INSUFFICIENT_DATA:'Chưa đủ dữ liệu',VALID_RECRUITMENT:'Có nội dung tuyển dụng',INVALID_RECRUITMENT:'Không phải tin tuyển dụng',NEEDS_REVIEW:'Cần xem xét nội dung',UNREVIEWED:'Chưa đánh giá',REVIEWED:'Đã đánh giá',CONFIRMED:'Đã xác nhận',CORRECTED:'Đã chỉnh sửa',UNCERTAIN:'Chưa thể kết luận'};
+    return labels[value] ?? 'Chưa có nhãn';
+  }
+  activeTab(){
+    if(!this.contentStatus && !this.targetStatus && !this.reviewState)return 'all';
+    if(!this.contentStatus && this.targetStatus==='TARGET_MATCH' && !this.reviewState)return 'matched';
+    if(this.contentStatus==='NEEDS_REVIEW' && !this.targetStatus && !this.reviewState)return 'needs-review';
+    if(!this.contentStatus && !this.targetStatus && this.reviewState==='REVIEWED')return 'reviewed';
+    return '';
+  }
+  selectTab(id:string){this.contentStatus=id==='needs-review'?'NEEDS_REVIEW':'';this.targetStatus=id==='matched'?'TARGET_MATCH':'';this.reviewState=id==='reviewed'?'REVIEWED':'';this.filter();}
+  hasAdvancedFilters(){return !!(this.runId.trim() || this.collectedDate || this.identityOnly || this.duplicatesOnly || (this.hasFilters() && !this.activeTab()));}
+  hasFilters(){return !!(this.contentStatus || this.targetStatus || this.reviewState || this.runId.trim() || this.collectedDate || this.identityOnly || this.duplicatesOnly);}
+  clearFilters(){this.contentStatus=this.targetStatus=this.reviewState=this.runId=this.collectedDate='';this.identityOnly=this.duplicatesOnly=false;this.filter();}
   targetStatuses = ['TARGET_MATCH','FALLBACK_MATCH','POTENTIAL_MATCH','NOT_MATCHED','INSUFFICIENT_DATA'];
   contentStatuses = ['VALID_RECRUITMENT','INVALID_RECRUITMENT','NEEDS_REVIEW'];
   reviewStates = ['REVIEWED','UNREVIEWED','CONFIRMED','CORRECTED','UNCERTAIN']; reviewState='';
@@ -157,19 +196,6 @@ export class DiscoveryReviewPageComponent {
     const failed = (e: unknown) => { if(request === this.requestNumber){this.error.set(safeAdminError(e)); this.loading.set(false);} };
     if (id) this.api.discoveryItem(id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({next:d=>{if(request===this.requestNumber){this.detail.set(d);this.reviewConflict.set(false);this.loading.set(false);}},error:failed});
     else {this.detail.set(null);this.api.discovery(params).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({next:d=>{if(request===this.requestNumber){this.list.set(d);this.loading.set(false);}},error:failed});}
-  }
-  chooseFile(event: Event) { this.error.set(''); this.selected.set((event.target as HTMLInputElement).files?.[0] ?? null); }
-  async importFile() {
-    const file = this.selected(); if(!file || this.importing()) return;
-    if(file.size > 8*1024*1024){this.error.set('File vượt quá 8 MiB.');return;}
-    this.importing.set(true);this.error.set('');this.message.set('');
-    try {
-      const payload: unknown = JSON.parse(await file.text());
-      this.api.importDiscovery(payload).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-        next:r=>{this.importing.set(false);this.selected.set(null);this.message.set(`Đã thêm ${r.inserted}; giữ nguyên ${r.unchanged}.`);this.filter();},
-        error:e=>{this.importing.set(false);this.error.set(safeAdminError(e));}
-      });
-    } catch {this.importing.set(false);this.error.set('File JSON không hợp lệ.');}
   }
   safeLink(value: string | null): string | null {
     if(!value)return null;

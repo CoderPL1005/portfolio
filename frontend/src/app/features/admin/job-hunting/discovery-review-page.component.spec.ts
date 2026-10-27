@@ -27,6 +27,16 @@ function mount(id?:string,runId?:string) {
   const fixture=TestBed.createComponent(DiscoveryReviewPageComponent);fixture.detectChanges();return {fixture,api,query,c:fixture.componentInstance};
 }
 describe('Discovery Review',()=>{
+  it('keeps all detail sections and submits confirmation from the rendered review controls',async()=>{
+    const {fixture,api}=mount('synthetic-1');const el:HTMLElement=fixture.nativeElement;
+    for(const heading of ['Thông tin tuyển dụng','Nội dung bài đăng gốc','Đánh giá AI / bộ phân loại','Human Review','Thông tin kỹ thuật'])expect(el.textContent).toContain(heading);
+    expect(el.querySelector<HTMLDetailsElement>('.technical')?.open).toBe(false);
+    const confirm=el.querySelector<HTMLButtonElement>('.human-review .admin-actions button')!;expect(confirm.disabled).toBe(true);
+    const notes=el.querySelector<HTMLTextAreaElement>('#human-notes')!;notes.value='Đã đọc và đối chiếu bài gốc';notes.dispatchEvent(new Event('input'));fixture.detectChanges();await fixture.whenStable();fixture.detectChanges();
+    expect(confirm.disabled).toBe(false);confirm.click();fixture.detectChanges();
+    expect(api.saveDiscoveryReview).toHaveBeenCalledExactlyOnceWith('synthetic-1',{expectedVersion:0,action:'CONFIRMED',notes:'Đã đọc và đối chiếu bài gốc'});
+    expect(el.querySelector('.comparison')?.textContent).toContain('Đã xác nhận');
+  });
   it('updates same-route session list and metrics, ignoring stale responses and clearing removed runId',()=>{
     const {api,c,query}=mount(undefined,'fresh-session-a');const oldMetrics=new Subject<DiscoveryQualityReport>();
     const newMetrics=new Subject<DiscoveryQualityReport>();const staleList=new Subject<DiscoveryReviewList>();const newList=new Subject<DiscoveryReviewList>();
@@ -101,10 +111,14 @@ describe('Discovery Review',()=>{
     expect(text).toContain('N/A');expect(text).toContain('Unique-content-level');expect(text).toContain('Human conflicts 1');expect(text).toContain('Support');
     api.discoveryMetrics.mockReturnValue(throwError(()=>new Error('synthetic')));c.loadMetrics();expect(c.metrics()).toBeNull();expect(c.metricsLoading()).toBe(false);
   });
-  it('keeps valid nonmatching rows visible with warnings and separate counters',()=>{
+  it('keeps nonmatching observations visible as readable cards without technical metadata',()=>{
     const {fixture,api}=mount();expect(api.discovery).toHaveBeenCalledTimes(1);
-    const text=fixture.nativeElement.textContent;expect(text).toContain('VALID_RECRUITMENT');expect(text).toContain('NOT_MATCHED');expect(text).toContain('POST_ID_URL_MISMATCH');
-    expect(fixture.nativeElement.querySelector('tbody a').getAttribute('href')).toContain('/discovery/synthetic-1');
+    const card:HTMLElement=fixture.nativeElement.querySelector('.job-card');
+    expect(card.textContent).toContain('Không phù hợp');expect(card.textContent).toContain('Chưa đánh giá');
+    expect(card.textContent).toContain('Chưa xác định ngày đăng');expect(card.textContent).toContain('Java');
+    for(const technical of ['VALID_RECRUITMENT','NOT_MATCHED','POST_ID_URL_MISMATCH','synthetic-run','EMPLOYER_HIRING','Item','Page'])expect(card.textContent).not.toContain(technical);
+    expect(card.querySelector('a')?.getAttribute('href')).toContain('/discovery/synthetic-1');
+    expect(fixture.nativeElement.querySelector('table')).toBeNull();
     expect(api.importDiscovery).not.toHaveBeenCalled();
   });
   it('forwards filters and resets pagination, without implementing classification rules in UI',()=>{
@@ -118,17 +132,45 @@ describe('Discovery Review',()=>{
     expect(c.safeLink('javascript:alert(1)')).toBeNull();expect(c.safeLink('https://facebook.com.evil.invalid/x/posts/123')).toBeNull();
     expect(c.safeLink('https://user:pass@facebook.com/x/posts/123')).toBeNull();expect(c.safeLink('https://facebook.com/search/posts?q=x')).toBeNull();
   });
-  it('imports only on explicit action and prevents duplicate clicks while request is pending',async()=>{
-    const {c,api}=mount();const pending=new Subject<{inserted:number;unchanged:number}>();api.importDiscovery.mockReturnValue(pending);
-    c.selected.set({size:100,text:()=>Promise.resolve('{"schemaVersion":1}')} as File);
-    await c.importFile();await c.importFile();expect(api.importDiscovery).toHaveBeenCalledTimes(1);expect(c.importing()).toBe(true);
-    pending.next({inserted:1,unchanged:0});expect(c.importing()).toBe(false);expect(c.selected()).toBeNull();
+  it('removes import and destructive reset controls without invoking their APIs',()=>{
+    const {fixture,api,c}=mount();const el:HTMLElement=fixture.nativeElement;
+    expect(el.querySelector('input[type=file]')).toBeNull();expect(el.querySelector('app-discovery-cleanup')).toBeNull();
+    expect(el.textContent).not.toContain('Import thủ công');expect(el.textContent).not.toContain('Reset All Job Data');
+    expect('importFile' in c).toBe(false);expect('cleanupOpen' in c).toBe(false);expect(api.importDiscovery).not.toHaveBeenCalled();
   });
-  it('rejects oversized and invalid JSON locally and recovers after API failure',async()=>{
-    const {c,api}=mount();c.selected.set({size:8*1024*1024+1} as File);await c.importFile();expect(api.importDiscovery).not.toHaveBeenCalled();
-    c.selected.set({size:2,text:()=>Promise.resolve('no')} as File);await c.importFile();expect(c.importing()).toBe(false);expect(api.importDiscovery).not.toHaveBeenCalled();
-    api.importDiscovery.mockReturnValue(throwError(()=>new Error('synthetic')));c.selected.set({size:2,text:()=>Promise.resolve('{}')} as File);
-    await c.importFile();expect(c.importing()).toBe(false);expect(c.error()).not.toBe('');
+  it('shows a deliberate empty state without zero summaries, pagination or unsupported discovery action',()=>{
+    const {fixture,c}=mount();c.list.set({...listing(),results:{items:[],page:1,pageSize:20,total:0,totalPages:0},counts:{...listing().counts,total:0}});fixture.detectChanges();
+    const el:HTMLElement=fixture.nativeElement;expect(el.querySelector('.empty-state')?.textContent).toContain('Discovery chưa có kết quả');
+    expect(el.querySelector('.summary')).toBeNull();expect(el.querySelector('[aria-label="Phân trang"]')).toBeNull();
+    expect(el.querySelector('.job-card')).toBeNull();expect(el.textContent).not.toContain('Chạy Discovery');expect(el.textContent).not.toContain('1 / 0');
+  });
+  it('routes compact tabs to existing server filters and resets pagination',()=>{
+    const {fixture,c,api}=mount();const tabs=fixture.nativeElement.querySelectorAll('.filter-tabs button') as NodeListOf<HTMLButtonElement>;
+    const expected=[{}, {targetStatus:'TARGET_MATCH'}, {contentStatus:'NEEDS_REVIEW'}, {reviewState:'REVIEWED'}];
+    tabs.forEach((button,i)=>{c.page=4;button.click();fixture.detectChanges();expect(api.discovery).toHaveBeenLastCalledWith({page:1,pageSize:20,...expected[i]});expect(button.getAttribute('aria-pressed')).toBe('true');});
+    c.selectTab('all');expect(api.discovery).toHaveBeenLastCalledWith({page:1,pageSize:20});
+    expect(fixture.nativeElement.querySelector('.advanced-filters').open).toBe(false);
+  });
+  it('renders filtered empty state and clears all filters through existing list API',()=>{
+    const {fixture,c,api}=mount(undefined,'session');c.reviewState='CORRECTED';c.identityOnly=true;c.collectedDate='2026-10-26';
+    api.discovery.mockReturnValue(of({...listing(),results:{items:[],page:1,pageSize:20,total:0,totalPages:0}}));c.filter();fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.empty-state').textContent).toContain('Không có cơ hội khớp bộ lọc');
+    fixture.nativeElement.querySelector('.empty-state button').click();expect(api.discovery).toHaveBeenLastCalledWith({page:1,pageSize:20});
+    expect(c.hasFilters()).toBe(false);
+  });
+  it('uses server totals rather than the current page for summary, with functional pagination',()=>{
+    const {fixture,c,api}=mount();const data=listing();data.results.total=41;data.results.totalPages=3;data.counts.total=41;data.counts.targetMatch=12;data.counts.needsReview=7;c.list.set(data);fixture.detectChanges();
+    const values=[...fixture.nativeElement.querySelectorAll('.summary strong')].map((el:HTMLElement)=>el.textContent);
+    expect(values).toEqual(['41','12','7']);
+    const nav=fixture.nativeElement.querySelector('[aria-label="Phân trang"]');expect(nav.querySelector('button').disabled).toBe(true);
+    api.discovery.mockReturnValue(of({...data,results:{...data.results,page:2}}));nav.querySelectorAll('button')[1].click();fixture.detectChanges();
+    expect(api.discovery).toHaveBeenLastCalledWith({page:2,pageSize:20});expect(fixture.nativeElement.querySelector('[aria-label="Phân trang"]').textContent).toContain('Trang 2 / 3');
+  });
+  it('shows only source-backed title/company/location/technologies and never invents seniority',()=>{
+    const {fixture,c}=mount();const data=listing();data.results.items[0].item.extracted={role:'Backend Developer',company:'Example',location:'Hà Nội',technologies:['C#','ASP.NET Core']};c.list.set(data);fixture.detectChanges();
+    const card:HTMLElement=fixture.nativeElement.querySelector('.job-card');
+    for(const fact of ['Backend Developer','Example','Hà Nội','C#','ASP.NET Core'])expect(card.textContent).toContain(fact);
+    expect(card.textContent).not.toContain('Fresher');expect(card.textContent).not.toContain('Đã xác minh');expect(c.seniority(data.results.items[0])).toBe('');
   });
   it('does not show the previous observation or list import UI when a detail reload fails',()=>{
     const {c,api,fixture}=mount('synthetic-1');const pending=new Subject<DiscoveryReviewDetail>();api.discoveryItem.mockReturnValue(pending);
@@ -151,13 +193,13 @@ describe('Discovery Review',()=>{
     const {c,api,fixture}=mount('synthetic-1');c.draft(c.detail()!).notes='Checked original';
     c.saveReview('CONFIRMED');fixture.detectChanges();
     expect(c.detail()?.humanReview?.version).toBe(1);expect(api.discoveryItem).toHaveBeenCalledTimes(1);
-    expect(fixture.nativeElement.textContent).toContain('CONFIRMED');
+    expect(fixture.nativeElement.textContent).toContain('Đã xác nhận');
   });
   it('sends an explicit local calendar-day window to the server and shows all review states in list',()=>{
     const {c,api,fixture}=mount();c.collectedDate='2026-10-26';c.filter();
     const params=(api.discovery.mock.calls as unknown as [Record<string,string>][]).at(-1)![0];
     expect(new Date(params['collectedFrom']).getDate()).toBe(26);
     expect(new Date(params['collectedBefore']).getDate()).toBe(27);
-    expect(fixture.nativeElement.querySelector('tbody')?.textContent).toContain('UNREVIEWED');
+    expect(fixture.nativeElement.querySelector('.job-card')?.textContent).toContain('Chưa đánh giá');
   });
 });
