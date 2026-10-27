@@ -18,7 +18,6 @@ import { safeAdminError } from '../shared/admin-api';
       <header class="page-header"><div><p class="eyebrow">JOB HUNTING / DISCOVERY</p><h1>Cơ hội việc làm</h1>
         <p>Khám phá bài tuyển dụng và đánh giá cơ hội theo mục tiêu của bạn.</p></div>
         <button class="admin-button" type="button" (click)="load()" [disabled]="loading() || savingReview()">Làm mới</button></header>
-      <p class="notice">Facebook chỉ là nguồn phát hiện. Phân loại không xác minh công ty và không cho phép tự động ứng tuyển.</p>
       @if(error()){<p role="alert" class="admin-error feedback">{{error()}}</p>}
       @if(message()){<p role="status">{{message()}}</p>}
       @if(loading()){<p role="status">Đang tải…</p>}
@@ -76,11 +75,12 @@ import { safeAdminError } from '../shared/admin-api';
       }@else if(!detailMode()){
         @if(list(); as data){@if(data.results.total > 0 && !loading()){
           <section class="summary" aria-label="Tổng quan trong phạm vi lọc">
-            <div><strong>{{data.counts.total}}</strong><span>Tổng JD</span></div>
-            <div><strong>{{data.counts.targetMatch}}</strong><span>Phù hợp mục tiêu</span></div>
-            <div><strong>{{data.counts.needsReview}}</strong><span>Cần xem xét nội dung</span></div>
+            <div><span>Tổng cơ hội</span><strong>{{data.counts.total}}</strong></div>
+            <div><span>Phù hợp</span><strong>{{data.counts.targetMatch}}</strong></div>
+            <div><span>Cần đánh giá</span><strong>{{data.counts.needsReview}}</strong><small>Nội dung cần xem xét</small></div>
           </section><p class="scope-note">Số liệu theo bộ lọc hiện tại; mỗi bài ghi nhận chưa chắc là một việc làm riêng biệt.</p>
         }}
+        @if(listControlsVisible()){
         <nav class="admin-tabs filter-tabs" aria-label="Lọc cơ hội">
           @for(tab of tabs;track tab.id){<button type="button" class="admin-button" [class.primary]="activeTab()===tab.id" [attr.aria-pressed]="activeTab()===tab.id" (click)="selectTab(tab.id)">{{tab.label}}</button>}
         </nav>
@@ -95,6 +95,7 @@ import { safeAdminError } from '../shared/admin-api';
           <label><input type="checkbox" [(ngModel)]="duplicatesOnly" (ngModelChange)="filter()" /> Có nội dung trùng</label></div>
           <div class="admin-actions"><button type="button" (click)="filter()" class="admin-button">Áp dụng</button><button type="button" (click)="clearFilters()" class="admin-button">Xóa bộ lọc</button></div>
         </section></details>
+        }
         @if(list(); as data){
           @if(!loading() && !error()){
             @if(data.results.total){
@@ -110,16 +111,21 @@ import { safeAdminError } from '../shared/admin-api';
               </section>
               @if(data.results.totalPages>1){<nav aria-label="Phân trang" class="pagination"><button class="admin-button" type="button" [disabled]="page <= 1 || loading()" (click)="changePage(-1)">Trước</button><span>Trang {{page}} / {{data.results.totalPages}}</span><button class="admin-button" type="button" [disabled]="page >= data.results.totalPages || loading()" (click)="changePage(1)">Sau</button></nav>}
             }@else{
-              <section class="empty-state" role="status"><p class="eyebrow">DISCOVERY</p><h2>{{hasFilters() ? 'Không có cơ hội khớp bộ lọc' : 'Chưa có cơ hội việc làm'}}</h2><p>{{hasFilters() ? 'Thử thay đổi bộ lọc để xem các bài tuyển dụng khác.' : 'Discovery chưa có kết quả. Các bài tuyển dụng được đồng bộ sẽ xuất hiện tại đây để bạn đánh giá.'}}</p>
+              <section class="empty-state" role="status">
+                <span class="empty-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 7h16v13H4zM8 7V4h8v3M4 12h16M10 12v3h4v-3" /></svg></span>
+                <h2>{{hasFilters() ? 'Không có cơ hội khớp bộ lọc' : 'Chưa có cơ hội việc làm'}}</h2><p>{{hasFilters() ? 'Thử thay đổi bộ lọc để xem các bài tuyển dụng khác.' : 'Discovery chưa có kết quả. Bài tuyển dụng mới sẽ xuất hiện tại đây để bạn xem và đánh giá.'}}</p>
                 @if(hasFilters()){<button type="button" class="admin-button" (click)="clearFilters()">Xóa bộ lọc</button>}
               </section>
             }
           }
         }
-        <details class="quality-section"><summary>Chất lượng phân loại</summary><p class="muted">Thống kê từ đánh giá của Admin theo phiên thu thập đang chọn, không theo các bộ lọc phân loại. Không đại diện toàn bộ thị trường.</p>
+        @if(list()?.results?.total && !loading() && !error()){
+        <details class="quality-section"><summary>Nâng cao · Chất lượng phân loại</summary><p class="muted">Thống kê từ đánh giá của Admin theo phiên thu thập đang chọn, không theo các bộ lọc phân loại. Không đại diện toàn bộ thị trường.</p>
+          <p class="muted">Facebook chỉ là nguồn phát hiện. Phân loại không xác minh công ty, ngày còn tuyển hoặc cho phép tự động ứng tuyển.</p>
           <button type="button" (click)="loadMetrics()" [disabled]="metricsLoading()" class="admin-button">{{metricsLoading() ? 'Đang tải thống kê…' : 'Xem thống kê chất lượng'}}</button>
           <app-discovery-quality [report]="metrics()" />
         </details>
+        }
       }
     </main>`
 })
@@ -146,6 +152,7 @@ export class DiscoveryReviewPageComponent {
   selectTab(id:string){this.contentStatus=id==='needs-review'?'NEEDS_REVIEW':'';this.targetStatus=id==='matched'?'TARGET_MATCH':'';this.reviewState=id==='reviewed'?'REVIEWED':'';this.filter();}
   hasAdvancedFilters(){return !!(this.runId.trim() || this.collectedDate || this.identityOnly || this.duplicatesOnly || (this.hasFilters() && !this.activeTab()));}
   hasFilters(){return !!(this.contentStatus || this.targetStatus || this.reviewState || this.runId.trim() || this.collectedDate || this.identityOnly || this.duplicatesOnly);}
+  listControlsVisible(){return !!this.list() && !this.loading() && !this.error() && (!!this.list()?.results.total || this.hasFilters());}
   clearFilters(){this.contentStatus=this.targetStatus=this.reviewState=this.runId=this.collectedDate='';this.identityOnly=this.duplicatesOnly=false;this.filter();}
   targetStatuses = ['TARGET_MATCH','FALLBACK_MATCH','POTENTIAL_MATCH','NOT_MATCHED','INSUFFICIENT_DATA'];
   contentStatuses = ['VALID_RECRUITMENT','INVALID_RECRUITMENT','NEEDS_REVIEW'];
@@ -167,8 +174,8 @@ export class DiscoveryReviewPageComponent {
   loadHistory(page:number){const d=this.detail();if(!d || this.historyLoading())return;this.historyLoading.set(true);
     const request=this.requestNumber;
     this.api.discoveryHistory(d.id,page).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({next:h=>{this.historyLoading.set(false);if(request===this.requestNumber)this.history.set(h);},error:e=>{this.historyLoading.set(false);if(request===this.requestNumber)this.error.set(safeAdminError(e));}});}
-  private metricsRequest = 0; private metricsRequested = false;
-  loadMetrics(){if(this.metricsLoading())return;this.metricsRequested=true;const request=++this.metricsRequest;
+  private metricsRequest = 0;
+  loadMetrics(){if(this.metricsLoading())return;const request=++this.metricsRequest;
     this.metricsLoading.set(true);this.metrics.set(null);
     this.api.discoveryMetrics(this.runId.trim()||undefined).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({next:m=>{if(request===this.metricsRequest){this.metrics.set(m);this.metricsLoading.set(false);}},error:e=>{if(request===this.metricsRequest){this.error.set(safeAdminError(e));this.metricsLoading.set(false);}}});}
   private requestNumber = 0;
@@ -176,9 +183,9 @@ export class DiscoveryReviewPageComponent {
     this.runId = query.get('runId') ?? ''; this.page=1;
     this.list.set(null);
     this.metricsRequest++;this.metrics.set(null);this.metricsLoading.set(false);
-    this.load();if(this.metricsRequested)this.loadMetrics();
+    this.load();
   }); }
-  filter() { this.page = 1; this.load(); }
+  filter() { this.page = 1; this.metricsRequest++;this.metrics.set(null);this.metricsLoading.set(false);this.load(); }
   changePage(delta: number) { this.page += delta; this.load(); }
   load() {
     const request = ++this.requestNumber; this.loading.set(true); this.error.set('');

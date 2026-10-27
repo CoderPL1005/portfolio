@@ -1,16 +1,19 @@
 :host { display: block; }
-.discovery-page { max-width: 86rem; display: grid; gap: 1.25rem; }
+.discovery-page { max-width: 82rem; display: grid; gap: 1.25rem; }
 .page-header { display: flex; align-items: center; justify-content: space-between; gap: 1.5rem; }
-.page-header h1 { font-size: clamp(2rem, 4vw, 3rem); margin: .35rem 0 .65rem; }
+.page-header h1 { font-size: clamp(1.75rem, 3vw, 2.5rem); letter-spacing: -.035em; line-height: 1.2; margin: .35rem 0 .65rem; }
 .page-header p, .job-heading p { margin: .4rem 0; }
-.page-header p:last-child, .muted, .notice, .scope-note { color: var(--color-text-dim); }
-.notice, .scope-note { font-size: .8rem; margin: 0; line-height: 1.6; }
+.page-header p:last-child, .muted, .scope-note { color: var(--color-text-dim); }
+.scope-note { font-size: .75rem; margin: -.5rem 0 0; line-height: 1.6; }
 .feedback { padding: 1rem; background: var(--color-surface-low); border-radius: var(--radius-md); }
 .summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
-.summary > div { padding: 1.15rem 1.4rem; background: var(--color-surface); border-radius: var(--radius-lg); display: grid; gap: .3rem; }
+.summary > div { padding: 1.15rem 1.4rem; background: var(--color-surface); border-radius: var(--radius-xl); display: flex; flex-direction: column; align-items: flex-start; gap: .4rem; }
+.summary small { font-size: .7rem; color: var(--color-text-dim); }
 .summary strong { font: 600 1.9rem var(--font-heading); }
 .summary span { color: var(--color-text-muted); font-size: .85rem; }
-.filter-tabs { margin: 0; padding-bottom: .25rem; }
+.filter-tabs { margin: 0; padding: .3rem; background: var(--color-surface); border-radius: var(--radius-lg); width: fit-content; max-width: 100%; }
+.filter-tabs .admin-button { border-color: transparent; background: transparent; color: var(--color-text-muted); }
+.filter-tabs .admin-button.primary { background: var(--color-surface-highest); color: var(--color-primary); }
 .advanced-filters, .quality-section { padding: 1rem 1.25rem; background: var(--color-surface); border-radius: var(--radius-lg); }
 summary { cursor: pointer; font-weight: 600; padding: .25rem 0; }
 .filter-grid { margin-top: 1rem; grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -30,10 +33,12 @@ summary { cursor: pointer; font-weight: 600; padding: .25rem 0; }
 .company { font-weight: 600; }
 .job-tags { margin: .85rem 0 1.25rem; }
 .job-tags span { background: var(--color-surface-low); border-radius: var(--radius-sm); padding: .25rem .5rem; color: var(--color-text-muted); font-size: .75rem; }
-.job-card footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .7rem; margin-top: auto; padding-top: 1rem; font-size: .8rem; color: var(--color-text-dim); }
+.job-card footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .7rem; margin-top: auto; padding-top: 1rem; border-top: 1px solid var(--color-border); font-size: .8rem; color: var(--color-text-dim); }
 .job-card footer a, .source-link, .back-link { color: var(--color-primary); text-underline-offset: .25rem; }
 .pagination { display: flex; justify-content: center; align-items: center; gap: 1rem; font-size: .85rem; }
-.empty-state { padding: clamp(2rem, 6vw, 5rem) 1.5rem; text-align: center; background: var(--color-surface); border-radius: var(--radius-xl); }
+.empty-state { padding: clamp(2rem, 5vw, 3.5rem) 1.5rem; text-align: center; background: var(--color-surface); border-radius: var(--radius-xl); }
+.empty-icon { display: inline-flex; padding: 1rem; border-radius: var(--radius-xl); background: var(--color-surface-low); color: var(--color-primary); }
+.empty-icon svg { width: 2rem; height: 2rem; }
 .empty-state h2 { font-size: 1.4rem; margin: .75rem 0; }
 .empty-state > p:not(.eyebrow) { color: var(--color-text-dim); max-width: 35rem; margin: 0 auto 1.5rem; line-height: 1.7; }
 .detail-layout { display: grid; gap: 1.25rem; min-width: 0; }
@@ -52,6 +57,12 @@ blockquote { margin: .75rem 0; padding-left: 1rem; border-left: 2px solid var(--
 .review-history { padding-left: 1.25rem; }
 .review-history li { padding: .75rem 0; }
 .technical { color: var(--color-text-dim); font-size: .85rem; }
+@media (min-width: 1100px) {
+  .detail-layout { grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); align-items: start; }
+  .job-heading, .human-review, .technical { grid-column: 1 / -1; }
+  .original-post { grid-column: 2; grid-row: 2 / span 2; }
+  .job-facts, .assessment { grid-column: 1; }
+}
 button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 4px; }
 @media (max-width: 900px) { .filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 650px) {

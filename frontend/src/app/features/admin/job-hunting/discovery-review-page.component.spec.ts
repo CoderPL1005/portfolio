@@ -37,22 +37,24 @@ describe('Discovery Review',()=>{
     expect(api.saveDiscoveryReview).toHaveBeenCalledExactlyOnceWith('synthetic-1',{expectedVersion:0,action:'CONFIRMED',notes:'Đã đọc và đối chiếu bài gốc'});
     expect(el.querySelector('.comparison')?.textContent).toContain('Đã xác nhận');
   });
-  it('updates same-route session list and metrics, ignoring stale responses and clearing removed runId',()=>{
+  it('updates same-route list but requires explicit metrics reload, ignoring stale responses',()=>{
     const {api,c,query}=mount(undefined,'fresh-session-a');const oldMetrics=new Subject<DiscoveryQualityReport>();
     const newMetrics=new Subject<DiscoveryQualityReport>();const staleList=new Subject<DiscoveryReviewList>();const newList=new Subject<DiscoveryReviewList>();
     api.discoveryMetrics.mockReturnValueOnce(oldMetrics).mockReturnValueOnce(newMetrics);
     c.loadMetrics();api.discovery.mockReturnValueOnce(staleList);c.load();c.page=3;api.discovery.mockReturnValueOnce(newList);
     query.next(convertToParamMap({runId:'fresh-session-b'}));
     expect(api.discovery).toHaveBeenLastCalledWith({page:1,pageSize:20,runId:'fresh-session-b'});
-    expect(api.discoveryMetrics).toHaveBeenLastCalledWith('fresh-session-b');
+    expect(api.discoveryMetrics).toHaveBeenCalledExactlyOnceWith('fresh-session-a');
     oldMetrics.next({notice:'OLD'} as DiscoveryQualityReport);oldMetrics.complete();
-    expect(c.metrics()).toBeNull();expect(c.metricsLoading()).toBe(true);
+    expect(c.metrics()).toBeNull();expect(c.metricsLoading()).toBe(false);
     staleList.next({...listing(),counts:{...listing().counts,total:999}});expect(c.list()).toBeNull();
     newList.next(listing());expect(c.list()?.counts.total).toBe(1);
+    c.loadMetrics();expect(api.discoveryMetrics).toHaveBeenLastCalledWith('fresh-session-b');
     newMetrics.next({notice:'NEW'} as DiscoveryQualityReport);expect(c.metrics()?.notice).toBe('NEW');
     api.discoveryMetrics.mockReturnValue(of({} as DiscoveryQualityReport));query.next(convertToParamMap({}));
     expect(c.runId).toBe('');expect(api.discovery).toHaveBeenLastCalledWith({page:1,pageSize:20});
-    expect(api.discoveryMetrics).toHaveBeenLastCalledWith(undefined);
+    expect(api.discoveryMetrics).toHaveBeenCalledTimes(2);expect(c.metrics()).toBeNull();
+    c.loadMetrics();expect(api.discoveryMetrics).toHaveBeenLastCalledWith(undefined);
   });
   it('opens the fresh session using server-side run filter without clearing historical observations',()=>{
     const {api,c}=mount(undefined,'fresh-offline-demo-01');
@@ -143,6 +145,9 @@ describe('Discovery Review',()=>{
     const el:HTMLElement=fixture.nativeElement;expect(el.querySelector('.empty-state')?.textContent).toContain('Discovery chưa có kết quả');
     expect(el.querySelector('.summary')).toBeNull();expect(el.querySelector('[aria-label="Phân trang"]')).toBeNull();
     expect(el.querySelector('.job-card')).toBeNull();expect(el.textContent).not.toContain('Chạy Discovery');expect(el.textContent).not.toContain('1 / 0');
+    expect(el.querySelector('.empty-icon svg')).not.toBeNull();
+    expect(el.querySelector('.filter-tabs')).toBeNull();expect(el.querySelector('.advanced-filters')).toBeNull();
+    expect(el.querySelector('.quality-section')).toBeNull();expect(el.querySelector('app-discovery-quality')).toBeNull();
   });
   it('routes compact tabs to existing server filters and resets pagination',()=>{
     const {fixture,c,api}=mount();const tabs=fixture.nativeElement.querySelectorAll('.filter-tabs button') as NodeListOf<HTMLButtonElement>;
@@ -155,6 +160,9 @@ describe('Discovery Review',()=>{
     const {fixture,c,api}=mount(undefined,'session');c.reviewState='CORRECTED';c.identityOnly=true;c.collectedDate='2026-10-26';
     api.discovery.mockReturnValue(of({...listing(),results:{items:[],page:1,pageSize:20,total:0,totalPages:0}}));c.filter();fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('.empty-state').textContent).toContain('Không có cơ hội khớp bộ lọc');
+    expect(fixture.nativeElement.querySelector('.filter-tabs')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.advanced-filters')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.quality-section')).toBeNull();
     fixture.nativeElement.querySelector('.empty-state button').click();expect(api.discovery).toHaveBeenLastCalledWith({page:1,pageSize:20});
     expect(c.hasFilters()).toBe(false);
   });
@@ -171,6 +179,18 @@ describe('Discovery Review',()=>{
     const card:HTMLElement=fixture.nativeElement.querySelector('.job-card');
     for(const fact of ['Backend Developer','Example','Hà Nội','C#','ASP.NET Core'])expect(card.textContent).toContain(fact);
     expect(card.textContent).not.toContain('Fresher');expect(card.textContent).not.toContain('Đã xác minh');expect(c.seniority(data.results.items[0])).toBe('');
+  });
+  it('keeps quality metrics collapsed and never loads them when opening the advanced section',()=>{
+    const {fixture,api}=mount();const panel:HTMLDetailsElement=fixture.nativeElement.querySelector('.quality-section');
+    expect(panel.open).toBe(false);expect(api.discoveryMetrics).not.toHaveBeenCalled();
+    panel.open=true;panel.dispatchEvent(new Event('toggle'));fixture.detectChanges();
+    expect(api.discoveryMetrics).not.toHaveBeenCalled();
+    panel.querySelector<HTMLButtonElement>('button')!.click();expect(api.discoveryMetrics).toHaveBeenCalledTimes(1);
+  });
+  it('invalidates metrics on filter changes without an implicit reload or stale receipt',()=>{
+    const {c,api}=mount();const pending=new Subject<DiscoveryQualityReport>();api.discoveryMetrics.mockReturnValue(pending);
+    c.loadMetrics();c.runId='another-session';c.filter();pending.next({notice:'OLD'} as DiscoveryQualityReport);
+    expect(c.metrics()).toBeNull();expect(c.metricsLoading()).toBe(false);expect(api.discoveryMetrics).toHaveBeenCalledTimes(1);
   });
   it('does not show the previous observation or list import UI when a detail reload fails',()=>{
     const {c,api,fixture}=mount('synthetic-1');const pending=new Subject<DiscoveryReviewDetail>();api.discoveryItem.mockReturnValue(pending);
