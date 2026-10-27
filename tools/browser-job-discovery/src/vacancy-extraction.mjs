@@ -24,7 +24,7 @@ function technologies(text) {
   const patterns = [['ASP.NET Core', /asp\.net\s*core/iu], ['ASP.NET', /asp\.net/iu], ['.NET', /\.net\b|\bdotnet\b/iu],
     ['C#', /c\s*#|c sharp/iu], ['Angular', /\bangular\b/iu], ['TypeScript', /\btypescript\b/iu],
     ['EF Core', /\bef\s*core\b|entity framework core/iu], ['SQL Server', /sql server/iu], ['SQL', /\bsql\b/iu],
-    ['Azure', /\bazure\b/iu], ['Flutter', /\bflutter\b/iu], ['Python', /\bpython\b/iu], ['C/C++', /c\s*\/\s*c\+\+/iu],
+    ['Azure', /\bazure\b/iu], ['Flutter', /\bflutter\b/iu], ['Python', /\bpython\b/iu], ['FastAPI', /\bfastapi\b/iu], ['C/C++', /c\s*\/\s*c\+\+/iu],
     ['Java', /\bjava\b/iu], ['React', /\breact\b/iu]];
   return patterns.filter(([, pattern]) => pattern.test(text)).map(([name]) => name);
 }
@@ -67,6 +67,30 @@ const requirementsLabel = /^(?:yêu cầu|requirements?|qualifications?|bạn ph
 const benefitsLabel = /^(?:quyền lợi|benefits?|phúc lợi|chế độ|đãi ngộ|khi tham gia|bạn sẽ được)/iu;
 const footerLabel = /^(?:địa chỉ|địa điểm|làm việc tại|address|office|location|liên hệ|contact|email|send cv|gửi cv|ứng tuyển|quan tâm|cảm ơn|thank|inbox|zalo|facebook\s*:)/iu;
 const optionalSkill = /nice to have|preferred|optional|advantage|\ba plus\b|\bbonus\b|là (?:một )?lợi thế|ưu tiên|không bắt buộc/iu;
+const responsibilitiesLabel = /^(?:responsibilities|duties|mô tả công việc|trách nhiệm|công việc)/iu;
+
+function responsibilities(lines) {
+  let active=false;const evidence=[];
+  for(const line of lines){
+    const text=labelText(line);
+    if(responsibilitiesLabel.test(text)){active=true;const inline=text.match(/[:：]\s*(.+)$/u)?.[1];if(inline)evidence.push(inline);continue;}
+    if(requirementsLabel.test(text)||benefitsLabel.test(text)||footerLabel.test(text)){active=false;continue;}
+    if(active && text)evidence.push(line);
+  }
+  return evidence.join('\n')||null;
+}
+
+// Verbatim statements, not inferred dates, contractual terms or verified hiring.
+function applicationDetails(text) {
+  const lines=text.split('\n');
+  const applicationLine=lines.find(line=>/apply|application|ứng tuyển|gửi (?:cv|hồ sơ)/iu.test(line) && /https?:\/\//u.test(line));
+  let applicationUrl=null;
+  if(applicationLine){try{const url=new URL(applicationLine.match(/https?:\/\/[^\s<>]+/u)[0]);
+    if(['https:','http:'].includes(url.protocol)&&!url.username&&!url.password)applicationUrl=url.href;}catch{ /* Unsupported URL stays unknown. */ }}
+  return {applicationUrl,deadline:lines.find(line=>/deadline|hạn (?:chót|nộp)|closing date/iu.test(line))??null,
+    employmentType:lines.find(line=>/\bfull[- ]time\b|\bpart[- ]time\b|toàn thời gian|bán thời gian/iu.test(line))??null,
+    workplaceType:lines.find(line=>/\b(?:remote|hybrid|on[- ]?site)\b|làm việc (?:từ xa|tại văn phòng)/iu.test(line))??null};
+}
 
 function extractRequirements(lines) {
   let section = null;
@@ -74,6 +98,7 @@ function extractRequirements(lines) {
   for (const line of lines) {
     const text = labelText(line);
     if (benefitsLabel.test(text)) { section = 'BENEFITS'; continue; }
+    if (responsibilitiesLabel.test(text)) { section = 'RESPONSIBILITIES'; continue; }
     if (footerLabel.test(text) || location(text).city && /^(?:\d+\s|địa|office|address|location)/iu.test(text)) { section = 'FOOTER'; continue; }
     if (requirementsLabel.test(text)) {
       section = 'REQUIREMENTS';
@@ -81,7 +106,7 @@ function extractRequirements(lines) {
       if (inline) result.push(inline);
       continue;
     }
-    if (!text || section === 'BENEFITS' || section === 'FOOTER' || salary(text, 'CHECK') || location(text).city || contacts(text).contactEmail) continue;
+    if (!text || section === 'BENEFITS' || section === 'FOOTER' || section === 'RESPONSIBILITIES' || salary(text, 'CHECK') || location(text).city || contacts(text).contactEmail) continue;
     if (/^(?:được |hỗ trợ|cơ hội|thưởng|lộ trình|đào tạo|training|free lunch|chúng |môi trường|nếu bạn|các bạn)/iu.test(text)) continue;
     if (section === 'REQUIREMENTS' || /^(?:có |biết |nắm |hiểu |thành thạo|kiến thức|kinh nghiệm|tư duy|sẵn sàng|là sv|sv |sinh viên|đã có|đã tốt nghiệp|đã có thể|tiếng |đi làm|[≥>]\s*\d|\d+\s*(?:\+|tháng|năm)|experience|must |proficien|familiar|mandatory)/iu.test(text)) result.push(line);
   }
@@ -191,12 +216,13 @@ export function extractVacancies(body, { sourceUrl = null, publishedAt = null } 
       : ownLocation.city ? ownLocation : allLocation.ambiguous ? precedingLocation ?? ownLocation : allLocation;
     const title = headings.length ? lines[start].replace(/^\s*(?:\d+[.)]|[-•▪✅👉])\s*/u, '') : null;
     const requirements = extractRequirements(blockLines.slice(headings.length ? 1 : 0));
+    const backendResponsibilities=responsibilities(blockLines);
     const tech = technologies(block);
     const titleTechnologies = technologies(title ?? '');
     const mandatoryText = mandatorySkills(requirements ?? '');
     const mandatoryTechnologies = technologies(mandatoryText);
     const backendTechnology = value => ['.NET', 'C#', 'ASP.NET', 'ASP.NET Core'].includes(value);
-    const primaryTechnologies = unique([...titleTechnologies, ...mandatoryTechnologies]);
+    const primaryTechnologies = unique([...titleTechnologies, ...mandatoryTechnologies, ...technologies(mandatorySkills(backendResponsibilities??''))]);
     const levels = unique(signalText(title ?? block).match(seniority) ?? (starts.length === 1 ? signalText(block).match(seniority) ?? commonSeniority : parentLevels));
     const hasEntryLevel = levels.some(level => /^(?:intern(?:ship)?|fresher|junior|entry[- ]level|thực tập)$/iu.test(level));
     const exp = experience(mandatoryText);
@@ -221,7 +247,15 @@ export function extractVacancies(body, { sourceUrl = null, publishedAt = null } 
       else { classification = 'INSUFFICIENT_DATA'; reason = 'SENIORITY_UNVERIFIED'; }
     } else if (recruitment && !tech.length && levels.length) { classification = 'INSUFFICIENT_DATA'; reason = 'TECHNOLOGY_UNVERIFIED'; }
     const ownContacts = contacts(block);
+    const primaryRole=/full[- ]?stack/iu.test(title??'')?'FULLSTACK':/back[- ]?end/iu.test(title??'')?'BACKEND':/front[- ]?end/iu.test(title??'')?'FRONTEND':null;
+    const application=applicationDetails(block);
+    const recruitmentStatus=/đóng tuyển|đã tuyển đủ|no longer accepting|(?:recruitment|position|applications?) (?:is |are )?closed/iu.test(block)?'CLOSED':recruitment?'ANNOUNCED_UNVERIFIED':'UNKNOWN';
     return { title, employer: employerEvidence, employerStatus: employer.status, location: assigned.value, technologies: tech, primaryTechnologies, seniority: levels,
+      primaryRole,requiredTechnologies:primaryTechnologies,optionalTechnologies:technologies((requirements??'').split(/\n|;/u).filter(line=>optionalSkill.test(line)).join('\n')),
+      backendResponsibilities,...application,recruitmentStatus,
+      missingFields:Object.entries({title,employer:employerEvidence,location:assigned.value,requirements,backendResponsibilities,
+        publishedAt,...application}).filter(([,value])=>value===null).map(([key])=>key),
+      extractionConfidence:'EVIDENCE_ONLY_NOT_INDEPENDENTLY_VERIFIED',
       experience: exp, requirements, salary: salary(block, 'VACANCY_RANGE_NOT_LEVEL_SPECIFIC'),
       // Only explicit introductory contacts are shared. A different role's contact is not inherited.
       contactEmail: ownContacts.contactEmail ?? introContacts.contactEmail,
@@ -230,7 +264,7 @@ export function extractVacancies(body, { sourceUrl = null, publishedAt = null } 
       sourceUrl, publishedAt, match: { classification, reason, backend, angular: tech.includes('Angular'),
         locationVerified: assigned.city === 'HANOI', locationAssignmentAmbiguous: !assigned.city && allLocation.ambiguous,
         freshness: publishedAt ? 'UNVERIFIED' : 'UNKNOWN', eligibleForProductionIngestion: false },
-      evidence: { title, employer: employer.evidence, location: assigned.evidence, requirements, body: block } };
+      evidence: { title, employer: employer.evidence, location: assigned.evidence, requirements,backendResponsibilities, body: block } };
   });
   if (!text) vacancies.length = 0;
   const classification = !text ? 'INSUFFICIENT_DATA' : ['TARGET_MATCH', 'POTENTIAL_MATCH', 'INSUFFICIENT_DATA'].find(value => vacancies.some(v => v.match.classification === value)) ?? 'NOT_MATCHED';
@@ -239,6 +273,7 @@ export function extractVacancies(body, { sourceUrl = null, publishedAt = null } 
     location: single?.location ?? (!allLocation.ambiguous ? allLocation.value : null), requirements: single?.requirements ?? sharedRequirements,
     sharedRequirements: starts.length > 1 ? sharedRequirements : null,
     postSections: { introduction: intro || null, sharedFooter: sharedLines.join('\n') || null },
+    sharedApplicationDetails:applicationDetails([...intro.split('\n'),...sharedLines].join('\n')),
     technologies: unique(vacancies.flatMap(v => v.technologies)), seniority: single?.seniority ?? [],
     salary: single?.salary ?? salary([...intro.split('\n'), ...sharedLines].join('\n'), 'POST_UNASSIGNED'), ...commonContacts, vacancies,
     structuredMatch: { classification, recruitment: !seeker && (explicitRecruitment || headings.length > 0),

@@ -3,8 +3,8 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID, createHash } from 'node:crypto';
 import { resolve, relative, isAbsolute } from 'node:path';
 import { Stop } from './core.mjs';
-import { beginExecution, claimPage, performPage, acknowledgePersistence, workflowMetrics, reconcileTerminalFailure } from './pagination-orchestrator.mjs';
-import { resolveDiscoveryPolicy, planFacebookQueries } from './candidate-technology-profile.mjs';
+import { beginExecution, claimPage, performPage, acknowledgePersistence, workflowMetrics, reconcileTerminalFailure, assertFreshBudget } from './pagination-orchestrator.mjs';
+import { resolveDiscoveryPolicy, planFacebookQueries, resolveOneRequestPolicy } from './candidate-technology-profile.mjs';
 import {encryptCheckpoint,decryptCheckpoint,syncConfiguration,preflightAdminSync,syncReviews} from './admin-sync.mjs';
 import {createFreshSession} from './fresh-demo.mjs';
 
@@ -87,29 +87,39 @@ export async function paginationCli(args) {
   if((state.freshSession||state.privateResponseAudit)&&process.env.DISCOVERY_AUTO_ADMIN_SYNC!=='true')
     throw new Stop('PRIVATE_FRESH_CHECKPOINT_REQUIRES_ENCRYPTED_MODE');
   const receipt = process.env.ARTIFACT_RECEIPT;
+  const oneRequest=process.env.DISCOVERY_ONE_REQUEST_V1==='true';
+  const globalBudget=()=>({...JSON.parse(process.env.SOCIALAPIS_FREE_BALANCE_EVIDENCE??'{}'),
+    maxRequests31Days:Number(process.env.SOCIALAPIS_MAX_31_DAY_REQUESTS),maxCredits31Days:Number(process.env.SOCIALAPIS_MAX_31_DAY_CREDITS)});
+  const resolvePolicy=async(policy,history)=>{
+    if(!oneRequest)return resolveDiscoveryPolicy(policy,process.env.DISCOVERY_QUERY,history);
+    if(process.env.DISCOVERY_AUTO_ADMIN_SYNC!=='true'||process.env.DISCOVERY_MAX_REQUESTS!=='1'||process.env.DISCOVERY_MAX_CREDITS!=='1'||
+      process.env.RESUME_CONTINUATION==='true'||process.env.DISCOVERY_QUERY?.trim())throw new Stop('V1_ONE_REQUEST_CONFIGURATION_REQUIRED');
+    const preferences=JSON.parse(await readFile(new URL('../config/backend-target-preferences.json',import.meta.url),'utf8'));
+    return resolveOneRequestPolicy(policy,preferences,history);
+  };
   if(action==='fresh-init'){
     syncConfiguration();encryptCheckpoint(Buffer.from('{}'),process.env.DISCOVERY_CHECKPOINT_KEY);
     if(process.env.DISCOVERY_AUTO_ADMIN_SYNC!=='true'||process.env.DISCOVERY_MAX_REQUESTS!=='1'||process.env.DISCOVERY_MAX_CREDITS!=='1'||
       process.env.RESUME_CONTINUATION==='true'||process.env.INITIALIZE_STATE==='true')throw new Stop('FRESH_CONFIGURATION_INVALID');
     const policy=JSON.parse(process.env.DISCOVERY_POLICY??'{}');
-    const resolved=resolveDiscoveryPolicy(policy,process.env.DISCOVERY_QUERY,[]);
+    const resolved=await resolvePolicy(policy,state.discoveryYieldHistory??[]);
     const start=dateSelection('DISCOVERY_START_TIME',resolved.startTime),end=dateSelection('DISCOVERY_END_TIME',resolved.endTime);
     state=createFreshSession(state,{...resolved,startTime:start.value,endTime:end.value,maxRequests:1,maxCredits:1},{
       sessionId:process.env.DISCOVERY_FRESH_SESSION_ID,workflowRunId:process.env.GITHUB_RUN_ID,activationSha:process.env.DISCOVERY_FRESH_ACTIVATION_SHA,
       proof:{...actionsResultEvidence(state),artifactId:receipt},
-      globalBudget:{...JSON.parse(process.env.SOCIALAPIS_FREE_BALANCE_EVIDENCE??'{}'),
-        maxRequests31Days:Number(process.env.SOCIALAPIS_MAX_31_DAY_REQUESTS),maxCredits31Days:Number(process.env.SOCIALAPIS_MAX_31_DAY_CREDITS)},
+      globalBudget:globalBudget(),
       freeConfirmed:process.env.SOCIALAPIS_FREE_PLAN_CONFIRMED==='true',noCashConfirmed:process.env.SOCIALAPIS_NO_CASH_CONFIRMED==='true'});
     state.orchestration.dateFilterAudit={startTime:state.orchestration.config.startTime,endTime:state.orchestration.config.endTime,
       startInputState:start.inputState,endInputState:end.inputState,startSource:start.source,endSource:end.source,providerFreshnessVerified:false};
+    if(oneRequest)state.oneRequestExecution={workflowRunId:state.orchestration.workflowRunId,globalBudget:state.freshSession.globalBudget,querySelection:resolved.querySelection};
     console.log(JSON.stringify({freshSessionId:state.freshSession.id,maximumHttpRequests:1,maximumPermittedDeductedCredits:1,historicalRequests:state.freshSession.historicalRequests,
       historicalCredits:state.freshSession.historicalCredits,providerRequests:0}));
   } else if (action === 'init') {
     if(process.env.DISCOVERY_AUTO_ADMIN_SYNC==='true'){
       syncConfiguration();encryptCheckpoint(Buffer.from('{}'),process.env.DISCOVERY_CHECKPOINT_KEY);
-      if(process.env.DISCOVERY_MAX_REQUESTS!=='1'||process.env.DISCOVERY_MAX_CREDITS!=='1'||process.env.RESUME_CONTINUATION==='true'||
+      if(!oneRequest && (process.env.DISCOVERY_MAX_REQUESTS!=='1'||process.env.DISCOVERY_MAX_CREDITS!=='1'||process.env.RESUME_CONTINUATION==='true'||
         process.env.DISCOVERY_QUERY!=='Fresher .NET Hà Nội'||process.env.DISCOVERY_START_TIME!=='2026-10-26'||process.env.DISCOVERY_END_TIME!=='2026-10-26')
-        throw new Stop('ONE_REQUEST_DEMO_CONFIGURATION_REQUIRED');
+        )throw new Stop('ONE_REQUEST_DEMO_CONFIGURATION_REQUIRED');
     }
     if (process.env.RESUME_CONTINUATION !== undefined && !['true','false',''].includes(process.env.RESUME_CONTINUATION)) throw new Stop('INVALID_RESUME_OPTION');
     // Downloading this exact result artifact is proof of persistence. A claim
@@ -122,7 +132,8 @@ export async function paginationCli(args) {
     if (policy.mode && policy.mode !== 'development') throw new Stop('MONTHLY_FREE_BALANCE_UNVERIFIED_SCHEDULE_DISABLED');
     const resumeContinuation = process.env.RESUME_CONTINUATION === 'true';
     if (resumeContinuation && process.env.INITIALIZE_STATE === 'true') throw new Stop('CANNOT_INITIALIZE_WHILE_RESUMING');
-    const resolved=resolveDiscoveryPolicy(policy,process.env.DISCOVERY_QUERY,state.discoveryYieldHistory??[],{resume:resumeContinuation,previous:state.orchestration});
+    const resolved=oneRequest ? await resolvePolicy(policy,state.discoveryYieldHistory??[]) : resolveDiscoveryPolicy(policy,process.env.DISCOVERY_QUERY,state.discoveryYieldHistory??[],{resume:resumeContinuation,previous:state.orchestration});
+    if(oneRequest)assertFreshBudget(state.requestLedger??[],globalBudget());
     const start=dateSelection('DISCOVERY_START_TIME',resolved.startTime),end=dateSelection('DISCOVERY_END_TIME',resolved.endTime);
     beginExecution(state, { ...resolved,
       startTime:start.value,endTime:end.value,
@@ -130,6 +141,7 @@ export async function paginationCli(args) {
     state.orchestration.dateFilterAudit={startTime:state.orchestration.config.startTime,endTime:state.orchestration.config.endTime,
       startInputState:start.inputState,endInputState:end.inputState,startSource:start.source,endSource:end.source,providerFreshnessVerified:false};
     if(resolved.profile?.technologyProfile)state.queryPlan={version:'facebook-query-v1',candidates:planFacebookQueries(resolved.profile.technologyProfile,state.discoveryYieldHistory??[],resolved.targetJobPreferences)};
+    if(oneRequest)state.oneRequestExecution={workflowRunId:state.orchestration.workflowRunId,globalBudget:globalBudget(),querySelection:resolved.querySelection};
     console.log(JSON.stringify({ maximumHttpRequests: state.orchestration.config.maxRequests,
       dateFilters:state.orchestration.dateFilterAudit,
       maximumPermittedDeductedCredits: state.orchestration.config.maxCredits,

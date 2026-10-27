@@ -1,11 +1,112 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {encryptCheckpoint,decryptCheckpoint,syncConfiguration,preflightAdminSync,syncReviews} from '../src/admin-sync.mjs';
-import {beginExecution,claimPage,performPage} from '../src/pagination-orchestrator.mjs';
+import {beginExecution,claimPage,performPage,acknowledgePersistence,accountingFingerprint,workflowMetrics} from '../src/pagination-orchestrator.mjs';
+import {resolveOneRequestPolicy} from '../src/candidate-technology-profile.mjs';
 import {mkdtemp,mkdir,readFile,writeFile,rm} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {join} from 'node:path';
 import {execFileSync} from 'node:child_process';
+import {resolve,relative,isAbsolute} from 'node:path';
+
+const preferences=JSON.parse(await readFile(new URL('../config/backend-target-preferences.json',import.meta.url),'utf8'));
+const uid=n=>`00000000-0000-0000-0000-${String(n).padStart(12,'0')}`;
+const policy={portfolioSnapshot:{schemaVersion:1,source:'PORTFOLIO_PUBLIC_API_EXPORT',
+  technologies:['C#','ASP.NET Core','Python','FastAPI'].map((name,i)=>({id:uid(i+1),name,category:'Backend'})),skills:[],experiences:[],
+  projects:[{id:uid(10),status:'COMPLETED',technologies:[1,2,3,4].map(n=>({id:uid(n)}))}]}};
+
+test('V1 producer to import contract: mixed batch, vacancy matching, repost dedup, encrypted persistence and sync-only recovery',async()=>{
+  const now=new Date(),resolved=resolveOneRequestPolicy(policy,preferences);
+  const state=beginExecution({jobs:[]},resolved,'81001',{now});
+  const globalBudget={maxRequests31Days:20,maxCredits31Days:20,source:'OPERATOR_VERIFIED_FREE_ACCOUNT',freePlan:true,noAutoTopUp:true,
+    freeCreditsRemaining:1,verifiedAt:now.toISOString(),ledgerFingerprint:accountingFingerprint([])};
+  state.oneRequestExecution={workflowRunId:'81001',globalBudget,querySelection:resolved.querySelection};
+  const dotnet='Hiring Fresher .NET Backend Developer\nRequirements: Build REST APIs using .NET; 0–1 years experience\nLocation: Hanoi';
+  const row=(id,text,url=`https://facebook.com/fixture/posts/${id}`)=>({basic_info:{post_id:id,post_text:text,url},engagement:{},media:{},author:{}});
+  const wire={data:{items:[row('8101',dotnet),row('8102','Hiring Intern Python Backend Developer\nRequirements: Python and FastAPI; build REST APIs; no experience required\nLocation: Hanoi'),
+    row('8103',dotnet),null,row('8104',dotnet,'https://facebook.com/fixture/posts/pfbidUnverified'),
+    row('8105','Hiring Senior Java Backend Developer\nRequirements: Java; 5 years experience\nLocation: Hanoi'),
+    row('8106','Hiring Fresher Backend Developer\nRequirements: Build REST APIs\nLocation: Hanoi'),
+    row('8107','Hiring Fresher React Frontend Developer\nRequirements: React\nLocation: Hanoi')],page_info:{cursor:'next-must-never-be-fetched'}}};
+  let providerCalls=0;const old=process.env.SOCIALAPIS_API_KEY;process.env.SOCIALAPIS_API_KEY='synthetic-v1-provider-key';
+  try{
+    claimPage(state,now);await performPage(state,{now,receipt:'123',claimArtifactName:'socialapis-page-81001-1-claim',captureReviews:true,
+      enabled:true,freePlanConfirmed:true,noCashConfirmed:true,secret:process.env.SOCIALAPIS_API_KEY,transport:async(url)=>{
+        providerCalls++;assert.equal(new URL(url).searchParams.get('query'),resolved.query);assert.equal(new URL(url).searchParams.has('end_cursor'),false);
+        return Response.json(wire,{headers:{'X-SocialAPIs-Credits-Deducted':'1','X-SocialAPIs-Credits-Used':'6'}});
+      }});
+  }finally{if(old===undefined)delete process.env.SOCIALAPIS_API_KEY;else process.env.SOCIALAPIS_API_KEY=old;}
+  assert.equal(providerCalls,1);assert.equal(state.orchestration.pages.length,1);
+  assert.equal(state.orchestration.pages[0].acceptedItems,6);assert.equal(state.orchestration.pages[0].rejectedItems,2);
+  assert.equal(state.orchestration.pages[0].newRelevantOpportunities,2);
+  assert.equal(state.discoveryReviews[0].items.length,8);assert.equal(state.discoveryReviews[0].items[3].rawContent,null);
+  assert.ok(state.jobs.every(j=>j.publishedAt===null));assert.equal(state.jobs[0].vacancies[0].match.classification,'TARGET_MATCH');
+  assert.equal(state.jobs[1].vacancies[0].match.classification,'TARGET_MATCH');
+  assert.ok(state.discoveryReviews[0].items[4].sourceWarnings.includes('POST_ID_URL_MISMATCH'));
+  const checkpoint=encryptCheckpoint(Buffer.from(JSON.stringify(state)),secret);
+  const restored=JSON.parse(decryptCheckpoint(checkpoint,secret));const ledger=structuredClone(restored.requestLedger);
+  await assert.rejects(()=>syncReviews(restored,config,async()=>{throw Error('Synthetic admin unavailable');}),/RETRY_SYNC_ONLY/u);
+  acknowledgePersistence(restored,'456');assert.equal(claimPage(restored),false);
+  const seen=new Set();const transport=async(_url,options)=>{
+    const bundle=JSON.parse(options.body);assert.deepEqual(bundle,state.discoveryReviews[0]);
+    const first=!seen.has(bundle.runId);seen.add(bundle.runId);return Response.json({data:{inserted:first?8:0,unchanged:first?0:8}});
+  };
+  assert.equal((await syncReviews(restored,config,transport))[0].inserted,8);
+  assert.equal((await syncReviews(restored,config,transport))[0].unchanged,8);
+  assert.deepEqual(restored.requestLedger[0],{...ledger[0],outcome:'CONFIRMED'});assert.equal(providerCalls,1);
+  assert.equal(workflowMetrics(restored).actualRequests,1);assert.equal(workflowMetrics(restored).totalDeductedCredits,1);
+  assert.equal(workflowMetrics(restored).reviewSummary.observations,8);
+  // A fresh operational view must not relabel already-known content as new yield.
+  const next=beginExecution({jobs:[],historicalJobs:state.jobs},resolved,'81003');
+  assert.equal(next.orchestration.initialOpportunityIds.length,5);
+  if(process.env.DISCOVERY_PIPELINE_TEST_BUNDLE){
+    const root=fileURLToPath(new URL('../.debug/',import.meta.url)),output=resolve(process.env.DISCOVERY_PIPELINE_TEST_BUNDLE),local=relative(root,output);
+    assert.ok(local&&!local.startsWith('..')&&!isAbsolute(local));
+    // Optional cross-language validation uses the actual producer payload, never a hand-written C# substitute.
+    await writeFile(output,JSON.stringify(restored.discoveryReviews[0]),{flag:'wx',mode:0o600});
+  }
+});
+
+test('actual V1 CLI plans one Backend query without the old date lock and refuses unverified global balance before HTTP',async()=>{
+  const directory=fileURLToPath(new URL('../',import.meta.url));await mkdir(join(directory,'.debug'),{recursive:true});
+  const local=await mkdtemp(join(directory,'.debug','v1-init-')),output=join(local,'state.json');
+  const guard='data:text/javascript,'+encodeURIComponent(`import net from 'node:net';net.Socket.prototype.connect=()=>{throw Error('NETWORK_FORBIDDEN')};globalThis.fetch=()=>{throw Error('NETWORK_FORBIDDEN')};`);
+  const budget={source:'OPERATOR_VERIFIED_FREE_ACCOUNT',freePlan:true,noAutoTopUp:true,freeCreditsRemaining:1,verifiedAt:new Date().toISOString(),ledgerFingerprint:accountingFingerprint([])};
+  const env={...process.env,DISCOVERY_STATE_FILE:output,INITIALIZE_STATE:'true',GITHUB_RUN_ID:'81002',DISCOVERY_AUTO_ADMIN_SYNC:'true',DISCOVERY_ONE_REQUEST_V1:'true',
+    DISCOVERY_CHECKPOINT_KEY:secret,DISCOVERY_IMPORT_KEY:secret,DISCOVERY_ADMIN_ORIGIN:config.origin,DISCOVERY_QUERY:'',RESUME_CONTINUATION:'false',
+    DISCOVERY_START_TIME:'2026-10-27',DISCOVERY_END_TIME:'2026-10-28',DISCOVERY_MAX_REQUESTS:'1',DISCOVERY_MAX_CREDITS:'1',DISCOVERY_POLICY:JSON.stringify(policy),
+    SOCIALAPIS_MAX_31_DAY_REQUESTS:'20',SOCIALAPIS_MAX_31_DAY_CREDITS:'20',SOCIALAPIS_FREE_BALANCE_EVIDENCE:JSON.stringify(budget)};
+  const invoke=(changes={})=>execFileSync(process.execPath,['--import',guard,'src/cli.mjs','--orchestrate','init'],{cwd:directory,env:{...env,...changes},stdio:'pipe'});
+  try{
+    for(const change of [{SOCIALAPIS_FREE_BALANCE_EVIDENCE:''},{SOCIALAPIS_MAX_31_DAY_CREDITS:''},{DISCOVERY_MAX_REQUESTS:'2'},{DISCOVERY_MAX_CREDITS:'2'},
+      {DISCOVERY_QUERY:'arbitrary query'},{RESUME_CONTINUATION:'true'},{DISCOVERY_AUTO_ADMIN_SYNC:'false'},
+      {DISCOVERY_POLICY:JSON.stringify({profile:{technologies:['.NET'],locations:['Hanoi'],seniorities:['Junior']}})}])assert.throws(()=>invoke(change));
+    invoke();const saved=JSON.parse(await readFile(output,'utf8'));
+    assert.equal(saved.requestLedger.length,0);assert.equal(saved.orchestration.config.startTime,'2026-10-27');
+    assert.equal(saved.orchestration.config.endTime,'2026-10-28');assert.equal(saved.orchestration.config.rotatingQuery,null);assert.deepEqual(saved.orchestration.config.adaptiveQueries,[]);
+    assert.equal(saved.oneRequestExecution.querySelection.query,saved.orchestration.config.query);
+    assert.ok(!/Junior|Frontend/iu.test(saved.orchestration.config.query));
+    assert.equal(saved.oneRequestExecution.querySelection.coverage,'ONE_QUERY_ONLY_NOT_ENTIRE_POOL');
+    const before=JSON.stringify(saved);saved.oneRequestExecution.globalBudget.freeCreditsRemaining=0;assert.throws(()=>claimPage(saved));
+    saved.oneRequestExecution.globalBudget.freeCreditsRemaining=1;assert.equal(JSON.stringify(saved),before);
+  }finally{await rm(local,{recursive:true,force:true});}
+});
+
+test('optional saved real capture through current Backend pipeline; fixture Portfolio evidence, zero real HTTP',
+  {skip:!process.env.DISCOVERY_FRESH_CAPTURE_REPLAY},async()=>{
+    const path=new URL('../.debug/socialapis-response.json',import.meta.url),bytes=await readFile(path);
+    const wire=JSON.parse(bytes),state=beginExecution({jobs:[]},resolveOneRequestPolicy(policy,preferences),'81004');
+    let replayCalls=0;const old=process.env.SOCIALAPIS_API_KEY;process.env.SOCIALAPIS_API_KEY='synthetic-capture-replay-key';
+    try{
+      claimPage(state);await performPage(state,{receipt:'123',enabled:true,freePlanConfirmed:true,noCashConfirmed:true,captureReviews:true,
+        secret:process.env.SOCIALAPIS_API_KEY,transport:async()=>{replayCalls++;return Response.json(wire,{headers:{'X-SocialAPIs-Credits-Deducted':'1'}});}});
+    }finally{if(old===undefined)delete process.env.SOCIALAPIS_API_KEY;else process.env.SOCIALAPIS_API_KEY=old;}
+    assert.equal(replayCalls,1);assert.equal(wire.data.items.length,8);assert.equal(state.jobs.length,8);assert.equal(state.discoveryReviews[0].items.length,8);
+    assert.deepEqual(await readFile(path),bytes);assert.ok(state.jobs.every(j=>j.publishedAt===null));
+    console.log(JSON.stringify({captureReplayOnly:true,realHttpRequests:0,portfolioEvidence:'SYNTHETIC_REAL_SHAPED_FIXTURE',
+      accepted:state.orchestration.pages[0].acceptedItems,rejected:state.orchestration.pages[0].rejectedItems,
+      uniquePrimaryOpportunities:state.orchestration.pages[0].newRelevantOpportunities,reviewSummary:workflowMetrics(state).reviewSummary}));
+  });
 
 const secret='a'.repeat(64),config=syncConfiguration({DISCOVERY_ADMIN_ORIGIN:'https://portfolio-api-forn.onrender.com',DISCOVERY_IMPORT_KEY:secret});
 test('private checkpoint is authenticated ciphertext, never JD plaintext; wrong key/tampering fail closed',()=>{

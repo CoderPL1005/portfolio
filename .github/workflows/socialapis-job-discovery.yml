@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       confirm_live:
-        description: Authorize up to max_requests HTTP requests, each <=1 deducted credit under current contract
+        description: Authorize exactly one bounded HTTP attempt, at most 1 deducted Free credit; never retry
         type: boolean
         default: false
       confirm_free_no_cash:
@@ -20,9 +20,9 @@ on:
         type: boolean
         default: false
       auto_admin_sync:
-        description: One-request 26 Oct demo; encrypted checkpoints and automatic import-only Admin sync
+        description: Required for V1; encrypted checkpoints and automatic import-only Admin sync
         type: boolean
-        default: false
+        default: true
       sync_only:
         description: Retry only saved observation import; ZERO SocialAPIs requests (requires auto_admin_sync)
         type: boolean
@@ -40,7 +40,7 @@ on:
         type: boolean
         default: false
       query:
-        description: Optional query override; leave empty with policy.planQueries and Portfolio snapshot
+        description: V1 must be blank; the evidence-based Backend planner selects one query
         type: string
         required: false
       start_time:
@@ -52,15 +52,17 @@ on:
         type: string
         default: ''
       max_requests:
-        description: Maximum HTTP requests 1..6, core <=4 plus optional rotating/adaptive
-        type: string
+        description: V1 hard limit - one HTTP request only
+        type: choice
+        options: ['1']
         default: '1'
       max_credits:
-        description: Maximum deducted Free credits 1..6, no paid fallback
-        type: string
+        description: V1 hard limit - one deducted Free credit only
+        type: choice
+        options: ['1']
         default: '1'
       policy:
-        description: JSON legacy profile or portfolioSnapshot plus profile preferences; planQueries=true enables evidence-based planner; target=5
+        description: JSON containing portfolioSnapshot from existing public Portfolio export; Backend preferences and query planning are applied automatically
         type: string
         required: true
 
@@ -73,13 +75,14 @@ concurrency:
 
 jobs:
   discover:
-    if: github.ref == 'refs/heads/main' && ((inputs.confirm_live && inputs.confirm_free_no_cash && (inputs.confirm_artifact_data || inputs.auto_admin_sync)) || (inputs.auto_admin_sync && inputs.sync_only))
+    if: github.ref == 'refs/heads/main' && inputs.auto_admin_sync && ((inputs.confirm_live && inputs.confirm_free_no_cash && (inputs.confirm_artifact_data || inputs.auto_admin_sync)) || (inputs.auto_admin_sync && inputs.sync_only))
     runs-on: ubuntu-latest
     permissions:
       contents: write # Only the explicit fresh mode creates a new immutable activation claim.
       actions: read
     timeout-minutes: 10
     env:
+      DISCOVERY_ONE_REQUEST_V1: 'true'
       DISCOVERY_AUTO_ADMIN_SYNC: ${{ inputs.auto_admin_sync }}
       DISCOVERY_FRESH_SESSION_ID: ${{ inputs.fresh_session_id }}
     defaults:
@@ -96,6 +99,7 @@ jobs:
       - name: Offline unit and configuration tests (no provider secret)
         env:
           DISCOVERY_AUTO_ADMIN_SYNC: 'false'
+          DISCOVERY_ONE_REQUEST_V1: 'false'
         run: npm test
       - name: Validate development safeguards and locate previous checkpoint
         id: checkpoint
@@ -140,6 +144,9 @@ jobs:
       - name: Validate profile and display maximum credit exposure before HTTP
         if: "!inputs.sync_only && inputs.fresh_session_id == ''"
         env:
+          SOCIALAPIS_MAX_31_DAY_REQUESTS: ${{ vars.SOCIALAPIS_MAX_31_DAY_REQUESTS }}
+          SOCIALAPIS_MAX_31_DAY_CREDITS: ${{ vars.SOCIALAPIS_MAX_31_DAY_CREDITS }}
+          SOCIALAPIS_FREE_BALANCE_EVIDENCE: ${{ vars.SOCIALAPIS_FREE_BALANCE_EVIDENCE }}
           DISCOVERY_ADMIN_ORIGIN: https://portfolio-api-forn.onrender.com
           INITIALIZE_STATE: ${{ steps.checkpoint.outputs.initialize }}
           ARTIFACT_RECEIPT: ${{ steps.checkpoint.outputs.artifact_id }}
@@ -228,31 +235,6 @@ jobs:
           api_key: ${{ secrets.SOCIALAPIS_API_KEY }}
           checkpoint_key: ${{ secrets.DISCOVERY_CHECKPOINT_KEY }}
           import_key: ${{ secrets.DISCOVERY_IMPORT_KEY }}
-      - uses: ./.github/actions/socialapis-discovery-page
-        if: '!inputs.sync_only && !inputs.auto_admin_sync'
-        with:
-          slot: '2'
-          api_key: ${{ secrets.SOCIALAPIS_API_KEY }}
-      - uses: ./.github/actions/socialapis-discovery-page
-        if: '!inputs.sync_only && !inputs.auto_admin_sync'
-        with:
-          slot: '3'
-          api_key: ${{ secrets.SOCIALAPIS_API_KEY }}
-      - uses: ./.github/actions/socialapis-discovery-page
-        if: '!inputs.sync_only && !inputs.auto_admin_sync'
-        with:
-          slot: '4'
-          api_key: ${{ secrets.SOCIALAPIS_API_KEY }}
-      - uses: ./.github/actions/socialapis-discovery-page
-        if: '!inputs.sync_only && !inputs.auto_admin_sync'
-        with:
-          slot: '5'
-          api_key: ${{ secrets.SOCIALAPIS_API_KEY }}
-      - uses: ./.github/actions/socialapis-discovery-page
-        if: '!inputs.sync_only && !inputs.auto_admin_sync'
-        with:
-          slot: '6'
-          api_key: ${{ secrets.SOCIALAPIS_API_KEY }}
       - name: Final workflow metrics
         run: node src/cli.mjs --orchestrate summary
       - name: Encrypt final state

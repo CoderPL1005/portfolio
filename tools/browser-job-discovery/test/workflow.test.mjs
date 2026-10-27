@@ -32,7 +32,7 @@ test('offline browser workflow remains manual/read-only/standard and has no prov
   assert.doesNotMatch(text, /secrets\.|upload-artifact|cache@|schedule:|workflow_run:|repository_dispatch:/u);
 });
 
-test('manual workflow explicitly consents to up to six requests, scoped key and no schedule/monthly dispatch cap', () => {
+test('V1 manual workflow has exactly one provider slot, explicit consent and a one-credit ceiling', () => {
   const job = discoveryWorkflow.jobs.discover; const inputs = discoveryWorkflow.on.workflow_dispatch.inputs;
   assert.deepEqual(Object.keys(discoveryWorkflow.on), ['workflow_dispatch']);
   assert.deepEqual(discoveryWorkflow.permissions, { contents: 'read', actions: 'read' });
@@ -55,11 +55,18 @@ test('manual workflow explicitly consents to up to six requests, scoped key and 
   assert.equal(freshInit.env.SOCIALAPIS_MAX_31_DAY_CREDITS,'${{ vars.SOCIALAPIS_MAX_31_DAY_CREDITS }}');
   assert.equal(freshInit.env.SOCIALAPIS_FREE_BALANCE_EVIDENCE,'${{ vars.SOCIALAPIS_FREE_BALANCE_EVIDENCE }}');
   assert.ok(freshInit.if.includes("inputs.fresh_session_id != ''"));
-  for(const step of job.steps.filter(s=>s!==freshInit))assert.doesNotMatch(JSON.stringify(step.env??{}),/SOCIALAPIS_MAX_31_DAY|SOCIALAPIS_FREE_BALANCE_EVIDENCE/u);
+  const legacyInit=job.steps.find(s=>s.run==='node src/cli.mjs --orchestrate init');
+  for(const step of [freshInit,legacyInit]){
+    assert.equal(step.env.SOCIALAPIS_MAX_31_DAY_REQUESTS,'${{ vars.SOCIALAPIS_MAX_31_DAY_REQUESTS }}');
+    assert.equal(step.env.SOCIALAPIS_FREE_BALANCE_EVIDENCE,'${{ vars.SOCIALAPIS_FREE_BALANCE_EVIDENCE }}');
+  }
   assert.equal(job.env?.SOCIALAPIS_API_KEY, undefined); assert.equal(discoveryWorkflow.env?.SOCIALAPIS_API_KEY, undefined);
   assert.equal(job.steps.filter(s => s.env?.SOCIALAPIS_API_KEY).length, 0);
   const calls = job.steps.filter(s => s.uses === './.github/actions/socialapis-discovery-page');
-  assert.deepEqual(calls.map(s => s.with.slot), ['1','2','3','4','5','6']);
+  assert.deepEqual(calls.map(s => s.with.slot), ['1']);
+  assert.equal(job.env.DISCOVERY_ONE_REQUEST_V1,'true');
+  assert.equal(job.steps.find(s=>s.run==='npm test').env.DISCOVERY_ONE_REQUEST_V1,'false');
+  assert.deepEqual(inputs.max_requests.options,['1']);assert.deepEqual(inputs.max_credits.options,['1']);
   assert.ok(calls.every(s => s.with.api_key === '${{ secrets.SOCIALAPIS_API_KEY }}'));
 });
 
@@ -88,7 +95,7 @@ test('real composite action persists claim before HTTP, result before ack and ex
 });
 test('automatic sync demo validates readiness before HTTP, persists ciphertext before import, and exposes no personal Admin token',()=>{
   const job=discoveryWorkflow.jobs.discover,steps=job.steps;
-  assert.equal(discoveryWorkflow.on.workflow_dispatch.inputs.auto_admin_sync.default,false);
+  assert.equal(discoveryWorkflow.on.workflow_dispatch.inputs.auto_admin_sync.default,true);
   assert.equal(discoveryWorkflow.on.workflow_dispatch.inputs.sync_only.default,false);
   const preflight=steps.findIndex(s=>s.run==='node src/cli.mjs --orchestrate sync-ready');
   const first=steps.findIndex(s=>s.uses==='./.github/actions/socialapis-discovery-page');

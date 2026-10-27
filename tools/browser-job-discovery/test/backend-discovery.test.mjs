@@ -26,6 +26,25 @@ const text=(title='Fresher .NET Backend Developer',requirements='Build REST APIs
 const extract=(body,id)=>new JobPostExtractor().extract(raw(body,id));
 const match=(body,p=profile(),preferences=prefs)=>classifyProfile(extract(body),p,preferences).vacancies[0].match;
 
+test('full-stack backend duties are extracted separately from optional qualifications and benefits',()=>{
+  const body='Hiring Fresher Full-stack Developer\nResponsibilities: Build REST APIs using ASP.NET Core\nRequirements: 0–1 years experience\nNice to have: Angular\nBenefits: Training and office lunch\nLocation: Hanoi\nApply: https://example.invalid/jobs/apply\nDeadline: 30/11/2026\nWorkplace: Hybrid\nEmployment: Full-time';
+  const job=classifyProfile(extract(body),profile(),prefs),v=job.vacancies[0];
+  assert.equal(v.match.classification,'TARGET_MATCH');assert.equal(v.backendResponsibilities,'Build REST APIs using ASP.NET Core');
+  assert.ok(!v.requirements.includes('Training'));assert.equal(v.applicationUrl,'https://example.invalid/jobs/apply');
+  assert.equal(v.deadline,'Deadline: 30/11/2026');assert.equal(v.workplaceType,'Workplace: Hybrid');
+  assert.equal(v.employmentType,'Employment: Full-time');assert.equal(v.publishedAt,null);
+  assert.ok(v.optionalTechnologies.includes('Angular'));assert.ok(!v.requiredTechnologies.includes('Angular'));
+  assert.ok(v.requiredTechnologies.includes('ASP.NET Core'));
+  assert.equal(v.extractionConfidence,'EVIDENCE_ONLY_NOT_INDEPENDENTLY_VERIFIED');
+});
+
+test('missing optional facts stay null and footer stack does not qualify another vacancy',()=>{
+  const job=extract('Hiring Fresher Backend Developer\nRequirements: Build REST APIs\nLocation: Hanoi');
+  const v=job.vacancies[0];for(const field of ['applicationUrl','deadline','employmentType','workplaceType'])assert.equal(v[field],null);
+  const multi=extract('Hiring developers\n1. Fresher Java Backend Developer\nRequirements: Java\n2. Fresher React Frontend Developer\nRequirements: React\nBenefits: Training in .NET\nLocation: Hanoi');
+  classifyProfile(multi,profile(),prefs);assert.ok(multi.vacancies.every(v=>v.match.classification!=='TARGET_MATCH'));
+});
+
 // Mirrors the real Portfolio shape: no standalone .NET record. Python/FastAPI
 // have project evidence; the snapshot is synthetic, not private production data.
 function ecosystemSnapshot() {

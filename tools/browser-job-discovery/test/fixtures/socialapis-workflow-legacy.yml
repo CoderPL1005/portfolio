@@ -1,0 +1,269 @@
+name: SocialAPIs job discovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_live:
+        description: Authorize up to max_requests HTTP requests, each <=1 deducted credit under current contract
+        type: boolean
+        default: false
+      confirm_free_no_cash:
+        description: Free credits available, no auto-top-up, GitHub storage available and spending disabled
+        type: boolean
+        default: false
+      confirm_artifact_data:
+        description: Consent to JD/contact text in downloadable artifacts of this PUBLIC repository
+        type: boolean
+        default: false
+      initialize_state:
+        description: FIRST run only - initialize empty discovery state
+        type: boolean
+        default: false
+      auto_admin_sync:
+        description: One-request 26 Oct demo; encrypted checkpoints and automatic import-only Admin sync
+        type: boolean
+        default: false
+      sync_only:
+        description: Retry only saved observation import; ZERO SocialAPIs requests (requires auto_admin_sync)
+        type: boolean
+        default: false
+      fresh_session_id:
+        description: Optional NEW fresh-<unique-id>, isolated candidates/cursor; preserves global audit; burns a new one-shot claim
+        type: string
+        default: ''
+      resume_continuation:
+        description: Resume saved core cursor with matching query/date/profile; never fall back to page 1
+        type: boolean
+        default: false
+      reconcile_terminal_failure:
+        description: Explicitly reconcile a complete known terminal result before starting a NEW logical execution; never refetch the old attempt
+        type: boolean
+        default: false
+      query:
+        description: Optional query override; leave empty with policy.planQueries and Portfolio snapshot
+        type: string
+        required: false
+      start_time:
+        description: Optional publication start date YYYY-MM-DD
+        type: string
+        default: ''
+      end_time:
+        description: Optional publication end date YYYY-MM-DD
+        type: string
+        default: ''
+      max_requests:
+        description: Maximum HTTP requests 1..6, core <=4 plus optional rotating/adaptive
+        type: string
+        default: '1'
+      max_credits:
+        description: Maximum deducted Free credits 1..6, no paid fallback
+        type: string
+        default: '1'
+      policy:
+        description: JSON legacy profile or portfolioSnapshot plus profile preferences; planQueries=true enables evidence-based planner; target=5
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: socialapis-job-discovery-state
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    if: github.ref == 'refs/heads/main' && ((inputs.confirm_live && inputs.confirm_free_no_cash && (inputs.confirm_artifact_data || inputs.auto_admin_sync)) || (inputs.auto_admin_sync && inputs.sync_only))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Only the explicit fresh mode creates a new immutable activation claim.
+      actions: read
+    timeout-minutes: 10
+    env:
+      DISCOVERY_AUTO_ADMIN_SYNC: ${{ inputs.auto_admin_sync }}
+      DISCOVERY_FRESH_SESSION_ID: ${{ inputs.fresh_session_id }}
+    defaults:
+      run:
+        working-directory: tools/browser-job-discovery
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.12.0
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Offline unit and configuration tests (no provider secret)
+        env:
+          DISCOVERY_AUTO_ADMIN_SYNC: 'false'
+        run: npm test
+      - name: Validate development safeguards and locate previous checkpoint
+        id: checkpoint
+        uses: actions/github-script@v7
+        env:
+          INITIALIZE_STATE: ${{ inputs.initialize_state }}
+        with:
+          retries: 0
+          script: |
+            const { pathToFileURL } = await import('node:url');
+            const { locateCheckpoint } = await import(pathToFileURL(`${process.env.GITHUB_WORKSPACE}/tools/browser-job-discovery/src/checkpoint-history.mjs`).href);
+            const found = await locateCheckpoint({ github, context,
+              initialize: process.env.INITIALIZE_STATE === 'true', attempt: process.env.GITHUB_RUN_ATTEMPT,
+              currentRunNumber: process.env.GITHUB_RUN_NUMBER });
+            for (const [key, value] of Object.entries(found)) core.setOutput(key, value);
+      - name: Restore prior-run state (never runner-local cache)
+        if: steps.checkpoint.outputs.initialize != 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.checkpoint.outputs.artifact_name }}
+          run-id: ${{ steps.checkpoint.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: tools/browser-job-discovery/.debug
+      - name: Decrypt restored checkpoint (legacy plaintext remains supported)
+        if: steps.checkpoint.outputs.initialize != 'true'
+        env:
+          DISCOVERY_CHECKPOINT_KEY: ${{ secrets.DISCOVERY_CHECKPOINT_KEY }}
+        run: node src/cli.mjs --orchestrate unseal
+      - name: Verify private checkpoint key and production import readiness before any provider request
+        if: inputs.auto_admin_sync
+        env:
+          DISCOVERY_ADMIN_ORIGIN: https://portfolio-api-forn.onrender.com
+          DISCOVERY_IMPORT_KEY: ${{ secrets.DISCOVERY_IMPORT_KEY }}
+          DISCOVERY_CHECKPOINT_KEY: ${{ secrets.DISCOVERY_CHECKPOINT_KEY }}
+        run: node src/cli.mjs --orchestrate sync-ready
+      - name: Retry only saved Admin synchronization
+        if: inputs.auto_admin_sync && inputs.sync_only
+        env:
+          DISCOVERY_ADMIN_ORIGIN: https://portfolio-api-forn.onrender.com
+          DISCOVERY_IMPORT_KEY: ${{ secrets.DISCOVERY_IMPORT_KEY }}
+        run: node src/cli.mjs --orchestrate sync
+      - name: Validate profile and display maximum credit exposure before HTTP
+        if: "!inputs.sync_only && inputs.fresh_session_id == ''"
+        env:
+          DISCOVERY_ADMIN_ORIGIN: https://portfolio-api-forn.onrender.com
+          INITIALIZE_STATE: ${{ steps.checkpoint.outputs.initialize }}
+          ARTIFACT_RECEIPT: ${{ steps.checkpoint.outputs.artifact_id }}
+          ARTIFACT_NAME: ${{ steps.checkpoint.outputs.artifact_name }}
+          ARTIFACT_RUN_ID: ${{ steps.checkpoint.outputs.run_id }}
+          CLAIM_ARTIFACT_RECEIPT: ${{ steps.checkpoint.outputs.claim_artifact_id }}
+          RECONCILE_TERMINAL_FAILURE: ${{ inputs.reconcile_terminal_failure }}
+          DISCOVERY_QUERY: ${{ inputs.query }}
+          DISCOVERY_START_TIME: ${{ inputs.start_time }}
+          DISCOVERY_END_TIME: ${{ inputs.end_time }}
+          DISCOVERY_MAX_REQUESTS: ${{ inputs.max_requests }}
+          DISCOVERY_MAX_CREDITS: ${{ inputs.max_credits }}
+          DISCOVERY_POLICY: ${{ inputs.policy }}
+          RESUME_CONTINUATION: ${{ inputs.resume_continuation }}
+          DISCOVERY_IMPORT_KEY: ${{ secrets.DISCOVERY_IMPORT_KEY }}
+          DISCOVERY_CHECKPOINT_KEY: ${{ secrets.DISCOVERY_CHECKPOINT_KEY }}
+        run: node src/cli.mjs --orchestrate init
+      - name: Reserve a NEW fresh-session activation, never reuse the old demo claim
+        id: fresh_activation
+        if: inputs.fresh_session_id != '' && !inputs.sync_only
+        uses: actions/github-script@v7
+        env:
+          FRESH_ID: ${{ inputs.fresh_session_id }}
+          FRESH_REQUESTS: ${{ inputs.max_requests }}
+          FRESH_CREDITS: ${{ inputs.max_credits }}
+          FRESH_AUTO_SYNC: ${{ inputs.auto_admin_sync }}
+          FRESH_FREE: ${{ inputs.confirm_free_no_cash }}
+          FRESH_LIVE: ${{ inputs.confirm_live }}
+          FRESH_RESUME: ${{ inputs.resume_continuation }}
+          FRESH_INITIALIZE: ${{ inputs.initialize_state }}
+        with:
+          retries: 0
+          script: |
+            const { pathToFileURL } = await import('node:url');
+            const { freshClaimName } = await import(pathToFileURL(`${process.env.GITHUB_WORKSPACE}/tools/browser-job-discovery/src/fresh-demo.mjs`).href);
+            if (process.env.FRESH_REQUESTS !== '1' || process.env.FRESH_CREDITS !== '1' || process.env.FRESH_AUTO_SYNC !== 'true' ||
+                process.env.FRESH_FREE !== 'true' || process.env.FRESH_LIVE !== 'true' || process.env.FRESH_RESUME === 'true' ||
+                process.env.FRESH_INITIALIZE === 'true') throw new Error('FRESH_CONFIGURATION_INVALID');
+            const tag = freshClaimName(process.env.FRESH_ID);
+            // Atomic create only. An existing tag is a hard stop; never delete/update/reuse it.
+            await github.rest.git.createRef({ ...context.repo, ref: `refs/tags/${tag}`, sha: context.sha });
+            core.setOutput('sha', context.sha);
+      - name: Initialize isolated fresh session from audit evidence only
+        if: inputs.fresh_session_id != '' && !inputs.sync_only
+        env:
+          SOCIALAPIS_MAX_31_DAY_REQUESTS: ${{ vars.SOCIALAPIS_MAX_31_DAY_REQUESTS }}
+          SOCIALAPIS_MAX_31_DAY_CREDITS: ${{ vars.SOCIALAPIS_MAX_31_DAY_CREDITS }}
+          SOCIALAPIS_FREE_BALANCE_EVIDENCE: ${{ vars.SOCIALAPIS_FREE_BALANCE_EVIDENCE }}
+          DISCOVERY_ADMIN_ORIGIN: https://portfolio-api-forn.onrender.com
+          DISCOVERY_FRESH_ACTIVATION_SHA: ${{ steps.fresh_activation.outputs.sha }}
+          ARTIFACT_RECEIPT: ${{ steps.checkpoint.outputs.artifact_id }}
+          ARTIFACT_NAME: ${{ steps.checkpoint.outputs.artifact_name }}
+          ARTIFACT_RUN_ID: ${{ steps.checkpoint.outputs.run_id }}
+          CLAIM_ARTIFACT_RECEIPT: ${{ steps.checkpoint.outputs.claim_artifact_id }}
+          DISCOVERY_QUERY: ${{ inputs.query }}
+          DISCOVERY_START_TIME: ${{ inputs.start_time }}
+          DISCOVERY_END_TIME: ${{ inputs.end_time }}
+          DISCOVERY_MAX_REQUESTS: ${{ inputs.max_requests }}
+          DISCOVERY_MAX_CREDITS: ${{ inputs.max_credits }}
+          DISCOVERY_POLICY: ${{ inputs.policy }}
+          INITIALIZE_STATE: ${{ inputs.initialize_state }}
+          RESUME_CONTINUATION: ${{ inputs.resume_continuation }}
+          SOCIALAPIS_FREE_PLAN_CONFIRMED: ${{ inputs.confirm_free_no_cash }}
+          SOCIALAPIS_NO_CASH_CONFIRMED: ${{ inputs.confirm_free_no_cash }}
+          DISCOVERY_IMPORT_KEY: ${{ secrets.DISCOVERY_IMPORT_KEY }}
+          DISCOVERY_CHECKPOINT_KEY: ${{ secrets.DISCOVERY_CHECKPOINT_KEY }}
+        run: node src/cli.mjs --orchestrate fresh-init
+      - name: Encrypt initialized checkpoint for automatic sync
+        if: inputs.auto_admin_sync && !inputs.sync_only
+        env:
+          DISCOVERY_CHECKPOINT_KEY: ${{ secrets.DISCOVERY_CHECKPOINT_KEY }}
+        run: node src/cli.mjs --orchestrate seal
+      - name: Persist initialized state before any HTTP
+        if: '!inputs.sync_only'
+        uses: actions/upload-artifact@v4
+        with:
+          name: socialapis-discovery-checkpoint
+          path: tools/browser-job-discovery/.debug/socialapis-discovery.json${{ inputs.auto_admin_sync && '.enc' || '' }}
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 90
+      - uses: ./.github/actions/socialapis-discovery-page
+        if: '!inputs.sync_only'
+        with:
+          slot: '1'
+          api_key: ${{ secrets.SOCIALAPIS_API_KEY }}
+          checkpoint_key: ${{ secrets.DISCOVERY_CHECKPOINT_KEY }}
+          import_key: ${{ secrets.DISCOVERY_IMPORT_KEY }}
+      - uses: ./.github/actions/socialapis-discovery-page
+        if: '!inputs.sync_only && !inputs.auto_admin_sync'
+        with:
+          slot: '2'
+          api_key: ${{ secrets.SOCIALAPIS_API_KEY }}
+      - uses: ./.github/actions/socialapis-discovery-page
+        if: '!inputs.sync_only && !inputs.auto_admin_sync'
+        with:
+          slot: '3'
+          api_key: ${{ secrets.SOCIALAPIS_API_KEY }}
+      - uses: ./.github/actions/socialapis-discovery-page
+        if: '!inputs.sync_only && !inputs.auto_admin_sync'
+        with:
+          slot: '4'
+          api_key: ${{ secrets.SOCIALAPIS_API_KEY }}
+      - uses: ./.github/actions/socialapis-discovery-page
+        if: '!inputs.sync_only && !inputs.auto_admin_sync'
+        with:
+          slot: '5'
+          api_key: ${{ secrets.SOCIALAPIS_API_KEY }}
+      - uses: ./.github/actions/socialapis-discovery-page
+        if: '!inputs.sync_only && !inputs.auto_admin_sync'
+        with:
+          slot: '6'
+          api_key: ${{ secrets.SOCIALAPIS_API_KEY }}
+      - name: Final workflow metrics
+        run: node src/cli.mjs --orchestrate summary
+      - name: Encrypt final state
+        if: inputs.auto_admin_sync
+        env:
+          DISCOVERY_CHECKPOINT_KEY: ${{ secrets.DISCOVERY_CHECKPOINT_KEY }}
+        run: node src/cli.mjs --orchestrate seal
+      - uses: actions/upload-artifact@v4
+        with:
+          name: socialapis-discovery-state
+          path: tools/browser-job-discovery/.debug/socialapis-discovery.json${{ inputs.auto_admin_sync && '.enc' || '' }}
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 90

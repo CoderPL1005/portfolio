@@ -41,7 +41,9 @@ export function createFreshSession(previous,input,{sessionId,workflowRunId,activ
     if(!closed||a.actualRequests!==1||!Number.isFinite(a.creditsDeducted)||a.creditsDeducted<0||a.creditsDeducted>1)throw new Stop('FRESH_AUDIT_AMBIGUOUS');
   }
   const budgetAudit=assertFreshBudget(copy.requestLedger,globalBudget,now);
-  const state={evidenceKind:'SOCIALAPIS_DISCOVERY_STATE',jobs:[],requestLedger:copy.requestLedger,
+  const historicalJobs=[...new Map([...(copy.historicalJobs??[]),...copy.jobs].map(job=>[job.sourceIdentity,job])).values()];
+  const state={evidenceKind:'SOCIALAPIS_DISCOVERY_STATE',jobs:[],historicalJobs,discoveryYieldHistory:copy.discoveryYieldHistory??[],
+    discoveryReviews:copy.discoveryReviews??[],requestLedger:copy.requestLedger,
     terminalReconciliations:copy.terminalReconciliations??[],
     freshSession:{version:1,id:sessionId,workflowRunId:String(workflowRunId),claimTag,activationSha,globalBudget:structuredClone(globalBudget),budgetAudit,auditSourceFingerprint:sourceFingerprint,
       sourceArtifactId:proof?.artifactId??null,sourceWorkflowRunId:oldRun.workflowRunId,

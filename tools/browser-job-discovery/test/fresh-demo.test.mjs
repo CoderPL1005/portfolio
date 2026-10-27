@@ -15,7 +15,8 @@ const secret='synthetic-fresh-provider-key';
 function previous(){
   const s=beginExecution({evidenceKind:'SOCIALAPIS_DISCOVERY_STATE',jobs:[]},config,'100');claimPage(s);
   s.jobs=Array.from({length:24},(_,i)=>({provider:'SOCIALAPIS',id:String(8000+i),sourceIdentity:`SOCIALAPIS:${8000+i}`,vacancies:[]}));
-  s.contentRegistry={historical:'untouched'};s.discoveryYieldHistory=[{query:'historical'}];s.discoveryReviews=[{old:true}];
+  s.contentRegistry={historical:'untouched'};s.discoveryYieldHistory=[{query:'historical'}];
+  s.discoveryReviews=[{schemaVersion:1,provider:'SOCIALAPIS',runId:'synthetic-historical-review',query:'historical',pageNumber:1,items:[]}];
   const reasons=Array.from({length:5},(_,index)=>({index,reason:'POST_ID_URL_MISMATCH'}));
   Object.assign(s.requestLedger[0],{actualRequests:1,creditsDeducted:1,outcome:'FAILED_OR_AMBIGUOUS',
     itemStats:{totalItems:5,acceptedItems:0,rejectedItems:5,rejectionReasons:reasons,outcome:'NO_VALID_ITEMS'},
@@ -54,11 +55,12 @@ test('global caps are separate and revalidated before claim and HTTP; missing ev
   await assert.rejects(()=>performPage(t,{receipt:'789',captureReviews:true,transport:()=>assert.fail('NO_NETWORK')}),/BALANCE_UNVERIFIED/u);
 });
 
-test('fresh session clears operational jobs/cursor/yield/dedup, not historical request/credit audit or original evidence',()=>{
+test('fresh session isolates operational jobs/cursor, preserving historical dedup/yield/accounting and original evidence',()=>{
   const old=previous(),bytes=JSON.stringify(old),s=fresh(old);
   assert.equal(JSON.stringify(old),bytes);assert.equal(old.jobs.length,24);
   assert.deepEqual(s.jobs,[]);assert.equal(s.orchestration.plan.pageNumber,1);assert.equal(s.orchestration.plan.cursor,null);
-  assert.equal(s.contentRegistry,undefined);assert.deepEqual(s.discoveryYieldHistory,[]);assert.equal(s.discoveryReviews,undefined);
+  assert.deepEqual(s.historicalJobs,old.jobs); // Private historical dedup evidence survives isolation.
+  assert.equal(s.contentRegistry,undefined);assert.deepEqual(s.discoveryYieldHistory,old.discoveryYieldHistory);assert.deepEqual(s.discoveryReviews,old.discoveryReviews);
   assert.deepEqual(s.requestLedger,old.requestLedger);assert.equal(s.terminalReconciliations.length,1);
   assert.equal(s.freshSession.historicalRequests,1);assert.equal(s.freshSession.historicalCredits,1);
   assert.equal(s.requestLedger[0].rejectionDiagnostics.length,5);assert.equal(s.orchestration.phase,'READY');
@@ -111,10 +113,10 @@ test('one mock HTTP page retains raw/normalized JSON privately, strict dedup and
   const s=fresh(previous()),payload={data:{items:[row(),row(),row('124','https://facebook.com/fixture/posts/pfbidUnverified'),null],page_info:{cursor:'not-for-next-request'}}};
   await execute(s,payload);
   assert.equal(s.jobs.length,1);assert.equal(s.jobs[0].publishedAt,null);
-  assert.equal(s.discoveryReviews.length,1);assert.equal(s.discoveryReviews[0].runId,s.freshSession.id);
-  assert.equal(s.discoveryReviews[0].items.length,4);
-  assert.ok(s.discoveryReviews[0].items[2].sourceWarnings.includes('POST_ID_URL_MISMATCH'));
-  assert.equal(s.discoveryReviews[0].items[3].contentValidity.status,'NEEDS_REVIEW');
+  assert.equal(s.discoveryReviews.length,2);assert.equal(s.discoveryReviews.at(-1).runId,s.freshSession.id);
+  assert.equal(s.discoveryReviews.at(-1).items.length,4);
+  assert.ok(s.discoveryReviews.at(-1).items[2].sourceWarnings.includes('POST_ID_URL_MISMATCH'));
+  assert.equal(s.discoveryReviews.at(-1).items[3].contentValidity.status,'NEEDS_REVIEW');
   assert.deepEqual(s.privateResponseAudit.payload,payload);
   assert.throws(()=>claimPage(s),/PERSISTENCE_CONFIRMATION_REQUIRED/u);
   acknowledgePersistence(s,'999');assert.equal(claimPage(s),false);
@@ -122,10 +124,12 @@ test('one mock HTTP page retains raw/normalized JSON privately, strict dedup and
   const bytes=Buffer.from(JSON.stringify(s)),encrypted=encryptCheckpoint(bytes,'a'.repeat(64));
   assert.equal(encrypted.includes(Buffer.from(payload.data.items[0].basic_info.post_text)),false);
   assert.deepEqual(decryptCheckpoint(encrypted,'a'.repeat(64)),bytes);
-  let syncCalls=0;const sync=async(_url,opts)=>{syncCalls++;assert.deepEqual(JSON.parse(opts.body),s.discoveryReviews[0]);return Response.json({data:{inserted:syncCalls===1?4:0,unchanged:syncCalls===1?0:4}});};
+  let syncCalls=0;const seen=new Set();const sync=async(_url,opts)=>{syncCalls++;const bundle=JSON.parse(opts.body);
+    assert.deepEqual(bundle,s.discoveryReviews.find(b=>b.runId===bundle.runId));const first=!seen.has(bundle.runId);seen.add(bundle.runId);
+    return Response.json({data:{inserted:first?bundle.items.length:0,unchanged:first?0:bundle.items.length}});};
   const c=syncConfiguration({DISCOVERY_ADMIN_ORIGIN:'https://portfolio-api-forn.onrender.com',DISCOVERY_IMPORT_KEY:'b'.repeat(64)});
   const ledger=structuredClone(s.requestLedger);await syncReviews(s,c,sync);await syncReviews(s,c,sync);
-  assert.equal(syncCalls,2);assert.deepEqual(s.requestLedger,ledger);
+  assert.equal(syncCalls,4);assert.deepEqual(s.requestLedger,ledger);
 });
 test('timeout is ambiguous, no retry/new session; unknown charge retains private response but cannot resume',async()=>{
   const s=fresh(previous());await execute(s,null,async()=>{throw Error('SENSITIVE_NETWORK_ERROR');});
@@ -146,7 +150,7 @@ test('fresh metadata never labels a later ordinary run as the old session, and f
   }finally{if(old===undefined)delete process.env.SOCIALAPIS_API_KEY;else process.env.SOCIALAPIS_API_KEY=old;}
   acknowledgePersistence(s,'999');const audit=structuredClone(s.privateResponseAudit);
   beginExecution(s,config,'201');await execute(s,{data:{items:[row('125')],page_info:{cursor:null}}});
-  assert.equal(s.discoveryReviews.at(-1).runId,'201');assert.equal(s.discoveryReviews[0].runId,s.freshSession.id);
+  assert.equal(s.discoveryReviews.at(-1).runId,'201');assert.equal(s.discoveryReviews[1].runId,s.freshSession.id);
   assert.deepEqual(s.privateResponseAudit,audit);
 });
 test('fresh CLI initializes offline through existing entrypoint, no missing-state initialization or network',()=>{
@@ -174,7 +178,7 @@ test('optional private real capture replays through fresh normalization/review w
     const root=fileURLToPath(new URL('../',import.meta.url)),path=join(root,'.debug','socialapis-response.json');
     const bytes=readFileSync(path),payload=JSON.parse(bytes),s=fresh(previous());
     assert.equal(payload.data.items.length,8);await execute(s,payload);
-    assert.equal(s.discoveryReviews[0].items.length,8);assert.deepEqual(readFileSync(path),bytes);
+    assert.equal(s.discoveryReviews.at(-1).items.length,8);assert.deepEqual(readFileSync(path),bytes);
     assert.equal(s.privateResponseAudit.payload.data.items.length,8);
     assert.equal(s.requestLedger.at(-1).actualRequests,1);assert.equal(s.jobs.length,8);
     assert.ok(s.jobs.every(j=>j.publishedAt===null));
@@ -182,7 +186,7 @@ test('optional private real capture replays through fresh normalization/review w
       const output=resolve(process.env.DISCOVERY_FRESH_CONTRACT_OUTPUT),local=relative(join(root,'.debug'),output);
       assert.ok(local&&!local.startsWith('..')&&!isAbsolute(local));
       assert.notEqual(output,resolve(path));
-      writeFileSync(output,JSON.stringify(s.discoveryReviews[0]),{flag:'wx',mode:0o600});
+      writeFileSync(output,JSON.stringify(s.discoveryReviews.at(-1)),{flag:'wx',mode:0o600});
     }
   });
 test('fresh manual workflow atomically burns NEW claim once; unchanged old marker and no dispatch/retry/delete operations',async()=>{

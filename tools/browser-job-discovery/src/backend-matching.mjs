@@ -48,7 +48,8 @@ export function classifyBackendProfile(job, profile, input) {
     const mandatory = (v.requirements ?? '').split(/\n|;|[.!?](?=\s)/u).filter(line => !optional.test(line)).join('\n');
     const title = v.title ?? '';
     const titleStack = title.split(/[();]|[.!?](?=\s)/u).filter(clause => !optional.test(clause)).join('\n');
-    const roleText = [titleStack,mandatory].join('\n');
+    const duties=(v.backendResponsibilities??'').split(/\n|;/u).filter(line=>!optional.test(line)).join('\n');
+    const roleText = [titleStack,mandatory,duties].join('\n');
     const body = [v.evidence.body,job.postSections?.introduction,job.postSections?.sharedFooter].filter(Boolean).join('\n');
     const requested = requestedTechnologies(roleText,allowed);
     // Directional compatibility: specific ASP.NET Core usage supports generic
@@ -66,7 +67,8 @@ export function classifyBackendProfile(job, profile, input) {
     const competing = knownStack.filter(name => !supporting.test(name) && technologyPattern(name).test(stackSearchText(titleStack)) && !allowed.some(a => technologyPattern(name).test(a)));
     const incompatibleMandatory = explicitStack.filter(name => !allowed.some(a => technologyIdentity(a) === technologyIdentity(name)));
     const isFullStack = fullstack.test(title);
-    const backendResponsibilities = backend.test(mandatory) || /(?:build|develop|implement|xây dựng|phát triển|thiết kế).*(?:rest\s*apis?|server|api|backend|back-end)/iu.test(mandatory);
+    const responsibilities=[mandatory,duties].join('\n');
+    const backendResponsibilities = backend.test(responsibilities) || /(?:build|develop|implement|xây dựng|phát triển|thiết kế).*(?:rest\s*apis?|server|api|backend|back-end)/iu.test(responsibilities);
     const hasBackend = isFullStack ? prefs.allowFullStack && backendResponsibilities : backend.test(title) ||
       /developer|engineer|lập trình/iu.test(title) && !frontend.test(title) && backendResponsibilities;
     const isClosed = closed.test(body);

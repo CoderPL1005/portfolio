@@ -3,13 +3,15 @@ import {readFileSync} from 'node:fs';
 import {parse} from 'yaml';
 export const source=readFileSync(new URL('../../../../.github/workflows/socialapis-job-discovery.yml',import.meta.url),'utf8');
 const definitions=parse(source).jobs.discover.steps;
+const legacySource=readFileSync(new URL('./socialapis-workflow-legacy.yml',import.meta.url),'utf8');
 export function run(id,options={}){
   return {id,run_number:id,status:'completed',run_attempt:1,path:'.github/workflows/socialapis-job-discovery.yml',
     event:'workflow_dispatch',head_branch:'main',head_sha:'a'.repeat(40),head_repository:{full_name:'fixture/fixture'},
     conclusion:'failure',...options};
 }
 export function artifact(id,name,options={}){return {id,name,expired:false,...options};}
-export function jobsFor(record,mode='PRE_REQUEST_CHECKPOINT',startedSlots=[1]){
+export function jobsFor(record,mode='PRE_REQUEST_CHECKPOINT',startedSlots=[1],workflowSource=source){
+  const definitions=parse(workflowSource).jobs.discover.steps;
   const barrier=definitions.findIndex(s=>s.run==='npm test');
   const checkpoint=definitions.findIndex(s=>s.name==='Persist initialized state before any HTTP');
   const failureName={ZERO_PROVIDER_INIT_FAILURE:'Initialize isolated fresh session from audit evidence only',
@@ -31,16 +33,19 @@ export function jobsFor(record,mode='PRE_REQUEST_CHECKPOINT',startedSlots=[1]){
 export function historyFixture({runs=[run(200),run(100)],artifacts={100:[artifact(11,'socialapis-discovery-state')]},
   modes={},startedSlots={},sources={},jobRows={},artifactRows=artifacts,runTotal=runs.length,privateRepo=false,failMethod}={}){
   const calls=[];
+  // Multi-slot historical cases must use the actual reviewed six-slot source,
+  // not invent nonexistent provider steps in the new one-slot workflow.
+  const defaultSource=Object.values(startedSlots).some(slots=>slots.some(slot=>slot>1))?legacySource:source;
   const paginate=(rows,params)=>rows.slice((params.page-1)*params.per_page,params.page*params.per_page);
   const call=(name,params)=>{calls.push({name,...params});if(failMethod===name)throw Error('PRIVATE_RESPONSE_MUST_NOT_LEAK');};
   const github={rest:{repos:{
     get:async params=>{call('repository',params);return {data:{private:privateRepo}};},
-    getContent:async params=>{call('source',params);return {data:{encoding:'base64',content:Buffer.from(sources[params.ref]??source).toString('base64'),size:source.length}};}
+    getContent:async params=>{call('source',params);const selected=sources[params.ref]??defaultSource;return {data:{encoding:'base64',content:Buffer.from(selected).toString('base64'),size:Buffer.byteLength(selected)}};}
   },actions:{
     listWorkflowRuns:async params=>{call('runs',params);return {data:{total_count:runTotal,workflow_runs:paginate(runs,params)}};},
     listWorkflowRunArtifacts:async params=>{call('artifacts',params);const rows=artifactRows[params.run_id]??[];return {data:{total_count:rows.length,artifacts:paginate(rows,params)}};},
     listJobsForWorkflowRun:async params=>{call('jobs',params);const record=runs.find(r=>r.id===params.run_id);
-      const rows=jobRows[params.run_id]??jobsFor(record,modes[record.id],startedSlots[record.id]);
+      const rows=jobRows[params.run_id]??jobsFor(record,modes[record.id],startedSlots[record.id],sources[record.head_sha]??defaultSource);
       return {data:{total_count:rows.length,jobs:paginate(rows,params)}};}
   }}};
   return {github,calls,context:{repo:{owner:'fixture',repo:'fixture'},runId:200},currentRunNumber:200};

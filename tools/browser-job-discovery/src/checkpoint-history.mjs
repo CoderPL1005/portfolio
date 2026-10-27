@@ -8,7 +8,7 @@ const BARRIER = 'Offline unit and configuration tests (no provider secret)';
 export const HISTORY_LIMITS = Object.freeze({ pages: 5, runs: 100, perPage: 20, metadataPages: 3, metadataPerPage: 100 });
 // Reviewed workflow source only. Unknown revisions must not become evidence of
 // zero HTTP merely because their steps use familiar display names. These
-// sources are reviewed to have NO SocialAPIs execution path outside the six
+// sources are reviewed to have NO SocialAPIs execution path outside their bounded
 // PROVIDER_ACTION steps (init/sync/readiness/claim-tag scripts do not call it).
 export const REVIEWED_WORKFLOW_HASHES = new Set([
   'b444787eaa084d3a23672b305f0228b7ffd7c60cc58bc3ab4055fc11467477cf', // 7e057ca (legacy)
@@ -18,6 +18,7 @@ export const REVIEWED_WORKFLOW_HASHES = new Set([
   '065d445876a9be0b368c42ac8e4167b9ba0e5515c561cdda8ba08f92362094d2', // bounded traversal
   '34ad103f94b45dc8059b0669393864373b47a8dd347f0e3c3a99d96ce1440fd7', // fresh one-shot, same provider barriers
   '61def54a11f9b622015b1ffe1ccf276b81e14969918ed19fb791f6527010fad1', // fresh global accounting + operator balance evidence
+  'ff568988e93dc3b835c402cb290917cabc5241b95a06c9c41b01b6ff267c1ade', // V1: one provider slot, encrypted automatic sync, global budget in both init modes
 ]);
 export const workflowHash = text => createHash('sha256').update(text.replace(/\r\n/gu, '\n')).digest('hex');
 const positive = value => /^[1-9]\d*$/u.test(String(value ?? ''));
@@ -55,8 +56,9 @@ async function executionEvidence(github, repo, run) {
   const barrier=definitions.findIndex(s=>s.name===BARRIER);
   const failed=steps.findIndex(s=>s.conclusion==='failure');
   const providers=steps.filter((_s,i)=>definitions[i].uses===PROVIDER_ACTION);
-  if(barrier<0 || providers.length!==6)fail('CHECKPOINT_WORKFLOW_SOURCE_UNVERIFIED');
+  if(barrier<0 || ![1,6].includes(providers.length))fail('CHECKPOINT_WORKFLOW_SOURCE_UNVERIFIED');
   return {
+    providerSlots:providers.length,
     // Only a hard failure at/before the approved offline barrier, with ALL later
     // steps explicitly skipped, proves this workflow could not reach HTTP.
     preHttp:run.conclusion==='failure' && failed>=0 && failed<=barrier &&
@@ -77,7 +79,7 @@ function selectArtifact(artifacts,run,evidence){
   if(related.length && evidence.preHttp)fail('CHECKPOINT_CONTRADICTORY_EXECUTION_EVIDENCE');
   const pages=related.filter(a=>a.name.startsWith('socialapis-page-')).map(a=>{
     const m=a.name.match(/^socialapis-page-([1-9]\d*)-([1-6])-(claim|result)$/u);
-    if(!m || m[1]!==String(run.id))fail('CHECKPOINT_ARTIFACT_PROVENANCE_INVALID');
+    if(!m || m[1]!==String(run.id) || Number(m[2])>evidence.providerSlots)fail('CHECKPOINT_ARTIFACT_PROVENANCE_INVALID');
     return {...a,slot:Number(m[2]),kind:m[3]};
   });
   if(evidence.zeroProvider && pages.length)fail('CHECKPOINT_CONTRADICTORY_EXECUTION_EVIDENCE');

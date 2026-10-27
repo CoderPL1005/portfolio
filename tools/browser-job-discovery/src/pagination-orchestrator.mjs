@@ -148,6 +148,8 @@ export function beginExecution(state, input, workflowRunId, { productionGuard, r
   if (config.mode === 'production' && (typeof productionGuard !== 'function' || productionGuard() !== true)) throw new Stop('MONTHLY_FREE_BALANCE_UNVERIFIED_SCHEDULE_DISABLED');
   if (!Array.isArray(state.jobs) || state.jobs.some(j => j.provider !== 'SOCIALAPIS' || !j.id || j.sourceIdentity !== `SOCIALAPIS:${j.id}`) ||
       new Set(state.jobs.map(j => j.sourceIdentity)).size !== state.jobs.length) throw new Stop('INVALID_REPLAY_STORE');
+  if(state.historicalJobs!==undefined && (!Array.isArray(state.historicalJobs)||state.historicalJobs.some(j=>j.provider!=='SOCIALAPIS'||!j.id||j.sourceIdentity!==`SOCIALAPIS:${j.id}`)||
+    new Set(state.historicalJobs.map(j=>j.sourceIdentity)).size!==state.historicalJobs.length))throw new Stop('INVALID_REPLAY_STORE');
   const previous = state.orchestration;
   if (['CLAIMED', 'IN_FLIGHT'].includes(previous?.phase)) throw new Stop('AMBIGUOUS_PAGE_NO_AUTOMATIC_REFETCH');
   if (['COMPLETED_UNCONFIRMED','TERMINAL_UNCONFIRMED'].includes(previous?.phase)) throw new Stop('PERSISTENCE_CONFIRMATION_REQUIRED');
@@ -172,8 +174,8 @@ export function beginExecution(state, input, workflowRunId, { productionGuard, r
   state.discoveryYieldHistory ??= [];
   state.orchestration = { schemaVersion: 3, logicalExecutionId: `${workflowRunId}-${randomBytes(8).toString('hex')}`,
     config, configHash: digest(JSON.stringify(config)), workflowRunId, phase: 'READY', status: 'RUNNING', stopReason: null, continuation: null,
-    initialIdentities: state.jobs.map(j => j.sourceIdentity), pages: [], newRelevantKeys: [], relevantKeys: [],
-    opportunityMode: 'CONTENT_V1', initialOpportunityIds:[...new Set(state.jobs.flatMap(opportunityIds))], newRelevantOpportunityIds:[],
+    initialIdentities: [...new Set([...(state.historicalJobs??[]),...state.jobs].map(j => j.sourceIdentity))], pages: [], newRelevantKeys: [], relevantKeys: [],
+    opportunityMode: 'CONTENT_V1', initialOpportunityIds:[...new Set([...(state.historicalJobs??[]),...state.jobs].flatMap(opportunityIds))], newRelevantOpportunityIds:[],
     plan: { allocation: 'CORE', query: config.query, pageNumber: 1, cursor: null, cursorHash: null },
     usedCursorHashes: [], usedQueries: [config.query], storage: { inserted: 0, updated: 0, unchanged: 0 } };
   // Derived recommendations are evaluated under THIS policy, never reused from
@@ -191,7 +193,13 @@ export function workflowMetrics(state) {
   const scopedOpportunities=new Set(pages.flatMap(p=>p.opportunityIds??[]));
   const logicalAttempts = [...run.pages]; const pending = state.requestLedger[run.attemptIndex];
   if (pending && ['CLAIMED','IN_FLIGHT','TERMINAL_UNCONFIRMED','TERMINAL_RECONCILED'].includes(run.phase) && !run.pages.some(p => p.workflowRunId === pending.workflowRunId && p.query === pending.query && p.allocation === pending.allocation && p.pageNumber === pending.pageNumber)) logicalAttempts.push(pending);
+  const observations=(state.discoveryReviews??[]).filter(b=>b.runId===(state.freshSession?.workflowRunId===run.workflowRunId?state.freshSession.id:run.workflowRunId)).flatMap(b=>b.items);
   return { workflowRunId: run.workflowRunId, logicalExecutionId: run.logicalExecutionId,
+    querySelection:state.oneRequestExecution?.workflowRunId===run.workflowRunId?state.oneRequestExecution.querySelection:null,
+    reviewSummary:{observations:observations.length,withVacancies:observations.filter(i=>i.extracted?.vacancies?.length).length,
+      classifications:Object.fromEntries(['TARGET_MATCH','FALLBACK_MATCH','POTENTIAL_MATCH','INSUFFICIENT_DATA','NOT_MATCHED'].map(c=>[c,observations.filter(i=>i.targetMatching.status===c).length])),
+      freshnessUnknown:observations.filter(i=>i.publishedAt===null).length},
+    adminSync:state.adminSync??null,
     status: run.status, continuationAvailable: run.status!=='STOPPED_TERMINAL' && !!run.continuation && !['CLAIMED','IN_FLIGHT'].includes(run.phase),
     profileVersion:run.config.profile.technologyProfile?.version??'legacy-operator-profile',
     profileFingerprint:run.config.profile.technologyProfile?.fingerprint??fingerprint(run.config.profile),
@@ -245,6 +253,10 @@ export function claimPage(state, now = new Date(), { productionGuard } = {}) {
   if (['CLAIMED', 'IN_FLIGHT'].includes(run.phase)) throw new Stop('AMBIGUOUS_PAGE_NO_AUTOMATIC_REFETCH');
   if (['COMPLETED_UNCONFIRMED','TERMINAL_UNCONFIRMED'].includes(run.phase)) throw new Stop('PERSISTENCE_CONFIRMATION_REQUIRED');
   if (run.stopReason) return false;
+  if(state.oneRequestExecution?.workflowRunId===run.workflowRunId){
+    if(config.maxRequests!==1||config.maxCredits!==1)throw new Stop('V1_ONE_REQUEST_CONFIGURATION_REQUIRED');
+    assertFreshBudget(state.requestLedger,state.oneRequestExecution.globalBudget,now);
+  }
   if(state.freshSession?.workflowRunId===run.workflowRunId)assertFreshBudget(state.requestLedger,state.freshSession.globalBudget,now);
   if (config.mode === 'production') {
     if (state.requestLedger.filter(p => p.day === calendarDay(now)).length >= 6) { stopExecution(run, 'DAILY_REQUEST_BUDGET'); return false; }
@@ -323,6 +335,11 @@ export async function performPage(state, { transport, now = new Date(), receipt,
   const attempt = state.requestLedger[run.attemptIndex];
   if (attempt.day !== calendarDay(now)) throw new Stop('RESERVATION_DAY_CHANGED_NO_REQUEST');
   if(fresh)assertFreshBudget(state.requestLedger.slice(0,run.attemptIndex),state.freshSession.globalBudget,now);
+  if(state.oneRequestExecution?.workflowRunId===run.workflowRunId){
+    if(!captureReviews||run.config.maxRequests!==1||run.config.maxCredits!==1||run.plan.pageNumber!==1||run.plan.cursor!==null)
+      throw new Stop('V1_ONE_REQUEST_CONFIGURATION_REQUIRED');
+    assertFreshBudget(state.requestLedger.slice(0,run.attemptIndex),state.oneRequestExecution.globalBudget,now);
+  }
   run.phase = 'IN_FLIGHT'; // Synchronous in-process claim; durable file is still CLAIMED.
   attempt.claimArtifactReceipt=String(receipt);
   if(claimArtifactName!==undefined)attempt.claimArtifactName=claimArtifactName;
@@ -347,7 +364,7 @@ export async function performPage(state, { transport, now = new Date(), receipt,
       jobs.push(classifyProfile(new JobPostExtractor().extract(structuredClone(raw)), run.config.profile, run.config.targetJobPreferences));
     }
     const stored = new Map(state.jobs.map(j => [j.sourceIdentity, j]));
-    const historicalJobs=[...stored.values()]; const priorOpportunities=new Set(historicalJobs.flatMap(opportunityIds));
+    const historicalJobs=[...(state.historicalJobs??[]),...stored.values()]; const priorOpportunities=new Set(historicalJobs.flatMap(opportunityIds));
     const relevantOpportunities=new Set(jobs.flatMap(j=>opportunityIds(j).filter((_id,index)=>j.vacancies[index].match.classification==='TARGET_MATCH')));
     const responseOpportunities=new Set(jobs.flatMap(opportunityIds));
     const newOpportunities=[...responseOpportunities].filter(id=>!priorOpportunities.has(id));

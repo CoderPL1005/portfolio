@@ -147,3 +147,18 @@ export function resolveDiscoveryPolicy(policy, query, history=[], {resume=false,
     rotatingQuery:policy.rotatingQuery ?? (policy.planQueries ? fixed ? previous?.config.rotatingQuery : candidates[1]?.query : null),
     adaptiveQueries:policy.adaptiveQueries ?? (policy.planQueries ? fixed ? previous?.config.adaptiveQueries : candidates.slice(2,targetPreferences?18:undefined).map(c=>c.query) : []) };
 }
+
+// V1 uses the existing Portfolio boundary, never a fabricated technology profile.
+// One selected query does not imply coverage of the other planned stacks.
+export function resolveOneRequestPolicy(policy, preferences, history=[]) {
+  if(!policy?.portfolioSnapshot || policy.mode && policy.mode!=='development')throw new Stop('V1_PORTFOLIO_SNAPSHOT_REQUIRED');
+  const resolved=resolveDiscoveryPolicy({...policy,targetJobPreferences:preferences,planQueries:true},undefined,history);
+  const candidates=planFacebookQueries(resolved.profile.technologyProfile,history,resolved.targetJobPreferences);
+  const selected=candidates[0];
+  if(!selected)throw new Stop('V1_QUERY_PLAN_EMPTY');
+  return {...resolved,rotatingQuery:null,adaptiveQueries:[],maxRequests:1,maxCredits:1,
+    querySelection:{query:selected.query,rankingBasis:selected.rankingBasis,score:selected.score,
+      evidenceLevel:selected.evidenceLevel,profileFingerprint:selected.profileFingerprint,
+      targetPreferencesFingerprint:selected.targetPreferencesFingerprint,candidateCount:candidates.length,
+      coverage:'ONE_QUERY_ONLY_NOT_ENTIRE_POOL'}};
+}
