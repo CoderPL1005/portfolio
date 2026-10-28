@@ -1,6 +1,8 @@
 import {createHash} from 'node:crypto';
 import {inflateRawSync} from 'node:zlib';
 import {decryptCheckpoint, resolveReviewSyncScope} from './admin-sync.mjs';
+import {JobPostExtractor} from './core.mjs';
+import {RECOVERY_PRODUCERS,recoveryProducerEvidence} from './recovery-source.mjs';
 
 // Deliberately fixed diagnostic target; no operator-supplied URL or execution ID.
 const TARGET = Object.freeze({artifactId:12725991974,uploader:'40488676716',logical:'40482593764',repo:'CoderPL1005/portfolio'});
@@ -409,7 +411,57 @@ function historyComplete(h){
       r.providerSteps.every(s=>s.status==='completed'&&s.conclusion==='skipped'));
 }
 
-export function compareAcknowledgedCheckpoints(input){
+// These are source-byte contracts, not version-marker guesses. The nullable
+// overlay replay below is supported only by the reviewed, unchanged extractor.
+const recoveryBlocked=reason=>({status:'BLOCKED',reason});
+const recoveryViolation=()=>({status:'INTEGRITY_VIOLATION',reason:'CONTENT_INTEGRITY_VIOLATION'});
+
+// Pure internal evidence port. Its caller must obtain records/source bytes from
+// the authenticated read boundary, never from workflow inputs or a boolean.
+export function validateRecoveryContent({snapshot:s,producerEvidence:e}={}){
+  try{
+    const producer=object(e)&&Object.hasOwn(RECOVERY_PRODUCERS,e.headSha)?RECOVERY_PRODUCERS[e.headSha]:null;
+    if(!producer||e.source!=='AUTHENTICATED_GITHUB_GET'||e.repository?.id!==1349147313||e.repository.full_name!==TARGET.repo||
+      id(e.runId)!==TARGET.logical||!equal(e.sourceDigests,producer.digests))return recoveryBlocked('PRODUCER_SOURCE_UNVERIFIED');
+    if(!object(s)||!Array.isArray(s.jobs)||!Array.isArray(s.discoveryReviews)||
+      s.historicalJobs!==undefined&&!Array.isArray(s.historicalJobs)||!Array.isArray(e.records))return recoveryBlocked('CONTENT_CONTRACT_UNPROVABLE');
+    const bindings=new Map();
+    for(const r of e.records){
+      if(!object(r)||typeof r.sourceIdentity!=='string'||bindings.has(r.sourceIdentity)||
+        !Object.values(COMPARISON_PINS).some(v=>id(v)===id(r.originArtifactId)))return recoveryBlocked('CONTENT_BINDING_UNVERIFIED');
+      bindings.set(r.sourceIdentity,r);
+    }
+    for(const collection of [s.jobs,s.historicalJobs??[]]){
+      const identities=new Set();
+      for(const j of collection){
+        if(!object(j)||j.provider!=='SOCIALAPIS'||j.source!=='FACEBOOK'||typeof j.id!=='string'||!j.id||j.sourceIdentity!==`SOCIALAPIS:${j.id}`||
+          identities.has(j.sourceIdentity)||typeof j.body!=='string'||j.body.length>24_000||
+          JOB_CONTENT_FIELDS.slice(0,4).some(k=>j[k]!==null&&typeof j[k]!=='string'))return recoveryViolation();
+        identities.add(j.sourceIdentity);
+        const r=bindings.get(j.sourceIdentity);
+        if(!r||!object(r.input)||!object(r.projection))return recoveryBlocked('CONTENT_BINDING_UNVERIFIED');
+        const p=r.input;
+        if(p.provider!=='SOCIALAPIS'||p.source!=='FACEBOOK'||p.id!==j.id||p.body!==j.body||typeof p.body!=='string')return recoveryViolation();
+        // Both reviewed SocialAPIs adapters supply exactly four blank fields.
+        // No formula search or coercion of missing pre-extraction fields.
+        if(JOB_CONTENT_FIELDS.slice(0,4).some(k=>p[k]!==''))return recoveryBlocked('HASH_PREIMAGE_UNPROVABLE');
+        const hash=sha(JOB_CONTENT_FIELDS.map(k=>p[k]).join('\n').replace(/\r\n?/gu,'\n').normalize('NFC').trim());
+        if(r.inputHash!==hash||j.contentHash!==hash||!equal(r.projection,j))return recoveryViolation();
+        const replay=producer.kind==='VACANCY'?new JobPostExtractor().extract(p):p;
+        for(const k of JOB_CONTENT_FIELDS)if(!equal(j[k],replay[k]))return recoveryViolation();
+        if(producer.kind==='VACANCY'&&j.extractionVersion!==replay.extractionVersion)return recoveryViolation();
+      }
+    }
+    // Observation hashes retain their exact raw UTF-8 contract, independently
+    // of the historical job hash formula and nullable derived fields.
+    const observations=diagnoseContentValidation({jobs:[],historicalJobs:[],discoveryReviews:s.discoveryReviews},'result');
+    if(observations.valid!==true)return recoveryViolation();
+    return {status:'VERIFIED',reason:'CONTENT_CONTRACT_VERIFIED'};
+  }catch{return recoveryBlocked('CONTENT_CONTRACT_UNPROVABLE');}
+}
+
+export function compareAcknowledgedCheckpoints(input){return compareCheckpointEvidence(input);}
+function compareCheckpointEvidence(input,recovery=false){
   try{
     const {snapshots,artifacts,repository,archiveDigests,plaintextDigests,history}=input??{};
     if(!Array.isArray(artifacts)||artifacts.length!==4||new Set(artifacts.map(a=>a?.id)).size!==4||
@@ -419,7 +471,9 @@ export function compareAcknowledgedCheckpoints(input){
       return comparisonFailure('ARTIFACT_DIGEST_MISMATCH');
     if(!object(snapshots)||Object.keys(snapshots).length!==4||!COMPARISON_ROLES.every(role=>comparisonShape(snapshots[role])))return comparisonFailure('CHECKPOINT_SCHEMA_INVALID');
     const {claim,result,originalFinal,syncFinal}=snapshots,completed=SNAPSHOT_ROLES.map(role=>snapshots[role]);
-    const contentValidation=combinedContentValidation(snapshots);
+    const contentValidation=recovery?
+      contentSummary(SNAPSHOT_ROLES.filter(role=>validateRecoveryContent({snapshot:snapshots[role],producerEvidence:input.producerEvidence}).status!=='VERIFIED').length,[]):
+      combinedContentValidation(snapshots);
     const checks={sameAttempt:COMPARISON_ROLES.every(role=>attemptBinding(snapshots[role],result,role==='claim')),
       historicalLedgerEqual:completed.every(s=>equal(protectedLedger(s),protectedLedger(result)))&&
         equal(claim.requestLedger.slice(0,9),result.requestLedger.slice(0,9)),
@@ -500,7 +554,27 @@ export function compareAcknowledgedCheckpoints(input){
   }catch{return comparisonFailure('CHECKPOINT_SCHEMA_INVALID');}
 }
 
+// Selection returns metadata, not repaired state. Every non-content invariant
+// is re-evaluated by the same comparator; a supplied eligibility flag is unused.
+export function selectAcknowledgedRecoverySource(input){
+  const prior=compareAcknowledgedCheckpoints(input);
+  if(!prior.ok)return recoveryBlocked(prior.errorCode);
+  for(const role of SNAPSHOT_ROLES){
+    const content=validateRecoveryContent({snapshot:input.snapshots[role],producerEvidence:input.producerEvidence});
+    if(content.status!=='VERIFIED')return recoveryBlocked(content.reason);
+  }
+  const comparison=compareCheckpointEvidence(input,true);
+  if(!comparison.ok)return recoveryBlocked(comparison.errorCode);
+  if(comparison.eligibility!=='YES')return recoveryBlocked(comparison.reasons[0]??'RECOVERY_EVIDENCE_INCOMPLETE');
+  return {status:'SELECTED',artifactId:COMPARISON_PINS.originalFinal,workflowRunId:TARGET.logical,
+    stateFingerprint:fingerprint(input.snapshots.originalFinal),reason:'ACKNOWLEDGED_FINAL_VERIFIED'};
+}
+
 export async function inspectAcknowledgedCheckpoints({github,key}={}){
+  return readAcknowledgedEvidence({github,key},input=>compareAcknowledgedCheckpoints(input));
+}
+async function readAcknowledgedEvidence({github,key},consume){
+  let finalCiphertext;
   try{
     if(typeof key!=='string'||!/^[a-f0-9]{64}$/iu.test(key))return comparisonFailure('CHECKPOINT_CREDENTIALS_UNAVAILABLE');
     const repository=await github.getRepository(),artifacts=[];
@@ -519,19 +593,21 @@ export async function inspectAcknowledgedCheckpoints({github,key}={}){
         if(archiveDigest!==artifacts[index].digest)return comparisonFailure('ARTIFACT_DIGEST_MISMATCH');
         try{ciphertext=ciphertextFromZip(archive);}catch{return comparisonFailure('CHECKPOINT_ARCHIVE_INVALID');}
         try{plaintext=decryptCheckpoint(ciphertext,key);}catch{return comparisonFailure('CHECKPOINT_DECRYPTION_FAILED');}
+        if(role==='originalFinal')finalCiphertext=Buffer.from(ciphertext);
         plaintextDigests[role]=sha(plaintext);
         try{snapshots[role]=JSON.parse(plaintext.toString('utf8'));}catch{return comparisonFailure('CHECKPOINT_SCHEMA_INVALID');}
       }finally{plaintext?.fill(0);ciphertext?.fill(0);}
     }
     let history;
     try{history=await github.getHistoryEvidence();}catch{history=undefined;}
-    return compareAcknowledgedCheckpoints({repository,artifacts,snapshots,archiveDigests,plaintextDigests,history});
+    return await consume({repository,artifacts,snapshots,archiveDigests,plaintextDigests,history},finalCiphertext);
   }catch{return comparisonFailure('CHECKPOINT_INSPECTION_FAILED');}
+  finally{finalCiphertext?.fill(0);}
 }
 
 // Builds evidence only from bounded authenticated REST reads. The pure comparator
 // consumes this internal port, never a workflow-provided assertion of authority.
-async function laterHistory(api){
+async function laterHistory(api,currentRunId){
   const {REVIEWED_WORKFLOW_HASHES,workflowHash,HISTORY_LIMITS}=await import('./checkpoint-history.mjs');
   const {parse}=await import('yaml');
   const query='/actions/workflows/socialapis-job-discovery.yml/runs?branch=main&event=workflow_dispatch&per_page=20&page=';
@@ -552,10 +628,13 @@ async function laterHistory(api){
     throw new Error('HISTORY_UNVERIFIED');
   };
   const before=await list(),records=[];
+  if(currentRunId&&!before.runs.some(r=>id(r.id)===currentRunId))throw new Error('HISTORY_UNVERIFIED');
   for(const run of before.runs){
+    const restoring=currentRunId&&id(run.id)===currentRunId;
     if(run.path!=='.github/workflows/socialapis-job-discovery.yml'||run.head_branch!=='main'||run.event!=='workflow_dispatch'||
-      run.head_repository?.full_name!==TARGET.repo||run.run_attempt!==1||run.status!=='completed'||
-      !['success','failure'].includes(run.conclusion)||!/^[a-f0-9]{40}$/u.test(run.head_sha??''))throw new Error('HISTORY_UNVERIFIED');
+      run.head_repository?.full_name!==TARGET.repo||run.run_attempt!==1||
+      (restoring?run.status!=='in_progress'||run.conclusion!==null:run.status!=='completed'||!['success','failure'].includes(run.conclusion))||
+      !/^[a-f0-9]{40}$/u.test(run.head_sha??''))throw new Error('HISTORY_UNVERIFIED');
     const file=await api.json(`/contents/.github/workflows/socialapis-job-discovery.yml?ref=${run.head_sha}`,128*1024);
     if(file.encoding!=='base64'||typeof file.content!=='string'||file.content.length>90_000)throw new Error('HISTORY_UNVERIFIED');
     const source=Buffer.from(file.content,'base64').toString('utf8');
@@ -571,10 +650,11 @@ async function laterHistory(api){
     }
     if(jobs.length!==1)throw new Error('HISTORY_UNVERIFIED');
     const job=jobs[0];
-    if(job.name!=='discover'||job.run_id!==run.id||job.run_attempt!==1||job.status!=='completed'||job.conclusion!==run.conclusion||!Array.isArray(job.steps))throw new Error('HISTORY_UNVERIFIED');
+    if(job.name!=='discover'||job.run_id!==run.id||job.run_attempt!==1||job.status!==run.status||job.conclusion!==run.conclusion||!Array.isArray(job.steps))throw new Error('HISTORY_UNVERIFIED');
     const steps=job.steps.filter(s=>s.name!=='Set up job'&&s.name!=='Complete job'&&!s.name.startsWith('Post '));
-    if(steps.length!==defs.length||steps.some((s,i)=>s.status!=='completed'||!Number.isSafeInteger(s.number)||i>0&&s.number<=steps[i-1].number||
+    if((restoring?steps.length>defs.length:steps.length!==defs.length)||steps.some((s,i)=>(!restoring&&s.status!=='completed')||!Number.isSafeInteger(s.number)||i>0&&s.number<=steps[i-1].number||
       s.name!==(defs[i].name??`Run ${defs[i].uses??defs[i].run.split('\n')[0]}`)))throw new Error('HISTORY_UNVERIFIED');
+    if(restoring){await activeRestoreRun(run,defs,steps);continue;}
     const providerSteps=steps.filter((_s,i)=>defs[i].uses==='./.github/actions/socialapis-discovery-page').map(s=>({status:s.status,conclusion:s.conclusion}));
     if(![1,6].includes(providerSteps.length))throw new Error('HISTORY_UNVERIFIED');
     if(String(run.id)!==TARGET.logical)records.push({id:String(run.id),status:run.status,runAttempt:run.run_attempt,conclusion:run.conclusion,providerSteps});
@@ -593,4 +673,45 @@ export async function inspectAcknowledgedFromGitHub({token,key,transport=fetch,h
       getArtifact:artifactId=>api.json(`/actions/artifacts/${artifactId}`),downloadArtifact:api.downloadArtifact,
       getHistoryEvidence:()=>historyReader?historyReader():laterHistory(api)}});
   }catch{return comparisonFailure('CHECKPOINT_INSPECTION_FAILED');}
+}
+
+// The active Discovery run is excluded ONLY while its reviewed decrypt step is
+// actually running before every provider action in the reviewed serial source.
+// GitHub may omit future steps; the complete current prefix proves execution
+// has not reached them. This exemption never applies to historical runs.
+// Completed/unknown/provider-started runs never acquire this exemption.
+async function activeRestoreRun(run,defs,steps){
+  const current=steps.findIndex(s=>s.status==='in_progress');
+  const restore=defs.findIndex(s=>s.name==='Decrypt restored checkpoint (legacy plaintext remains supported)');
+  const providerIndexes=defs.flatMap((s,i)=>s.uses==='./.github/actions/socialapis-discovery-page'?[i]:[]);
+  if(run.status!=='in_progress'||current!==restore||restore<0||!providerIndexes.length||
+    steps.filter(s=>s.status==='in_progress').length!==1||
+    steps.slice(0,restore).some(s=>s.status!=='completed'||!['success','skipped'].includes(s.conclusion))||
+    providerIndexes.some(i=>i<=restore||i<steps.length&&(!['queued','pending'].includes(steps[i].status)||steps[i].conclusion!==null||steps[i].started_at)))
+    throw new Error('HISTORY_UNVERIFIED');
+}
+
+// Internal restore port: callers must never log this result's encrypted bytes.
+// It returns the ORIGINAL ciphertext only after proof-based source selection.
+export async function restoreAcknowledgedCheckpoints({github,key,restoredState,artifactId}={}){
+  if(!Object.values(COMPARISON_PINS).some(v=>id(v)===id(artifactId)))return recoveryBlocked('RESTORED_SOURCE_UNVERIFIED');
+  const outcome=await readAcknowledgedEvidence({github,key},async(input,ciphertext)=>{
+    const role=COMPARISON_ROLES.find(r=>id(COMPARISON_PINS[r])===id(artifactId));
+    if(!equal(restoredState,input.snapshots[role]))return recoveryBlocked('RESTORED_SOURCE_MISMATCH');
+    input.producerEvidence=await github.getProducerEvidence(input);
+    const selection=selectAcknowledgedRecoverySource(input);
+    if(selection.status!=='SELECTED')return selection;
+    return {...selection,encryptedCheckpoint:Buffer.from(ciphertext)};
+  });
+  return outcome.ok===false?recoveryBlocked(outcome.errorCode):outcome;
+}
+export async function restoreAcknowledgedFromGitHub({token,key,restoredState,artifactId,currentRunId,transport=fetch}={}){
+  try{
+    if(typeof token!=='string'||!token||typeof key!=='string'||!/^[a-f0-9]{64}$/iu.test(key)||!id(currentRunId))
+      return recoveryBlocked('CHECKPOINT_CREDENTIALS_UNAVAILABLE');
+    const api=githubReads(token,transport,AbortSignal.timeout(240_000));
+    return await restoreAcknowledgedCheckpoints({key,restoredState,artifactId,github:{
+      getRepository:()=>api.json(''),getArtifact:v=>api.json(`/actions/artifacts/${v}`),downloadArtifact:api.downloadArtifact,
+      getHistoryEvidence:()=>laterHistory(api,id(currentRunId)),getProducerEvidence:input=>recoveryProducerEvidence(api,input)}});
+  }catch{return recoveryBlocked('RECOVERY_SOURCE_UNVERIFIED');}
 }

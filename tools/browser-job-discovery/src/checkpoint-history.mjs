@@ -21,6 +21,7 @@ export const REVIEWED_WORKFLOW_HASHES = new Set([
   'ff568988e93dc3b835c402cb290917cabc5241b95a06c9c41b01b6ff267c1ade', // V1: one provider slot, encrypted automatic sync, global budget in both init modes
   '2423e8ae2c413fcd68bc8709f281768d6e40b6b8d4f47f8c3af51cddc0d2fb78', // Manual V1: same one-slot/claim/sync boundaries, no balance JSON or rolling quota
   '87fb4aa1a0e1e29539f0eae121b298784432fc83023889790d410253ee2ea771', // Run-scoped Admin sync/recovery only; unchanged single provider boundary
+  'e032d3ccbecb17f5b1920cd362f03e1905c9dadeee155c0e1d2d440bc336ea28', // Reviewed pinned read-only restore selection before Fresh; same provider slot
 ]);
 export const workflowHash = text => createHash('sha256').update(text.replace(/\r\n/gu, '\n')).digest('hex');
 const positive = value => /^[1-9]\d*$/u.test(String(value ?? ''));

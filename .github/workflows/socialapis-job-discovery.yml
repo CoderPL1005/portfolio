@@ -131,9 +131,13 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: tools/browser-job-discovery/.debug
       - name: Decrypt restored checkpoint (legacy plaintext remains supported)
+        id: restored_checkpoint
         if: steps.checkpoint.outputs.initialize != 'true'
         env:
           DISCOVERY_CHECKPOINT_KEY: ${{ secrets.DISCOVERY_CHECKPOINT_KEY }}
+          DISCOVERY_RECOVER_ACKNOWLEDGED: ${{ inputs.fresh_session_id != '' && !inputs.sync_only }}
+          GH_READ_TOKEN: ${{ github.token }}
+          ARTIFACT_RECEIPT: ${{ steps.checkpoint.outputs.artifact_id }}
         run: node src/cli.mjs --orchestrate unseal
       - name: Verify private checkpoint key and production import readiness before any provider request
         if: inputs.auto_admin_sync
@@ -200,9 +204,9 @@ jobs:
         env:
           DISCOVERY_ADMIN_ORIGIN: https://portfolio-api-forn.onrender.com
           DISCOVERY_FRESH_ACTIVATION_SHA: ${{ steps.fresh_activation.outputs.sha }}
-          ARTIFACT_RECEIPT: ${{ steps.checkpoint.outputs.artifact_id }}
-          ARTIFACT_NAME: ${{ steps.checkpoint.outputs.artifact_name }}
-          ARTIFACT_RUN_ID: ${{ steps.checkpoint.outputs.run_id }}
+          ARTIFACT_RECEIPT: ${{ steps.restored_checkpoint.outputs.artifact_id || steps.checkpoint.outputs.artifact_id }}
+          ARTIFACT_NAME: ${{ steps.restored_checkpoint.outputs.artifact_name || steps.checkpoint.outputs.artifact_name }}
+          ARTIFACT_RUN_ID: ${{ steps.restored_checkpoint.outputs.run_id || steps.checkpoint.outputs.run_id }}
           CLAIM_ARTIFACT_RECEIPT: ${{ steps.checkpoint.outputs.claim_artifact_id }}
           DISCOVERY_QUERY: ${{ inputs.query }}
           DISCOVERY_START_TIME: ${{ inputs.start_time }}

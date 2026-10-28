@@ -78,11 +78,30 @@ export async function paginationCli(args) {
     await writeFile(output+'.enc',encryptCheckpoint(await readFile(output),process.env.DISCOVERY_CHECKPOINT_KEY),{mode:0o600});return;
   }
   if(action==='unseal'){
+    const authenticatedRecovery=process.env.DISCOVERY_RECOVER_ACKNOWLEDGED==='true'&&['12725991974','12723771007'].includes(process.env.ARTIFACT_RECEIPT);
     try{
       if((await stat(output+'.enc')).size>12*1024*1024+32)throw new Stop('CHECKPOINT_CAPACITY_REACHED');
-      const plaintext=decryptCheckpoint(await readFile(output+'.enc'),process.env.DISCOVERY_CHECKPOINT_KEY);
-      await writeFile(output,plaintext,{mode:0o600});
-    }catch(error){if(error.code!=='ENOENT')throw error;else await stat(output);} // Explicit legacy plaintext compatibility, never initialize here.
+      let plaintext=decryptCheckpoint(await readFile(output+'.enc'),process.env.DISCOVERY_CHECKPOINT_KEY);
+      try{
+        if(authenticatedRecovery){
+          const {restoreAcknowledgedFromGitHub}=await import('./checkpoint-inspection.mjs');
+          const selected=await restoreAcknowledgedFromGitHub({token:process.env.GH_READ_TOKEN,key:process.env.DISCOVERY_CHECKPOINT_KEY,
+            restoredState:JSON.parse(plaintext.toString('utf8')),artifactId:process.env.ARTIFACT_RECEIPT,currentRunId:process.env.GITHUB_RUN_ID});
+          if(selected.status!=='SELECTED')throw new Stop(selected.reason);
+          try{
+            plaintext.fill(0);plaintext=decryptCheckpoint(selected.encryptedCheckpoint,process.env.DISCOVERY_CHECKPOINT_KEY);
+            if(hash(JSON.stringify(JSON.parse(plaintext.toString('utf8'))))!==selected.stateFingerprint)throw new Stop('RECOVERY_SOURCE_FINGERPRINT_MISMATCH');
+            // Only the runner-local restored copy changes. Historical artifacts,
+            // original ciphertext and accounting are never rewritten remotely.
+            await writeFile(output+'.enc',selected.encryptedCheckpoint,{mode:0o600});
+            if(process.env.GITHUB_OUTPUT)await appendFile(process.env.GITHUB_OUTPUT,
+              `artifact_id=${selected.artifactId}\nrun_id=${selected.workflowRunId}\nartifact_name=socialapis-discovery-state\n`);
+          }finally{selected.encryptedCheckpoint.fill(0);}
+          console.log(JSON.stringify({recovery:'ACKNOWLEDGED_FINAL_VERIFIED',artifactId:selected.artifactId,providerRequests:0}));
+        }
+        await writeFile(output,plaintext,{mode:0o600});
+      }finally{plaintext.fill(0);}
+    }catch(error){if(error.code!=='ENOENT'||authenticatedRecovery)throw error;else await stat(output);} // Explicit legacy plaintext compatibility, never initialize here.
     return;
   }
   let state;
