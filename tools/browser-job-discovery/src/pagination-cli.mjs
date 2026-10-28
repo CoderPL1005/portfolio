@@ -62,6 +62,34 @@ function dateSelection(name,policyValue) {
 export async function paginationCli(args) {
   const action = args[args.indexOf('--orchestrate') + 1];
   if (args.length !== 2 || !['init','fresh-init', 'claim', 'page', 'ack', 'summary','reconcile','seal','unseal','sync-ready','sync'].includes(action)) throw new Stop('INVALID_ORCHESTRATION_COMMAND');
+  if(process.env.DISCOVERY_VERIFY_ONLY==='true'){
+    // Read-only early return: no mutable state loader, legacy plaintext fallback,
+    // output-file writes, GITHUB_OUTPUT, ACK, synchronization or provider path.
+    const {restoreAcknowledgedFromGitHub,readinessReport}=await import('./checkpoint-inspection.mjs');
+    let plaintext,ciphertext,selected;
+    try{
+      if(action!=='unseal')throw new Stop('VERIFY_ONLY_UNSEAL_REQUIRED');
+      const directory=fileURLToPath(new URL('../.debug/',import.meta.url));
+      const output=resolve(process.env.DISCOVERY_STATE_FILE??resolve(directory,'socialapis-discovery.json'));
+      const local=relative(directory,output);
+      if(!local||local.startsWith('..')||isAbsolute(local)||!output.endsWith('.json')||
+        output===resolve(directory,'socialapis-response.json'))throw new Stop('PRIVATE_REPLAY_OUTPUT_REQUIRED');
+      if(!['12723661427','12723771007','12723681280','12725991974'].includes(process.env.ARTIFACT_RECEIPT))
+        throw new Stop('RESTORED_SOURCE_UNVERIFIED');
+      if(!process.env.GH_READ_TOKEN||!/^[a-f0-9]{64}$/iu.test(process.env.DISCOVERY_CHECKPOINT_KEY??''))
+        throw new Stop('CHECKPOINT_CREDENTIALS_UNAVAILABLE');
+      if((await stat(output+'.enc')).size>12*1024*1024+32)throw new Stop('CHECKPOINT_CAPACITY_REACHED');
+      ciphertext=await readFile(output+'.enc');
+      plaintext=decryptCheckpoint(ciphertext,process.env.DISCOVERY_CHECKPOINT_KEY);
+      selected=await restoreAcknowledgedFromGitHub({token:process.env.GH_READ_TOKEN,key:process.env.DISCOVERY_CHECKPOINT_KEY,
+        restoredState:JSON.parse(plaintext.toString('utf8')),artifactId:process.env.ARTIFACT_RECEIPT,currentRunId:process.env.GITHUB_RUN_ID});
+      console.log(JSON.stringify(readinessReport(selected)));
+    }catch(error){
+      // Only fixed, allowlisted Stop codes; never arbitrary errors/file paths.
+      console.log(JSON.stringify(readinessReport({status:'BLOCKED',reason:error instanceof Stop?error.code:undefined})));
+    }finally{plaintext?.fill(0);ciphertext?.fill(0);selected?.encryptedCheckpoint?.fill(0);}
+    return;
+  }
   if(action==='reconcile')return reconcileLocalResult();
   if(action==='sync-ready'){
     // No provider request: validate import-only credentials and readiness first.

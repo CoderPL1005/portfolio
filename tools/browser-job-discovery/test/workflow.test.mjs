@@ -98,7 +98,7 @@ test('automatic sync demo validates readiness before HTTP, persists ciphertext b
   const first=steps.findIndex(s=>s.uses==='./.github/actions/socialapis-discovery-page');
   assert.ok(preflight<first);assert.equal(steps[preflight].env.SOCIALAPIS_API_KEY,undefined);
   const calls=steps.filter(s=>s.uses==='./.github/actions/socialapis-discovery-page');
-  assert.equal(calls[0].if,'!inputs.sync_only');
+  assert.equal(calls[0].if,'!inputs.verify_only && !inputs.sync_only');
   assert.ok(calls.slice(1).every(s=>s.if==='!inputs.sync_only && !inputs.auto_admin_sync'));
   const parts=action.runs.steps;
   const result=parts.findIndex(s=>s.id==='result'),sync=parts.findIndex(s=>s.run==='node src/cli.mjs --orchestrate sync');
@@ -109,7 +109,7 @@ test('automatic sync demo validates readiness before HTTP, persists ciphertext b
     assert.match(step.with.path,/\.enc/u);assert.doesNotMatch(step.with.path,/\*|review-final|response\.json/u);
   }
   const replay=steps.find(s=>s.name==='Retry only saved Admin synchronization');
-  assert.equal(replay.if,'inputs.auto_admin_sync && inputs.sync_only');assert.equal(replay.env.SOCIALAPIS_API_KEY,undefined);
+  assert.equal(replay.if,'!inputs.verify_only && inputs.auto_admin_sync && inputs.sync_only');assert.equal(replay.env.SOCIALAPIS_API_KEY,undefined);
   assert.equal(replay.env.DISCOVERY_SYNC_ONLY,'true');assert.equal(replay.env.DISCOVERY_SYNC_WORKFLOW_RUN_ID,'${{ inputs.sync_workflow_run_id }}');
   assert.equal(parts[sync].env.DISCOVERY_SYNC_ONLY,'false');assert.equal(parts[sync].env.DISCOVERY_SYNC_WORKFLOW_RUN_ID,'');
   assert.doesNotMatch(workflowText+actionText,/ADMIN_TOKEN|ADMIN_PASSWORD|schedule:/u);

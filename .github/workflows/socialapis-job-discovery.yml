@@ -3,6 +3,10 @@ name: SocialAPIs job discovery
 on:
   workflow_dispatch:
     inputs:
+      verify_only:
+        description: Read-only authenticated checkpoint readiness; zero provider requests, no sync or activation
+        type: boolean
+        default: false
       confirm_live:
         description: Authorize exactly one bounded HTTP attempt, at most 1 deducted Free credit; never retry
         type: boolean
@@ -79,7 +83,7 @@ concurrency:
 
 jobs:
   discover:
-    if: github.ref == 'refs/heads/main' && inputs.auto_admin_sync && ((inputs.confirm_live && inputs.confirm_free_no_cash && (inputs.confirm_artifact_data || inputs.auto_admin_sync)) || (inputs.auto_admin_sync && inputs.sync_only))
+    if: github.ref == 'refs/heads/main' && (inputs.verify_only || (inputs.auto_admin_sync && ((inputs.confirm_live && inputs.confirm_free_no_cash && (inputs.confirm_artifact_data || inputs.auto_admin_sync)) || (inputs.auto_admin_sync && inputs.sync_only))))
     runs-on: ubuntu-latest
     permissions:
       contents: write # Only the explicit fresh mode creates a new immutable activation claim.
@@ -88,7 +92,7 @@ jobs:
     env:
       DISCOVERY_ONE_REQUEST_V1: 'true'
       DISCOVERY_AUTO_ADMIN_SYNC: ${{ inputs.auto_admin_sync }}
-      DISCOVERY_FRESH_SESSION_ID: ${{ inputs.fresh_session_id }}
+      DISCOVERY_FRESH_SESSION_ID: ${{ !inputs.verify_only && inputs.fresh_session_id || '' }}
     defaults:
       run:
         working-directory: tools/browser-job-discovery
@@ -109,21 +113,28 @@ jobs:
         id: checkpoint
         uses: actions/github-script@v7
         env:
-          INITIALIZE_STATE: ${{ inputs.initialize_state }}
-          SYNC_ONLY: ${{ inputs.sync_only }}
-          SYNC_WORKFLOW_RUN_ID: ${{ inputs.sync_workflow_run_id }}
+          INITIALIZE_STATE: ${{ !inputs.verify_only && inputs.initialize_state }}
+          SYNC_ONLY: ${{ !inputs.verify_only && inputs.sync_only }}
+          SYNC_WORKFLOW_RUN_ID: ${{ !inputs.verify_only && inputs.sync_workflow_run_id || '' }}
+          VERIFY_ONLY: ${{ inputs.verify_only }}
         with:
           retries: 0
           script: |
             if (process.env.SYNC_WORKFLOW_RUN_ID && process.env.SYNC_ONLY !== 'true') throw new Error('HISTORICAL_SYNC_REQUIRES_SYNC_ONLY');
             const { pathToFileURL } = await import('node:url');
             const { locateCheckpoint } = await import(pathToFileURL(`${process.env.GITHUB_WORKSPACE}/tools/browser-job-discovery/src/checkpoint-history.mjs`).href);
-            const found = await locateCheckpoint({ github, context,
-              initialize: process.env.INITIALIZE_STATE === 'true', attempt: process.env.GITHUB_RUN_ATTEMPT,
-              currentRunNumber: process.env.GITHUB_RUN_NUMBER });
-            for (const [key, value] of Object.entries(found)) core.setOutput(key, value);
+            try {
+              const found = await locateCheckpoint({ github, context,
+                initialize: process.env.INITIALIZE_STATE === 'true', attempt: process.env.GITHUB_RUN_ATTEMPT,
+                currentRunNumber: process.env.GITHUB_RUN_NUMBER });
+              for (const [key, value] of Object.entries(found)) core.setOutput(key, value);
+            } catch (error) {
+              if (process.env.VERIFY_ONLY !== 'true') throw error;
+              core.setOutput('blocked', 'true');
+              core.info(JSON.stringify({status:'BLOCKED',reason:'CHECKPOINT_LOCATOR_UNVERIFIED',selectedArtifactId:null,providerRequests:0}));
+            }
       - name: Restore prior-run state (never runner-local cache)
-        if: steps.checkpoint.outputs.initialize != 'true'
+        if: steps.checkpoint.outputs.initialize != 'true' && steps.checkpoint.outputs.blocked != 'true'
         uses: actions/download-artifact@v4
         with:
           name: ${{ steps.checkpoint.outputs.artifact_name }}
@@ -132,22 +143,23 @@ jobs:
           path: tools/browser-job-discovery/.debug
       - name: Decrypt restored checkpoint (legacy plaintext remains supported)
         id: restored_checkpoint
-        if: steps.checkpoint.outputs.initialize != 'true'
+        if: steps.checkpoint.outputs.initialize != 'true' && steps.checkpoint.outputs.blocked != 'true'
         env:
           DISCOVERY_CHECKPOINT_KEY: ${{ secrets.DISCOVERY_CHECKPOINT_KEY }}
-          DISCOVERY_RECOVER_ACKNOWLEDGED: ${{ inputs.fresh_session_id != '' && !inputs.sync_only }}
+          DISCOVERY_RECOVER_ACKNOWLEDGED: ${{ inputs.verify_only || (inputs.fresh_session_id != '' && !inputs.sync_only) }}
+          DISCOVERY_VERIFY_ONLY: ${{ inputs.verify_only }}
           GH_READ_TOKEN: ${{ github.token }}
           ARTIFACT_RECEIPT: ${{ steps.checkpoint.outputs.artifact_id }}
         run: node src/cli.mjs --orchestrate unseal
       - name: Verify private checkpoint key and production import readiness before any provider request
-        if: inputs.auto_admin_sync
+        if: '!inputs.verify_only && inputs.auto_admin_sync'
         env:
           DISCOVERY_ADMIN_ORIGIN: https://portfolio-api-forn.onrender.com
           DISCOVERY_IMPORT_KEY: ${{ secrets.DISCOVERY_IMPORT_KEY }}
           DISCOVERY_CHECKPOINT_KEY: ${{ secrets.DISCOVERY_CHECKPOINT_KEY }}
         run: node src/cli.mjs --orchestrate sync-ready
       - name: Retry only saved Admin synchronization
-        if: inputs.auto_admin_sync && inputs.sync_only
+        if: '!inputs.verify_only && inputs.auto_admin_sync && inputs.sync_only'
         env:
           DISCOVERY_SYNC_ONLY: 'true'
           DISCOVERY_SYNC_WORKFLOW_RUN_ID: ${{ inputs.sync_workflow_run_id }}
@@ -155,7 +167,7 @@ jobs:
           DISCOVERY_IMPORT_KEY: ${{ secrets.DISCOVERY_IMPORT_KEY }}
         run: node src/cli.mjs --orchestrate sync
       - name: Validate profile and display maximum credit exposure before HTTP
-        if: "!inputs.sync_only && inputs.fresh_session_id == ''"
+        if: "!inputs.verify_only && !inputs.sync_only && inputs.fresh_session_id == ''"
         env:
           DISCOVERY_ADMIN_ORIGIN: https://portfolio-api-forn.onrender.com
           INITIALIZE_STATE: ${{ steps.checkpoint.outputs.initialize }}
@@ -176,7 +188,7 @@ jobs:
         run: node src/cli.mjs --orchestrate init
       - name: Reserve a NEW fresh-session activation, never reuse the old demo claim
         id: fresh_activation
-        if: inputs.fresh_session_id != '' && !inputs.sync_only
+        if: "!inputs.verify_only && inputs.fresh_session_id != '' && !inputs.sync_only"
         uses: actions/github-script@v7
         env:
           FRESH_ID: ${{ inputs.fresh_session_id }}
@@ -200,7 +212,7 @@ jobs:
             await github.rest.git.createRef({ ...context.repo, ref: `refs/tags/${tag}`, sha: context.sha });
             core.setOutput('sha', context.sha);
       - name: Initialize isolated fresh session from audit evidence only
-        if: inputs.fresh_session_id != '' && !inputs.sync_only
+        if: "!inputs.verify_only && inputs.fresh_session_id != '' && !inputs.sync_only"
         env:
           DISCOVERY_ADMIN_ORIGIN: https://portfolio-api-forn.onrender.com
           DISCOVERY_FRESH_ACTIVATION_SHA: ${{ steps.fresh_activation.outputs.sha }}
@@ -222,12 +234,12 @@ jobs:
           DISCOVERY_CHECKPOINT_KEY: ${{ secrets.DISCOVERY_CHECKPOINT_KEY }}
         run: node src/cli.mjs --orchestrate fresh-init
       - name: Encrypt initialized checkpoint for automatic sync
-        if: inputs.auto_admin_sync && !inputs.sync_only
+        if: '!inputs.verify_only && inputs.auto_admin_sync && !inputs.sync_only'
         env:
           DISCOVERY_CHECKPOINT_KEY: ${{ secrets.DISCOVERY_CHECKPOINT_KEY }}
         run: node src/cli.mjs --orchestrate seal
       - name: Persist initialized state before any HTTP
-        if: '!inputs.sync_only'
+        if: '!inputs.verify_only && !inputs.sync_only'
         uses: actions/upload-artifact@v4
         with:
           name: socialapis-discovery-checkpoint
@@ -236,20 +248,22 @@ jobs:
           if-no-files-found: error
           retention-days: 90
       - uses: ./.github/actions/socialapis-discovery-page
-        if: '!inputs.sync_only'
+        if: '!inputs.verify_only && !inputs.sync_only'
         with:
           slot: '1'
           api_key: ${{ secrets.SOCIALAPIS_API_KEY }}
           checkpoint_key: ${{ secrets.DISCOVERY_CHECKPOINT_KEY }}
           import_key: ${{ secrets.DISCOVERY_IMPORT_KEY }}
       - name: Final workflow metrics
+        if: '!inputs.verify_only'
         run: node src/cli.mjs --orchestrate summary
       - name: Encrypt final state
-        if: inputs.auto_admin_sync
+        if: '!inputs.verify_only && inputs.auto_admin_sync'
         env:
           DISCOVERY_CHECKPOINT_KEY: ${{ secrets.DISCOVERY_CHECKPOINT_KEY }}
         run: node src/cli.mjs --orchestrate seal
       - uses: actions/upload-artifact@v4
+        if: '!inputs.verify_only'
         with:
           name: socialapis-discovery-state
           path: tools/browser-job-discovery/.debug/socialapis-discovery.json${{ inputs.auto_admin_sync && '.enc' || '' }}

@@ -416,6 +416,25 @@ function historyComplete(h){
 const recoveryBlocked=reason=>({status:'BLOCKED',reason});
 const recoveryViolation=()=>({status:'INTEGRITY_VIOLATION',reason:'CONTENT_INTEGRITY_VIOLATION'});
 
+// Presentation only: never serialize the internal restore result/ciphertext.
+// Unknown strings, including exception messages, cannot become public reasons.
+const READINESS_REASONS=new Set([
+  'CHECKPOINT_CREDENTIALS_UNAVAILABLE','CHECKPOINT_CAPACITY_REACHED','CHECKPOINT_ARCHIVE_INVALID',
+  'CHECKPOINT_DECRYPTION_FAILED','CHECKPOINT_SCHEMA_INVALID','CHECKPOINT_INSPECTION_FAILED',
+  'ARTIFACT_PROVENANCE_INVALID','ARTIFACT_DIGEST_MISMATCH','RESTORED_SOURCE_UNVERIFIED','RESTORED_SOURCE_MISMATCH',
+  'PRODUCER_SOURCE_UNVERIFIED','CONTENT_CONTRACT_UNPROVABLE','CONTENT_BINDING_UNVERIFIED','HASH_PREIMAGE_UNPROVABLE',
+  'CONTENT_INTEGRITY_VIOLATION','PROTECTED_STATE_OR_ACK_INVARIANT_FAILED','CLAIM_BINDING_MISSING',
+  'LATER_HISTORY_NOT_VERIFIED','UNCLASSIFIED_SNAPSHOT_DIFFERENCES','RECOVERY_EVIDENCE_INCOMPLETE',
+  'OUTPUT_LIMIT_EXCEEDED','RECOVERY_SOURCE_UNVERIFIED','RECOVERY_SOURCE_FINGERPRINT_MISMATCH',
+  'VERIFY_ONLY_UNSEAL_REQUIRED','PRIVATE_REPLAY_OUTPUT_REQUIRED'
+]);
+export function readinessReport(selection){
+  const ready=selection?.status==='SELECTED'&&selection.reason==='ACKNOWLEDGED_FINAL_VERIFIED'&&selection.artifactId===COMPARISON_PINS.originalFinal;
+  return {status:ready?'READY':'BLOCKED',reason:ready?'ACKNOWLEDGED_FINAL_VERIFIED':
+    READINESS_REASONS.has(selection?.reason)?selection.reason:'RECOVERY_SOURCE_UNVERIFIED',
+    selectedArtifactId:ready?COMPARISON_PINS.originalFinal:null,providerRequests:0};
+}
+
 // Pure internal evidence port. Its caller must obtain records/source bytes from
 // the authenticated read boundary, never from workflow inputs or a boolean.
 export function validateRecoveryContent({snapshot:s,producerEvidence:e}={}){
