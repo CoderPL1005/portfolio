@@ -96,6 +96,11 @@ public sealed class JobAnalysisConcurrencyPostgresTests
               verification_status varchar(30) NOT NULL, selection_status varchar(30) NOT NULL, expires_at timestamptz NULL,
               verified_at timestamptz NULL, archived_at timestamptz NULL, notes text NULL, version integer NOT NULL DEFAULT 1,
               created_at timestamptz NOT NULL, updated_at timestamptz NOT NULL);
+            CREATE TABLE discovery_execution_vacancies (
+              "Id" uuid PRIMARY KEY,
+              "RawJobPostingId" uuid NULL REFERENCES raw_job_postings(id),
+              "JobPostingId" uuid NULL REFERENCES job_postings(id));
+
             CREATE TABLE job_applications (
               id uuid PRIMARY KEY, job_posting_id uuid NOT NULL, status varchar(30) NOT NULL, channel varchar(30) NULL,
               application_email varchar(255) NULL, application_url text NULL, external_application_id varchar(500) NULL,

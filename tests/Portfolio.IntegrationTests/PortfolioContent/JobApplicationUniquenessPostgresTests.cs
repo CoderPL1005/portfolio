@@ -178,6 +178,11 @@ public sealed class JobApplicationUniquenessPostgresTests
             CREATE INDEX ix_raw_job_postings_company_title_fingerprint ON raw_job_postings(company_title_fingerprint);
             CREATE INDEX ix_raw_job_postings_ingestion_status_created_at ON raw_job_postings(ingestion_status, created_at DESC);
             CREATE INDEX ix_raw_job_postings_job_posting_id ON raw_job_postings(job_posting_id);
+            CREATE TABLE discovery_execution_vacancies (
+              "Id" uuid PRIMARY KEY,
+              "RawJobPostingId" uuid NULL REFERENCES raw_job_postings(id),
+              "JobPostingId" uuid NULL REFERENCES job_postings(id));
+
             CREATE TABLE job_applications (
               id uuid PRIMARY KEY, job_posting_id uuid NOT NULL REFERENCES job_postings(id) ON DELETE RESTRICT,
               status varchar(30) NOT NULL, channel varchar(30) NULL, application_email varchar(255) NULL, application_url text NULL,
