@@ -241,32 +241,84 @@ function protectedState(s){
   if(page){delete page.outcome;delete page.artifactReceipt;}
   return copy;
 }
-function contentValid(s){
-  // The same identity may deliberately appear in both current and historical
-  // collections. Preserve and compare each collection; never merge them here.
-  for(const collection of [s.jobs,s.historicalJobs??[]]){
-    const identities=new Set();
-    for(const j of collection){
-    if(j.provider!=='SOCIALAPIS'||typeof j.id!=='string'||!j.id||j.sourceIdentity!==`SOCIALAPIS:${j.id}`||
-      identities.has(j.sourceIdentity)||!['title','employer','location','requirements','body'].every(k=>typeof j[k]==='string'))return false;
-    identities.add(j.sourceIdentity);
-    // Existing JobPostExtractor hash contract; raw full-state equality is also
-    // checked so normalization cannot conceal a changed body.
-    const material=[j.title,j.employer,j.location,j.requirements,j.body].join('\n').replace(/\r\n?/gu,'\n').normalize('NFC').trim();
-    if(j.contentHash!==sha(material))return false;
+const MAX_CONTENT_FAILURES=16;
+const JOB_CONTENT_FIELDS=Object.freeze(['title','employer','location','requirements','body']);
+function fieldType(value){
+  if(value===undefined)return 'missing';
+  if(value===null)return 'null';
+  if(Array.isArray(value))return 'array';
+  const type=typeof value;
+  if(['string','number','boolean','object'].includes(type))return type;
+  throw new Error('CONTENT_DIAGNOSTIC_SCHEMA_INVALID');
+}
+function contentSummary(totalFailures,failures){
+  return {valid:totalFailures===0,totalFailures,reportedFailures:failures.length,
+    truncated:totalFailures>failures.length,failures};
+}
+
+// Read-only explanations of the existing predicates, NOT a compatibility fix.
+// Stored values/hashes are never repaired; nullable/enriched historical jobs
+// still fail the same validation. Count all failures, even after output is full.
+export function diagnoseContentValidation(s,role){
+  if(!SNAPSHOT_ROLES.includes(role))return fail('CONTENT_DIAGNOSTIC_ROLE_INVALID');
+  try{
+    if(!object(s)||!Array.isArray(s.jobs)||!s.jobs.every(object)||
+      !Array.isArray(s.discoveryReviews)||!s.discoveryReviews.every(object)||
+      (s.historicalJobs!==undefined&&(!Array.isArray(s.historicalJobs)||!s.historicalJobs.every(object))))
+      return fail('CONTENT_DIAGNOSTIC_SCHEMA_INVALID');
+    const failures=[];let totalFailures=0;
+    const add=(collection,recordIndex,rule,extra={})=>{
+      totalFailures++;
+      if(failures.length<MAX_CONTENT_FAILURES)failures.push({role,collection,recordIndex,rule,...extra});
+    };
+    // The same identity may deliberately appear in both current and historical
+    // collections. Preserve and compare each collection; never merge them here.
+    for(const collection of ['jobs','historicalJobs']){
+      const identities=new Set();
+      for(const [index,j] of (s[collection]??[]).entries()){
+        if(j.provider!=='SOCIALAPIS')add(collection,index,'JOB_PROVIDER_INVALID');
+        if(typeof j.id!=='string'||!j.id)add(collection,index,'JOB_ID_INVALID');
+        // Never coerce arbitrary provider objects into text for identity checks.
+        if(typeof j.id!=='string'||j.sourceIdentity!==`SOCIALAPIS:${j.id}`)add(collection,index,'JOB_SOURCE_IDENTITY_INVALID');
+        if(identities.has(j.sourceIdentity))add(collection,index,'JOB_DUPLICATE_IDENTITY');
+        identities.add(j.sourceIdentity);
+        const invalidFields=JOB_CONTENT_FIELDS.filter(k=>typeof j[k]!=='string');
+        if(invalidFields.length){
+          const fieldFlags=Object.fromEntries(invalidFields.map(k=>[k,{present:Object.hasOwn(j,k),type:fieldType(j[k])}]));
+          add(collection,index,'JOB_FIELD_TYPE_INVALID',{fieldFlags});
+        }else{
+          // Preserve the old persisted-field validation formula. This may NOT be
+          // the pre-extraction hash contract of a historical producer generation.
+          const material=JOB_CONTENT_FIELDS.map(k=>j[k]).join('\n').replace(/\r\n?/gu,'\n').normalize('NFC').trim();
+          if(j.contentHash!==sha(material))add(collection,index,'JOB_PERSISTED_HASH_MISMATCH',{hashMatches:false});
+        }
+      }
     }
-  }
-  const bundles=new Set();
-  for(const b of s.discoveryReviews){
-    if(!Array.isArray(b.items))return false;
-    const identity=JSON.stringify([b.runId,b.query,b.pageNumber]);if(bundles.has(identity))return false;bundles.add(identity);
-    for(const [i,item] of b.items.entries()){
-      if(!object(item)||item.itemIndex!==i)return false;
-      if(item.rawContent===null){if(item.contentHash!==null)return false;}
-      else if(typeof item.rawContent!=='string'||item.contentHash!==sha(item.rawContent))return false;
+    const bundles=new Set();
+    for(const [index,b] of s.discoveryReviews.entries()){
+      const identity=JSON.stringify([b.runId,b.query,b.pageNumber]);
+      if(bundles.has(identity))add('discoveryReviews',index,'REVIEW_BUNDLE_DUPLICATE');
+      bundles.add(identity);
+      if(!Array.isArray(b.items)){add('discoveryReviews',index,'REVIEW_ITEMS_INVALID');continue;}
+      for(const [i,item] of b.items.entries()){
+        const extra={itemIndex:i};
+        if(!object(item)){add('discoveryReviews',index,'REVIEW_ITEM_INVALID',extra);continue;}
+        if(item.itemIndex!==i)add('discoveryReviews',index,'REVIEW_ITEM_INDEX_INVALID',extra);
+        if(item.rawContent===null){
+          if(item.contentHash!==null)add('discoveryReviews',index,'OBSERVATION_NULL_HASH_INVALID',extra);
+        }else if(typeof item.rawContent!=='string')add('discoveryReviews',index,'OBSERVATION_RAW_TYPE_INVALID',extra);
+        else if(item.contentHash!==sha(item.rawContent))add('discoveryReviews',index,'OBSERVATION_RAW_HASH_MISMATCH',{...extra,hashMatches:false});
+      }
     }
-  }
-  return true;
+    return contentSummary(totalFailures,failures);
+  }catch{return fail('CONTENT_DIAGNOSTIC_SCHEMA_INVALID');}
+}
+function combinedContentValidation(snapshots){
+  const reports=SNAPSHOT_ROLES.map(role=>diagnoseContentValidation(snapshots[role],role));
+  // Shape was checked at the comparison boundary. A diagnostic error cannot
+  // turn a partial scan into valid content or disclose exception details.
+  if(reports.some(r=>typeof r.valid!=='boolean'))throw new Error('CONTENT_DIAGNOSTIC_SCHEMA_INVALID');
+  return contentSummary(reports.reduce((n,r)=>n+r.totalFailures,0),reports.flatMap(r=>r.failures).slice(0,MAX_CONTENT_FAILURES));
 }
 
 // Schemas describe known technical metadata only. Unknown keys are never
@@ -367,6 +419,7 @@ export function compareAcknowledgedCheckpoints(input){
       return comparisonFailure('ARTIFACT_DIGEST_MISMATCH');
     if(!object(snapshots)||Object.keys(snapshots).length!==4||!COMPARISON_ROLES.every(role=>comparisonShape(snapshots[role])))return comparisonFailure('CHECKPOINT_SCHEMA_INVALID');
     const {claim,result,originalFinal,syncFinal}=snapshots,completed=SNAPSHOT_ROLES.map(role=>snapshots[role]);
+    const contentValidation=combinedContentValidation(snapshots);
     const checks={sameAttempt:COMPARISON_ROLES.every(role=>attemptBinding(snapshots[role],result,role==='claim')),
       historicalLedgerEqual:completed.every(s=>equal(protectedLedger(s),protectedLedger(result)))&&
         equal(claim.requestLedger.slice(0,9),result.requestLedger.slice(0,9)),
@@ -380,7 +433,7 @@ export function compareAcknowledgedCheckpoints(input){
       accountingEqual:completed.every(s=>ledgerKnown(s))&&completed.every(s=>equal(s.requestLedger.map(a=>[a.actualRequests,a.creditsDeducted]),
         result.requestLedger.map(a=>[a.actualRequests,a.creditsDeducted]))),
       jobsEqual:completed.every(s=>equal(s.jobs,result.jobs)),historicalJobsEqual:completed.every(s=>equal(s.historicalJobs,result.historicalJobs)),
-      observationsEqual:completed.every(s=>equal(s.discoveryReviews,result.discoveryReviews)),contentHashesValid:completed.every(contentValid),
+      observationsEqual:completed.every(s=>equal(s.discoveryReviews,result.discoveryReviews)),contentHashesValid:contentValidation.valid,
       laterHistoryVerified:historyComplete(history)};
     let missingClaim=false,receiptsValid=true;
     for(const s of completed){
@@ -424,7 +477,7 @@ export function compareAcknowledgedCheckpoints(input){
         registryCount:s.jobs.length,observationCount:s.discoveryReviews.reduce((n,b)=>n+(Array.isArray(b.items)?b.items.length:0),0)};
     });
     const resultReport={ok:true,eligibility,fingerprintVersion:'CANONICAL_JSON_V1',protectedFingerprint:semanticHash(protectedState(result)),
-      ledgerRowsCompared:Math.max(...completed.map(s=>s.requestLedger.length)),snapshots:rows,checks,comparisons,
+      ledgerRowsCompared:Math.max(...completed.map(s=>s.requestLedger.length)),snapshots:rows,checks,comparisons,contentValidation,
       artifactProvenance:COMPARISON_ROLES.map(role=>{
         const a=artifacts.find(v=>v.id===COMPARISON_PINS[role]);
         const timestamp=v=>typeof v==='string'&&Number.isFinite(Date.parse(v))?new Date(v).toISOString():null;
@@ -436,6 +489,13 @@ export function compareAcknowledgedCheckpoints(input){
       reasons:[...(contradiction?['PROTECTED_STATE_OR_ACK_INVARIANT_FAILED']:[]),...(missingClaim?['CLAIM_BINDING_MISSING']:[]),
         ...(!checks.laterHistoryVerified?['LATER_HISTORY_NOT_VERIFIED']:[]),...(unclassified?['UNCLASSIFIED_SNAPSHOT_DIFFERENCES']:[])],
       recoveryExecuted:false};
+    // Preserve counts/decision while making any output-size truncation explicit.
+    // Never dump a large failure list or treat an omitted failure as a pass.
+    while(Buffer.byteLength(JSON.stringify(resultReport))>MAX_OUTPUT&&contentValidation.failures.length){
+      contentValidation.failures.pop();
+      contentValidation.reportedFailures=contentValidation.failures.length;
+      contentValidation.truncated=true;
+    }
     return Buffer.byteLength(JSON.stringify(resultReport))<=MAX_OUTPUT?resultReport:comparisonFailure('OUTPUT_LIMIT_EXCEEDED');
   }catch{return comparisonFailure('CHECKPOINT_SCHEMA_INVALID');}
 }
