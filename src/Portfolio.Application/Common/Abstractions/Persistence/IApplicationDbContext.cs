@@ -32,6 +32,11 @@ public interface IApplicationDbContext
     DbSet<ChatMessageFeedback> ChatMessageFeedback { get; }
     DbSet<ChatUsageDaily> ChatUsageDaily { get; }
     DbSet<RawJobPosting> RawJobPostings { get; }
+    DbSet<DiscoveryExecution> DiscoveryExecutions => throw new NotSupportedException();
+    DbSet<DiscoveryExecutionAttempt> DiscoveryExecutionAttempts => throw new NotSupportedException();
+    DbSet<DiscoveryExecutionObservation> DiscoveryExecutionObservations => throw new NotSupportedException();
+    DbSet<DiscoveryExecutionVacancy> DiscoveryExecutionVacancies => throw new NotSupportedException();
+    DbSet<DiscoveryExecutionEvent> DiscoveryExecutionEvents => throw new NotSupportedException();
     DbSet<DiscoveryCandidate> DiscoveryCandidates { get; }
     DbSet<DiscoveryCandidateReview> DiscoveryCandidateReviews { get; }
     DbSet<DiscoveryCandidateReviewEvent> DiscoveryCandidateReviewEvents { get; }

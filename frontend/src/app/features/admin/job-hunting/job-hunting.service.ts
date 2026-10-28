@@ -4,11 +4,15 @@ import { ApiClientService } from '../../../core/api/api-client.service';
 import { ApiResponse } from '../../../core/api/api-response.model';
 import { PagedResult } from '../../../core/api/paged-result.model';
 import { requireData } from '../shared/admin-api';
+import { DiscoveryExecution, DiscoveryExecutionHistory } from './discovery-execution.models';
 import { DiscoveryReviewDetail, DiscoveryReviewList, HumanReview, HumanReviewWrite, ReviewHistory, DiscoveryQualityReport } from './discovery-review.models';
 import {DiscoveryRunSummary,DiscoveryCleanupPlan,DiscoveryCleanupBackup,DiscoveryCleanupResult,JobDataResetPlan,JobDataResetResult} from './discovery-cleanup.models';
 import { ApplicationCreate, ApplicationDetail, ApplicationItem, ApplicationPackage, ApplicationPackageReadiness, ApplicationSubmissionReadiness, CandidateJobPreferences, CandidateJobPreferencesWrite, CanonicalCv, DocumentItem, EmailApplicationWorkflowResult, JobCreate, JobDetail, JobFitAnalysis, JobSummary, JobWrite, RawJobPostingSummary, ScreenshotSubmissionResult, SubmissionAttempt } from './job-hunting.models';
 @Injectable({ providedIn: 'root' }) export class JobHuntingService {
  private api=inject(ApiClientService);
+ startDiscoveryExecution(body:{clientRequestId:string}){return this.api.post<ApiResponse<DiscoveryExecution>>('admin/job-hunting/discovery/executions',body).pipe(map(requireData))}
+ discoveryExecution(id:string){return this.api.get<ApiResponse<DiscoveryExecution>>(`admin/job-hunting/discovery/executions/${id}`).pipe(map(requireData))}
+ discoveryExecutions(){return this.api.get<ApiResponse<DiscoveryExecutionHistory>>('admin/job-hunting/discovery/executions',{params:{page:1,pageSize:20}}).pipe(map(requireData))}
  jobDataResetPreview(){return this.api.get<ApiResponse<JobDataResetPlan>>('admin/job-hunting/discovery/cleanup/reset-all/preview').pipe(map(requireData))}
  resetAllJobData(body:{confirmation:string;expectedFingerprint:string}){return this.api.post<ApiResponse<JobDataResetResult>>('admin/job-hunting/discovery/cleanup/reset-all/execute',body).pipe(map(requireData))}
  discoveryCleanupRuns(){return this.api.get<ApiResponse<DiscoveryRunSummary[]>>('admin/job-hunting/discovery/cleanup/runs').pipe(map(requireData))}

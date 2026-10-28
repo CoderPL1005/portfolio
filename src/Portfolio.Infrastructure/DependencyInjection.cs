@@ -47,6 +47,11 @@ public static class DependencyInjection
         services.AddSingleton<IFileStorage, R2FileStorage>();
         services.AddSingleton<IPrivateFileStorage, R2PrivateFileStorage>();
         services.AddOptions<GeminiSettings>().Bind(configuration.GetSection(GeminiSettings.SectionName));
+        services.AddOptions<Portfolio.Application.Features.JobHunting.DiscoveryExecutionOptions>().Bind(configuration.GetSection("DiscoveryExecution"));
+        services.AddHttpClient<Portfolio.Application.Features.JobHunting.IDiscoveryGitHubClient, Portfolio.Infrastructure.Integrations.Discovery.DiscoveryGitHubClient>(client=>client.Timeout=TimeSpan.FromSeconds(15))
+            .ConfigurePrimaryHttpMessageHandler(()=>new HttpClientHandler{AllowAutoRedirect=false}).RemoveAllLoggers();
+        services.AddHttpClient<Portfolio.Application.Features.JobHunting.IDiscoveryTextExtractor, Portfolio.Infrastructure.AI.GeminiDiscoveryTextExtractor>(client=>client.Timeout=TimeSpan.FromSeconds(20))
+            .ConfigurePrimaryHttpMessageHandler(()=>new HttpClientHandler{AllowAutoRedirect=false}).RemoveAllLoggers();
         services.AddSingleton<IValidateOptions<JobFitScoringOptions>, JobFitScoringOptionsValidator>();
         services.AddOptions<JobFitScoringOptions>()
             .Bind(configuration.GetSection(JobFitScoringOptions.SectionName))

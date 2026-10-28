@@ -35,6 +35,11 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<ChatMessageFeedback> ChatMessageFeedback => Set<ChatMessageFeedback>();
     public DbSet<ChatUsageDaily> ChatUsageDaily => Set<ChatUsageDaily>();
     public DbSet<RawJobPosting> RawJobPostings => Set<RawJobPosting>();
+    public DbSet<DiscoveryExecution> DiscoveryExecutions => Set<DiscoveryExecution>();
+    public DbSet<DiscoveryExecutionAttempt> DiscoveryExecutionAttempts => Set<DiscoveryExecutionAttempt>();
+    public DbSet<DiscoveryExecutionObservation> DiscoveryExecutionObservations => Set<DiscoveryExecutionObservation>();
+    public DbSet<DiscoveryExecutionVacancy> DiscoveryExecutionVacancies => Set<DiscoveryExecutionVacancy>();
+    public DbSet<DiscoveryExecutionEvent> DiscoveryExecutionEvents => Set<DiscoveryExecutionEvent>();
     public DbSet<DiscoveryCandidate> DiscoveryCandidates => Set<DiscoveryCandidate>();
     public DbSet<DiscoveryCandidateReview> DiscoveryCandidateReviews => Set<DiscoveryCandidateReview>();
     public DbSet<DiscoveryCandidateReviewEvent> DiscoveryCandidateReviewEvents => Set<DiscoveryCandidateReviewEvent>();

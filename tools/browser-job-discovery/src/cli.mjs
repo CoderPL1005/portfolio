@@ -11,7 +11,15 @@ import { resolveDiscoveryPolicy } from './candidate-technology-profile.mjs';
 
 // No browser URL/session/auth arguments. Select mode before importing a browser.
 const args = process.argv.slice(2);
-if (args.includes('--orchestrate')) {
+if (args.includes('--execution')) {
+  try {
+    if(args.length!==2||args[0]!=='--execution')throw new Stop('DISCOVERY_EXECUTION_ID_INVALID');
+    const {runDiscoveryExecution,executionBackendFromEnvironment}=await import('./discovery-execution-worker.mjs');
+    await runDiscoveryExecution({executionId:args[1],workflowRunId:process.env.GITHUB_RUN_ID,runAttempt:Number(process.env.GITHUB_RUN_ATTEMPT)},
+      {backend:executionBackendFromEnvironment()});
+    console.log(JSON.stringify({executionCompleted:true}));
+  }catch(error){console.error(error instanceof Stop?error.code:'DISCOVERY_EXECUTION_FAILED');process.exitCode=1;}
+} else if (args.includes('--orchestrate')) {
   try { await (await import('./pagination-cli.mjs')).paginationCli(args); }
   catch (error) { console.error(error instanceof Stop ? error.code : 'ORCHESTRATION_FAILED'); process.exitCode = 1; }
 } else if (args.includes('--source')) {

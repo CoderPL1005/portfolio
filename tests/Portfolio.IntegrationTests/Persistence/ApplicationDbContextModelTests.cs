@@ -22,11 +22,12 @@ public sealed class ApplicationDbContextModelTests
         "chat_message_sources", "chat_message_feedback", "chat_usage_daily", "raw_job_postings",
         "raw_job_posting_attachments", "job_postings", "job_applications", "job_application_events", "job_application_documents",
         "push_subscriptions", "candidate_job_preferences", "canonical_cvs",
-        "submission_attempts", "submission_attempt_events", "discovery_candidates", "discovery_candidate_reviews", "discovery_candidate_review_events"
+        "submission_attempts", "submission_attempt_events", "discovery_candidates", "discovery_candidate_reviews", "discovery_candidate_review_events",
+        "discovery_executions", "discovery_execution_attempts", "discovery_execution_events", "discovery_execution_observations", "discovery_execution_vacancies"
     ];
 
     [Fact]
-    public void Model_contains_all_40_expected_tables_and_excludes_contact_messages()
+    public void Model_contains_all_45_expected_tables_and_excludes_contact_messages()
     {
         using var context = CreateContext();
         var tables = context.Model.GetEntityTypes().Select(entity => entity.GetTableName()).Order().ToArray();
@@ -37,13 +38,13 @@ public sealed class ApplicationDbContextModelTests
     }
 
     [Fact]
-    public void Application_context_contract_exposes_all_40_sets()
+    public void Application_context_contract_exposes_all_45_sets()
     {
         var dbSetCount = typeof(IApplicationDbContext).GetProperties()
             .Count(property => property.PropertyType.IsGenericType &&
                 property.PropertyType.GetGenericTypeDefinition() == typeof(DbSet<>));
 
-        Assert.Equal(40, dbSetCount);
+        Assert.Equal(45, dbSetCount);
     }
 
     [Fact]
@@ -61,9 +62,14 @@ public sealed class ApplicationDbContextModelTests
         using var context = CreateContext();
         var model = context.GetService<IDesignTimeModel>().Model;
 
-        Assert.Equal(35, model.GetEntityTypes().SelectMany(entity => entity.GetForeignKeys()).Count());
-        Assert.Equal(107, model.GetEntityTypes().SelectMany(entity => entity.GetCheckConstraints()).Count());
-        Assert.Equal(56, model.GetEntityTypes().SelectMany(entity => entity.GetIndexes()).Count());
+        // Five additive execution tables: seven RESTRICT FKs, four checks, eight indexes.
+        Assert.Equal(42, model.GetEntityTypes().SelectMany(entity => entity.GetForeignKeys()).Count());
+        Assert.Equal(111, model.GetEntityTypes().SelectMany(entity => entity.GetCheckConstraints()).Count());
+        Assert.Equal(64, model.GetEntityTypes().SelectMany(entity => entity.GetIndexes()).Count());
+        var executionTypes = model.GetEntityTypes().Where(e => e.GetTableName()!.StartsWith("discovery_execution", StringComparison.Ordinal)).ToArray();
+        Assert.Equal(5, executionTypes.Length);
+        Assert.Equal(7, executionTypes.SelectMany(e => e.GetForeignKeys()).Count());
+        Assert.All(executionTypes.SelectMany(e => e.GetForeignKeys()), fk => Assert.Equal(DeleteBehavior.Restrict, fk.DeleteBehavior));
 
         var experienceTechnology = model.FindEntityType(typeof(ExperienceTechnology))!;
         Assert.Equal(2, experienceTechnology.FindPrimaryKey()!.Properties.Count);
@@ -113,7 +119,7 @@ public sealed class ApplicationDbContextModelTests
         using var context = CreateContext();
         var migrations = context.Database.GetMigrations().ToArray();
 
-        Assert.Equal(18, migrations.Length);
+        Assert.Equal(19, migrations.Length);
         Assert.EndsWith("_InitialPortfolioSchema", migrations[0], StringComparison.Ordinal);
         Assert.EndsWith("_RemoveContactMessages", migrations[1], StringComparison.Ordinal);
         Assert.EndsWith("_AllowDuplicateSocialLinkPlatforms", migrations[2], StringComparison.Ordinal);
@@ -132,6 +138,7 @@ public sealed class ApplicationDbContextModelTests
         Assert.EndsWith("_AddSubmissionAttemptCore", migrations[15], StringComparison.Ordinal);
         Assert.EndsWith("_AddDiscoveryReviewCandidates", migrations[16], StringComparison.Ordinal);
         Assert.EndsWith("_AddDiscoveryHumanReviews", migrations[17], StringComparison.Ordinal);
+        Assert.Equal(DiscoveryReleaseMigration.Executions, migrations[18]);
     }
 
     [Fact]

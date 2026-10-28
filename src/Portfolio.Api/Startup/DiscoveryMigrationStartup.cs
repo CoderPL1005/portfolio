@@ -14,7 +14,7 @@ public static class DiscoveryMigrationStartup
         {
             await using var scope = app.Services.CreateAsyncScope();
             await DiscoveryReleaseMigration.ApplyAsync(scope.ServiceProvider.GetRequiredService<ApplicationDbContext>(), timeout.Token);
-            app.Logger.LogInformation("DISCOVERY_MIGRATIONS_READY: B44/B45 schema committed before API startup.");
+            app.Logger.LogInformation("DISCOVERY_MIGRATIONS_READY: reviewed Discovery schema committed before API startup.");
         }
         catch (Exception e)
         {

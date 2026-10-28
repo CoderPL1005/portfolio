@@ -3,18 +3,19 @@ using Npgsql;
 
 namespace Portfolio.Infrastructure.Persistence;
 
-// Release-only startup: existing production database, only the two reviewed additive migrations.
+// Release-only startup: existing production database, exact reviewed additive migrations.
 public static class DiscoveryReleaseMigration
 {
     public const string Candidates = "20261026074534_AddDiscoveryReviewCandidates";
     public const string Reviews = "20261026102500_AddDiscoveryHumanReviews";
+    public const string Executions = "20261028121110_AddDiscoveryExecutions";
     public const string Predecessor = "20260923032547_AddSubmissionAttemptCore";
     // Transaction-scoped: safe with Neon transaction pooling; not a session advisory lock.
     public const string LockSql = "SELECT pg_advisory_xact_lock(741204, 445)";
 
     public static void ValidateHistory(IReadOnlyCollection<string> applied, IReadOnlyCollection<string> pending)
     {
-        if (!applied.Contains(Predecessor) || pending.Any(x => x != Candidates && x != Reviews))
+        if (!applied.Contains(Predecessor) || pending.Any(x => x != Candidates && x != Reviews && x != Executions))
             throw new InvalidOperationException("DISCOVERY_MIGRATION_UNEXPECTED_BASELINE");
     }
 

@@ -24,4 +24,7 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="AI/discovery-extraction-contract.json" />
+  </ItemGroup>
 </Project>

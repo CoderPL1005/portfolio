@@ -32,13 +32,16 @@ public sealed class GetJobPostingsQueryHandler(IApplicationDbContext db):IReques
     {
         var q=db.JobPostings.AsNoTracking();
         if(!string.IsNullOrWhiteSpace(r.Search)){var v=r.Search.Trim().ToLowerInvariant();q=q.Where(x=>x.CompanyName.ToLower().Contains(v)||x.PositionTitle.ToLower().Contains(v));}
-        if(!string.IsNullOrWhiteSpace(r.Source)){var v=r.Source.Trim().ToUpperInvariant();q=q.Where(x=>x.RawJobPostings.Any(y=>y.Source==v));}
+        if(!string.IsNullOrWhiteSpace(r.Source)){var v=r.Source.Trim().ToUpperInvariant();q=q.Where(x=>db.RawJobPostings.Any(y=>y.Source==v&&(y.JobPostingId==x.Id||db.DiscoveryExecutionVacancies.Any(l=>l.JobPostingId==x.Id&&l.RawJobPostingId==y.Id))));}
         if(!string.IsNullOrWhiteSpace(r.VerificationStatus)){var v=r.VerificationStatus.Trim().ToUpperInvariant();q=q.Where(x=>x.VerificationStatus==v);}
         if(!string.IsNullOrWhiteSpace(r.SelectionStatus)){var v=r.SelectionStatus.Trim().ToUpperInvariant();q=q.Where(x=>x.SelectionStatus==v);}
         if(r.Archived.HasValue)q=q.Where(x=>(x.ArchivedAt!=null)==r.Archived.Value);
         var total=await q.CountAsync(ct);
         var items=await q.OrderByDescending(x=>x.CreatedAt).ThenBy(x=>x.Id).Skip((r.Page-1)*r.PageSize).Take(r.PageSize)
-            .Select(x=>new JobPostingListItem(x.Id,x.CompanyName,x.PositionTitle,x.Location,x.RawJobPostings.OrderBy(y=>y.CreatedAt).ThenBy(y=>y.Id).Select(y=>y.Source).FirstOrDefault(),x.RawJobPostings.Count,x.VerificationStatus,x.SelectionStatus,x.ArchivedAt!=null,x.CreatedAt,x.UpdatedAt,x.JobApplications.Count,x.Version)).ToListAsync(ct);
+            .Select(x=>new JobPostingListItem(x.Id,x.CompanyName,x.PositionTitle,x.Location,
+                db.RawJobPostings.Where(y=>y.JobPostingId==x.Id||db.DiscoveryExecutionVacancies.Any(l=>l.JobPostingId==x.Id&&l.RawJobPostingId==y.Id)).OrderBy(y=>y.CreatedAt).ThenBy(y=>y.Id).Select(y=>y.Source).FirstOrDefault(),
+                db.RawJobPostings.Count(y=>y.JobPostingId==x.Id||db.DiscoveryExecutionVacancies.Any(l=>l.JobPostingId==x.Id&&l.RawJobPostingId==y.Id)),
+                x.VerificationStatus,x.SelectionStatus,x.ArchivedAt!=null,x.CreatedAt,x.UpdatedAt,x.JobApplications.Count,x.Version)).ToListAsync(ct);
         return new(items,r.Page,r.PageSize,total);
     }
 }
@@ -83,7 +86,15 @@ internal static class JobPostingMapping
     public static void Assign(JobPosting x,string company,string title,string location,string? employment,string? workplace,decimal? min,decimal? max,string? currency,string? period,string? experience,string description,JsonElement stack,string? email,string? url,DateTimeOffset? expires,string? notes){x.CompanyName=company.Trim();x.PositionTitle=title.Trim();x.Location=location.Trim();x.EmploymentType=JobText.TrimOrNull(employment);x.WorkplaceType=JobText.TrimOrNull(workplace);x.SalaryMinimum=min;x.SalaryMaximum=max;x.SalaryCurrency=JobText.TrimOrNull(currency)?.ToUpperInvariant();x.SalaryPeriod=JobText.TrimOrNull(period);x.ExperienceRequirements=JobText.TrimOrNull(experience);x.Description=description.Trim();x.TechnologyStack=JsonDocument.Parse(stack.GetRawText());x.ApplicationEmail=JobText.TrimOrNull(email);x.ApplicationUrl=JobText.TrimOrNull(url);x.ExpiresAt=expires;x.Notes=JobText.TrimOrNull(notes);}
     public static async Task<JobPosting> RequireVersion(IApplicationDbContext db,Guid id,int version,CancellationToken ct){var x=await db.JobPostings.SingleOrDefaultAsync(x=>x.Id==id,ct)??throw new NotFoundException("JOB_POSTING_NOT_FOUND","The job posting was not found.");if(x.Version!=version)throw new ConflictException("JOB_POSTING_VERSION_CONFLICT","The job posting has been modified.");return x;}
     public static async Task SaveVersioned(IApplicationDbContext db,CancellationToken ct){try{await db.SaveChangesAsync(ct);}catch(DbUpdateConcurrencyException){throw new ConflictException("JOB_POSTING_VERSION_CONFLICT","The job posting has been modified.");}}
-    public static async Task<JobPostingResult> GetAsync(IApplicationDbContext db,Guid id,CancellationToken ct){var x=await db.JobPostings.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id,ct)??throw new NotFoundException("JOB_POSTING_NOT_FOUND","The job posting was not found.");var sourceRows=await db.RawJobPostings.AsNoTracking().Where(y=>y.JobPostingId==id).OrderBy(y=>y.DiscoveredAt).ThenBy(y=>y.Id).ToListAsync(ct);var sources=sourceRows.Select(y=>new RawJobPostingResult(y.Id,y.Source,y.SourceExternalId,y.SourceUrl,y.SourceUrlHash,y.RawContent,y.ContentHash,y.CompanyTitleFingerprint,y.IngestionStatus,y.DuplicateOfRawJobPostingId,y.Metadata.RootElement.Clone(),y.DiscoveredAt,y.CreatedAt,y.UpdatedAt)).ToArray();var apps=await db.JobApplications.AsNoTracking().Where(y=>y.JobPostingId==id).OrderByDescending(y=>y.CreatedAt).ThenBy(y=>y.Id).Select(y=>new JobApplicationSummary(y.Id,y.Status,y.Channel,y.AppliedAt,y.LastActivityAt,y.Version)).ToListAsync(ct);return new(x.Id,x.CompanyName,x.PositionTitle,x.Location,x.EmploymentType,x.WorkplaceType,x.SalaryMinimum,x.SalaryMaximum,x.SalaryCurrency,x.SalaryPeriod,x.ExperienceRequirements,x.Description,x.TechnologyStack.RootElement.Clone(),x.ApplicationEmail,x.ApplicationUrl,x.VerificationStatus,x.SelectionStatus,x.ExpiresAt,x.VerifiedAt,x.ArchivedAt,x.Notes,x.Version,x.CreatedAt,x.UpdatedAt,sources,apps);}
+    public static async Task<JobPostingResult> GetAsync(IApplicationDbContext db,Guid id,CancellationToken ct)
+    {
+        var x=await db.JobPostings.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id,ct)??throw new NotFoundException("JOB_POSTING_NOT_FOUND","The job posting was not found.");
+        var sourceRows=await db.RawJobPostings.AsNoTracking().Where(y=>y.JobPostingId==id||db.DiscoveryExecutionVacancies.Any(l=>l.JobPostingId==id&&l.RawJobPostingId==y.Id))
+            .OrderBy(y=>y.DiscoveredAt).ThenBy(y=>y.Id).ToListAsync(ct);
+        var sources=sourceRows.Select(y=>new RawJobPostingResult(y.Id,y.Source,y.SourceExternalId,y.SourceUrl,y.SourceUrlHash,y.RawContent,y.ContentHash,y.CompanyTitleFingerprint,y.IngestionStatus,y.DuplicateOfRawJobPostingId,y.Metadata.RootElement.Clone(),y.DiscoveredAt,y.CreatedAt,y.UpdatedAt)).ToArray();
+        var apps=await db.JobApplications.AsNoTracking().Where(y=>y.JobPostingId==id).OrderByDescending(y=>y.CreatedAt).ThenBy(y=>y.Id).Select(y=>new JobApplicationSummary(y.Id,y.Status,y.Channel,y.AppliedAt,y.LastActivityAt,y.Version)).ToListAsync(ct);
+        return new(x.Id,x.CompanyName,x.PositionTitle,x.Location,x.EmploymentType,x.WorkplaceType,x.SalaryMinimum,x.SalaryMaximum,x.SalaryCurrency,x.SalaryPeriod,x.ExperienceRequirements,x.Description,x.TechnologyStack.RootElement.Clone(),x.ApplicationEmail,x.ApplicationUrl,x.VerificationStatus,x.SelectionStatus,x.ExpiresAt,x.VerifiedAt,x.ArchivedAt,x.Notes,x.Version,x.CreatedAt,x.UpdatedAt,sources,apps);
+    }
 }
 internal static class JobHashing
 {

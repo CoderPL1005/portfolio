@@ -21,6 +21,7 @@ public static class AuthenticationExtensions
     {
         ArgumentNullException.ThrowIfNull(configuration);
         services.AddHttpContextAccessor();
+        services.AddAuthentication().AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions,DiscoveryExecutionAuthentication>(DiscoveryExecutionAuthentication.SchemeName,_=>{});
         services.AddSingleton<IClientIdentityProvider, ClientIdentityProvider>();
         services.AddScoped<ICurrentUser, CurrentUser>();
         services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)

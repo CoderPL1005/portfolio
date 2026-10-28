@@ -35,6 +35,11 @@ internal sealed class ContentTestDbContext(DbContextOptions<ContentTestDbContext
     public DbSet<ChatMessageFeedback> ChatMessageFeedback => Set<ChatMessageFeedback>();
     public DbSet<ChatUsageDaily> ChatUsageDaily => Set<ChatUsageDaily>();
     public DbSet<RawJobPosting> RawJobPostings => Set<RawJobPosting>();
+    public DbSet<DiscoveryExecution> DiscoveryExecutions => Set<DiscoveryExecution>();
+    public DbSet<DiscoveryExecutionAttempt> DiscoveryExecutionAttempts => Set<DiscoveryExecutionAttempt>();
+    public DbSet<DiscoveryExecutionObservation> DiscoveryExecutionObservations => Set<DiscoveryExecutionObservation>();
+    public DbSet<DiscoveryExecutionVacancy> DiscoveryExecutionVacancies => Set<DiscoveryExecutionVacancy>();
+    public DbSet<DiscoveryExecutionEvent> DiscoveryExecutionEvents => Set<DiscoveryExecutionEvent>();
     public DbSet<DiscoveryCandidate> DiscoveryCandidates => Set<DiscoveryCandidate>();
     public DbSet<DiscoveryCandidateReview> DiscoveryCandidateReviews => Set<DiscoveryCandidateReview>();
     public DbSet<DiscoveryCandidateReviewEvent> DiscoveryCandidateReviewEvents => Set<DiscoveryCandidateReviewEvent>();
@@ -65,6 +70,9 @@ internal sealed class ContentTestDbContext(DbContextOptions<ContentTestDbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<DiscoveryExecution>().Property(x=>x.Version).IsConcurrencyToken();
+        modelBuilder.Entity<DiscoveryExecution>().HasIndex(x=>x.ClientRequestId).IsUnique();
+        modelBuilder.Entity<DiscoveryExecutionAttempt>().HasIndex(x=>x.ExecutionId).IsUnique();
         modelBuilder.ApplyConfiguration(new Portfolio.Infrastructure.Persistence.Configurations.DiscoveryCandidateConfiguration());
         modelBuilder.ApplyConfiguration(new Portfolio.Infrastructure.Persistence.Configurations.DiscoveryCandidateReviewConfiguration());
         modelBuilder.ApplyConfiguration(new Portfolio.Infrastructure.Persistence.Configurations.DiscoveryCandidateReviewEventConfiguration());

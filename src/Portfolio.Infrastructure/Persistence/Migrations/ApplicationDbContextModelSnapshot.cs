@@ -1001,6 +1001,239 @@ namespace Portfolio.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Portfolio.Domain.Entities.DiscoveryExecution", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ActiveKey")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<Guid>("ClientRequestId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ConfigurationJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByAdminId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ErrorCode")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("ResultHash")
+                        .HasColumnType("text");
+
+                    b.Property<int>("SemanticAttempts")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<string>("TriggerSource")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.Property<string>("WorkflowRunId")
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ActiveKey")
+                        .IsUnique()
+                        .HasFilter("\"ActiveKey\" IS NOT NULL");
+
+                    b.HasIndex("ClientRequestId")
+                        .IsUnique();
+
+                    b.HasIndex("CreatedAt");
+
+                    b.ToTable("discovery_executions", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_discovery_execution_trigger", "\"TriggerSource\" IN ('ADMIN_MANUAL','DAILY_SCHEDULED')");
+
+                            t.HasCheckConstraint("ck_discovery_execution_version", "\"Version\" >= 1");
+                        });
+                });
+
+            modelBuilder.Entity("Portfolio.Domain.Entities.DiscoveryExecutionAttempt", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int?>("ActualRequests")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("ClaimedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal?>("CreditsDeducted")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)");
+
+                    b.Property<decimal?>("CreditsUsedAlternateHeader")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)");
+
+                    b.Property<Guid>("ExecutionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int?>("HttpStatus")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Outcome")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("WorkflowRunId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExecutionId")
+                        .IsUnique();
+
+                    b.ToTable("discovery_execution_attempts", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_discovery_execution_credit_evidence", "\"CreditsDeducted\" IS NULL OR \"CreditsDeducted\" >= 0");
+
+                            t.HasCheckConstraint("ck_discovery_execution_one_request", "\"ActualRequests\" IS NULL OR \"ActualRequests\" BETWEEN 0 AND 1");
+                        });
+                });
+
+            modelBuilder.Entity("Portfolio.Domain.Entities.DiscoveryExecutionEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("At")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("ExecutionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Reason")
+                        .HasColumnType("text");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("discovery_execution_events", (string)null);
+                });
+
+            modelBuilder.Entity("Portfolio.Domain.Entities.DiscoveryExecutionObservation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ContentHash")
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("ExecutionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("ItemIndex")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("PayloadHash")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("PayloadJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("RawJobPostingId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("SemanticCacheKey")
+                        .HasColumnType("text");
+
+                    b.Property<string>("SemanticOutputJson")
+                        .HasColumnType("text");
+
+                    b.Property<string>("SemanticState")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ContentHash");
+
+                    b.HasIndex("ExecutionId", "ItemIndex")
+                        .IsUnique();
+
+                    b.ToTable("discovery_execution_observations", (string)null);
+                });
+
+            modelBuilder.Entity("Portfolio.Domain.Entities.DiscoveryExecutionVacancy", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("FieldsJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Fingerprint")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("JobPostingId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("MissingFieldsJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("ObservationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("RawJobPostingId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("VacancyIndex")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Fingerprint");
+
+                    b.HasIndex("ObservationId", "VacancyIndex")
+                        .IsUnique();
+
+                    b.ToTable("discovery_execution_vacancies", (string)null);
+                });
+
             modelBuilder.Entity("Portfolio.Domain.Entities.Education", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3297,6 +3530,57 @@ namespace Portfolio.Infrastructure.Persistence.Migrations
                         .HasForeignKey("ReviewedByAdminId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("Portfolio.Domain.Entities.DiscoveryExecutionAttempt", b =>
+                {
+                    b.HasOne("Portfolio.Domain.Entities.DiscoveryExecution", null)
+                        .WithMany()
+                        .HasForeignKey("ExecutionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Portfolio.Domain.Entities.DiscoveryExecutionEvent", b =>
+                {
+                    b.HasOne("Portfolio.Domain.Entities.DiscoveryExecution", null)
+                        .WithMany()
+                        .HasForeignKey("ExecutionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Portfolio.Domain.Entities.DiscoveryExecutionObservation", b =>
+                {
+                    b.HasOne("Portfolio.Domain.Entities.DiscoveryExecution", null)
+                        .WithMany()
+                        .HasForeignKey("ExecutionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Portfolio.Domain.Entities.RawJobPosting", null)
+                        .WithMany()
+                        .HasForeignKey("RawJobPostingId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Portfolio.Domain.Entities.DiscoveryExecutionVacancy", b =>
+                {
+                    b.HasOne("Portfolio.Domain.Entities.JobPosting", null)
+                        .WithMany()
+                        .HasForeignKey("JobPostingId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Portfolio.Domain.Entities.DiscoveryExecutionObservation", null)
+                        .WithMany()
+                        .HasForeignKey("ObservationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Portfolio.Domain.Entities.RawJobPosting", null)
+                        .WithMany()
+                        .HasForeignKey("RawJobPostingId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("Portfolio.Domain.Entities.ExperienceTechnology", b =>

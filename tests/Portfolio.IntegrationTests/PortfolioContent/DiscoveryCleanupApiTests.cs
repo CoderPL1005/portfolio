@@ -96,10 +96,10 @@ public sealed class DiscoveryCleanupApiTests(AuthApiFactory root) : IClassFixtur
         Assert.Equal(HttpStatusCode.InternalServerError,(await client.PostAsJsonAsync(Route+"/cleanup/execute",Command(backup))).StatusCode);
         fault.FailSave=false;var after=await Backup(client);Assert.Equal(backup.Fingerprint,after.Fingerprint);
     }
-    [Fact] public async Task Reset_all_clears_all_eleven_tables_including_former_protected_run_and_preserves_portfolio_and_cv()
+    [Fact] public async Task Reset_all_clears_all_thirteen_tables_including_former_protected_run_and_preserves_portfolio_and_cv()
     {
         using var f=Factory();using var client=Admin(f);await SeedAll(f,client);
-        var before=await ResetPlan(client);Assert.Equal(11,before.Counts.Count);Assert.All(before.Counts.Values,n=>Assert.True(n>0));
+        var before=await ResetPlan(client);Assert.Equal(13,before.Counts.Count);Assert.All(before.Counts.Values,n=>Assert.True(n>0));
         var result=await Data<JobDataResetResult>(await client.PostAsJsonAsync(Route+"/cleanup/reset-all/execute",new ResetAllJobDataCommand(JobDataReset.Confirmation,before.Fingerprint)));
         Assert.Equal(before.TotalRecords,result.Deleted.TotalRecords);Assert.Equal(0,result.Remaining.TotalRecords);Assert.All(result.Remaining.Counts.Values,n=>Assert.Equal(0,n));
         Assert.Empty(await Data<DiscoveryRunSummary[]>(await client.GetAsync(Route+"/cleanup/runs")));
@@ -136,6 +136,82 @@ public sealed class DiscoveryCleanupApiTests(AuthApiFactory root) : IClassFixtur
         Assert.Single(results.Where(r=>r.StatusCode==HttpStatusCode.OK));Assert.Single(results.Where(r=>r.StatusCode==HttpStatusCode.Conflict));
         Assert.Equal(0,(await ResetPlan(client)).TotalRecords);
     }
+    [Fact] public async Task Reset_preserves_claim_accounting_and_audit_but_removes_multi_vacancy_source_and_cannot_reopen_claim()
+    {
+        using var f=Factory();using var client=Admin(f);await SeedAll(f,client);
+        DiscoveryExecution execution;DiscoveryExecutionAttempt attempt;
+        using(var scope=f.Services.CreateScope())
+        {
+            var db=scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
+            execution=await db.DiscoveryExecutions.AsNoTracking().SingleAsync();attempt=await db.DiscoveryExecutionAttempts.AsNoTracking().SingleAsync();
+            Assert.Equal(2,await db.DiscoveryExecutionVacancies.CountAsync());Assert.Single(await db.DiscoveryExecutionObservations.ToListAsync());
+        }
+        var plan=await ResetPlan(client);
+        await Data<JobDataResetResult>(await client.PostAsJsonAsync(Route+"/cleanup/reset-all/execute",new ResetAllJobDataCommand(JobDataReset.Confirmation,plan.Fingerprint)));
+        using(var scope=f.Services.CreateScope())
+        {
+            var db=scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
+            Assert.Equal(JsonSerializer.Serialize(execution),JsonSerializer.Serialize(await db.DiscoveryExecutions.AsNoTracking().SingleAsync()));
+            Assert.Equal(JsonSerializer.Serialize(attempt),JsonSerializer.Serialize(await db.DiscoveryExecutionAttempts.AsNoTracking().SingleAsync()));
+            Assert.Empty(await db.DiscoveryExecutionObservations.ToListAsync());Assert.Empty(await db.DiscoveryExecutionVacancies.ToListAsync());
+            Assert.Empty(await db.RawJobPostings.ToListAsync());Assert.Empty(await db.JobPostings.ToListAsync());
+            var events=await db.DiscoveryExecutionEvents.ToListAsync();Assert.Contains(events,e=>e.State=="SUCCEEDED");
+            Assert.Single(events.Where(e=>e.State=="RECRUITMENT_DATA_RESET"));
+            Assert.Equal(execution.ResultHash,(await db.DiscoveryExecutions.SingleAsync()).ResultHash);
+        }
+        // Repeated reset does not remove accounting or append a phantom reset event.
+        var empty=await ResetPlan(client);await Data<JobDataResetResult>(await client.PostAsJsonAsync(Route+"/cleanup/reset-all/execute",new ResetAllJobDataCommand(JobDataReset.Confirmation,empty.Fingerprint)));
+        using var after=f.Services.CreateScope();var data=after.ServiceProvider.GetRequiredService<IApplicationDbContext>();
+        Assert.Single(await data.DiscoveryExecutionAttempts.ToListAsync());
+        Assert.Single(await data.DiscoveryExecutionEvents.Where(e=>e.State=="RECRUITMENT_DATA_RESET").ToListAsync());
+    }
+    [Theory]
+    [InlineData("QUEUED")][InlineData("CLAIMED")][InlineData("INGESTING")][InlineData("DISPATCH_UNKNOWN")][InlineData("PROVIDER_UNKNOWN")]
+    public async Task Active_or_ambiguous_execution_blocks_preview_and_execute_without_deletion(string state)
+    {
+        using var f=Factory();using var client=Admin(f);await SeedAll(f,client);var plan=await ResetPlan(client);
+        using(var scope=f.Services.CreateScope())
+        {
+            var db=scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();var e=await db.DiscoveryExecutions.SingleAsync();
+            e.State=state;e.ActiveKey="DISCOVERY";await db.SaveChangesAsync();
+        }
+        Assert.Equal(HttpStatusCode.Conflict,(await client.GetAsync(Route+"/cleanup/reset-all/preview")).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict,(await client.PostAsJsonAsync(Route+"/cleanup/reset-all/execute",new ResetAllJobDataCommand(JobDataReset.Confirmation,plan.Fingerprint))).StatusCode);
+        using var verify=f.Services.CreateScope();var data=verify.ServiceProvider.GetRequiredService<IApplicationDbContext>();
+        Assert.Equal(2,await data.DiscoveryExecutionVacancies.CountAsync());Assert.Single(await data.DiscoveryExecutionAttempts.ToListAsync());
+        Assert.DoesNotContain(await data.DiscoveryExecutionEvents.ToListAsync(),e=>e.State=="RECRUITMENT_DATA_RESET");
+    }
+    [Fact] public async Task Unrelated_job_added_after_preview_is_not_deleted_by_stale_confirmation()
+    {
+        using var f=Factory();using var client=Admin(f);await SeedAll(f,client);var plan=await ResetPlan(client);var id=Guid.NewGuid();
+        using(var scope=f.Services.CreateScope())
+        {
+            var db=scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
+            db.JobPostings.Add(new(){Id=id,CompanyName="Unrelated",PositionTitle="Manual JD",Location="Hanoi",Description="Not part of the approved preview",TechnologyStack=JsonDocument.Parse("[]")});
+            await db.SaveChangesAsync();
+        }
+        Assert.Equal(HttpStatusCode.Conflict,(await client.PostAsJsonAsync(Route+"/cleanup/reset-all/execute",new ResetAllJobDataCommand(JobDataReset.Confirmation,plan.Fingerprint))).StatusCode);
+        using var verify=f.Services.CreateScope();var data=verify.ServiceProvider.GetRequiredService<IApplicationDbContext>();
+        Assert.True(await data.JobPostings.AnyAsync(j=>j.Id==id));Assert.Equal(2,await data.DiscoveryExecutionVacancies.CountAsync());
+    }
+    [Fact] public async Task Same_count_job_replacement_invalidates_preview_and_preserves_unpreviewed_job()
+    {
+        using var f=Factory();using var client=Admin(f);await SeedAll(f,client);var original=Guid.NewGuid();var replacement=Guid.NewGuid();
+        using(var scope=f.Services.CreateScope())
+        {
+            var db=scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
+            db.JobPostings.Add(new(){Id=original,CompanyName="Manual",PositionTitle="Old manual JD",Location="Hanoi",Description="Previewed",TechnologyStack=JsonDocument.Parse("[]")});await db.SaveChangesAsync();
+        }
+        var before=await ResetPlan(client);
+        using(var scope=f.Services.CreateScope())
+        {
+            var db=scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();db.JobPostings.Remove(await db.JobPostings.SingleAsync(j=>j.Id==original));
+            db.JobPostings.Add(new(){Id=replacement,CompanyName="Unrelated",PositionTitle="New manual JD",Location="Hanoi",Description="Not previewed",TechnologyStack=JsonDocument.Parse("[]")});await db.SaveChangesAsync();
+        }
+        Assert.Equal(HttpStatusCode.Conflict,(await client.PostAsJsonAsync(Route+"/cleanup/reset-all/execute",new ResetAllJobDataCommand(JobDataReset.Confirmation,before.Fingerprint))).StatusCode);
+        using var verify=f.Services.CreateScope();var data=verify.ServiceProvider.GetRequiredService<IApplicationDbContext>();
+        Assert.True(await data.JobPostings.AnyAsync(j=>j.Id==replacement));Assert.Equal(2,await data.DiscoveryExecutionVacancies.CountAsync());
+    }
     private static async Task<JobDataResetPlan> ResetPlan(HttpClient c)=>await Data<JobDataResetPlan>(await c.GetAsync(Route+"/cleanup/reset-all/preview"));
     private static async Task SeedAll(Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program> f,HttpClient client)
     {
@@ -155,6 +231,12 @@ public sealed class DiscoveryCleanupApiTests(AuthApiFactory root) : IClassFixtur
         db.Skills.Add(new(){Id=Guid.NewGuid(),Name="Keep skill",Category="BACKEND",ExperienceLevel="USED"});
         db.Technologies.Add(new(){Id=Guid.NewGuid(),Name="Keep technology",Category="BACKEND"});
         db.CanonicalCvs.Add(new(){Id=Guid.NewGuid(),StorageKey="private/canonical.pdf",FileName="cv.pdf",ContentType="application/pdf",ContentHash=new string('a',64),FileSizeBytes=10});
+        var execution=Guid.NewGuid();var observation=Guid.NewGuid();
+        db.DiscoveryExecutions.Add(new(){Id=execution,ClientRequestId=Guid.NewGuid(),ActiveKey=null,State="SUCCEEDED",WorkflowRunId="10001",ResultHash=new string('c',64),Version=7});
+        db.DiscoveryExecutionAttempts.Add(new(){Id=execution,ExecutionId=execution,WorkflowRunId="10001",Outcome="SUCCEEDED",ActualRequests=1,CreditsDeducted=1,CreditsUsedAlternateHeader=6,HttpStatus=200});
+        db.DiscoveryExecutionEvents.Add(new(){Id=Guid.NewGuid(),ExecutionId=execution,State="SUCCEEDED"});
+        db.DiscoveryExecutionObservations.Add(new(){Id=observation,ExecutionId=execution,ItemIndex=0,RawJobPostingId=raw,PayloadHash=new string('a',64),ContentHash=new string('a',64),PayloadJson="{}"});
+        for(var i=0;i<2;i++)db.DiscoveryExecutionVacancies.Add(new(){Id=Guid.NewGuid(),ObservationId=observation,VacancyIndex=i,RawJobPostingId=raw,JobPostingId=job,Fingerprint=new string((char)('a'+i),64)});
         await db.SaveChangesAsync();
     }
     private static DeleteDiscoveryRunsCommand Command(DiscoveryCleanupBackup b)=>new(["legacy-a"],b.Fingerprint,b,true,DiscoveryCleanup.Confirmation);
@@ -198,6 +280,8 @@ public sealed class DiscoveryCleanupApiTests(AuthApiFactory root) : IClassFixtur
         {
             public async Task DeleteAllJobDataAsync(CancellationToken ct=default)
             {
+                db.DiscoveryExecutionVacancies.RemoveRange(await db.DiscoveryExecutionVacancies.ToListAsync(ct));
+                db.DiscoveryExecutionObservations.RemoveRange(await db.DiscoveryExecutionObservations.ToListAsync(ct));
                 db.DiscoveryCandidateReviewEvents.RemoveRange(await db.DiscoveryCandidateReviewEvents.ToListAsync(ct));
                 db.DiscoveryCandidateReviews.RemoveRange(await db.DiscoveryCandidateReviews.ToListAsync(ct));
                 db.DiscoveryCandidates.RemoveRange(await db.DiscoveryCandidates.ToListAsync(ct));

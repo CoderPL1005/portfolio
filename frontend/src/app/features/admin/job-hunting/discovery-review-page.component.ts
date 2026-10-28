@@ -9,15 +9,17 @@ import { DiscoveryReviewDetail, DiscoveryReviewList, DiscoveryQualityReport, Rev
 import { DiscoveryQualityComponent } from './discovery-quality.component';
 import { DiscoveryJobInformationComponent, discoveryTitle, evidenceText } from './discovery-job-information.component';
 import { safeAdminError } from '../shared/admin-api';
+import { DiscoveryExecutionComponent } from './discovery-execution.component';
 
 @Component({
-  selector: 'app-discovery-review-page', standalone: true, imports: [FormsModule, RouterLink, DatePipe, JsonPipe, DiscoveryQualityComponent, DiscoveryJobInformationComponent],
+  selector: 'app-discovery-review-page', standalone: true, imports: [FormsModule, RouterLink, DatePipe, JsonPipe, DiscoveryQualityComponent, DiscoveryJobInformationComponent, DiscoveryExecutionComponent],
   styleUrl: './discovery-review-page.component.css',
   template: `
     <main class="admin-page discovery-page">
       <header class="page-header"><div><p class="eyebrow">JOB HUNTING / DISCOVERY</p><h1>Cơ hội việc làm</h1>
         <p>Khám phá bài tuyển dụng và đánh giá cơ hội theo mục tiêu của bạn.</p></div>
         <button class="admin-button" type="button" (click)="load()" [disabled]="loading() || savingReview()">Làm mới</button></header>
+      @if(!detailMode()){<app-discovery-execution />}
       @if(error()){<p role="alert" class="admin-error feedback">{{error()}}</p>}
       @if(message()){<p role="status">{{message()}}</p>}
       @if(loading()){<p role="status">Đang tải…</p>}

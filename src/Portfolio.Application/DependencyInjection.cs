@@ -39,6 +39,7 @@ public static class DependencyInjection
     public static IServiceCollection AddApplication(this IServiceCollection services)
     {
         services.AddScoped<IRequestDispatcher, RequestDispatcher>();
+        services.AddScoped<IDiscoveryExecutionService, DiscoveryExecutionService>();
         services.AddScoped<IRequestHandler<SaveDiscoveryHumanReviewCommand, HumanReviewSummary>, SaveDiscoveryHumanReviewHandler>();
         services.AddScoped<IRequestValidator<SaveDiscoveryHumanReviewCommand>, SaveDiscoveryHumanReviewValidator>();
         services.AddScoped<IRequestHandler<GetDiscoveryReviewHistoryQuery, DiscoveryReviewHistory>, GetDiscoveryReviewHistoryHandler>();

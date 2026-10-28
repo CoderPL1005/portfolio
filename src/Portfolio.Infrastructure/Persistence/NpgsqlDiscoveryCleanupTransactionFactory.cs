@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Portfolio.Application.Common.Abstractions.Persistence;
+using Portfolio.Application.Features.JobHunting;
 
 namespace Portfolio.Infrastructure.Persistence;
 
@@ -17,8 +18,9 @@ public sealed class NpgsqlDiscoveryCleanupTransactionFactory(ApplicationDbContex
             // phantom imports and first reviews. Ordinary SELECT remains available.
             await db.Database.ExecuteSqlRawAsync("SET LOCAL lock_timeout = '5s'", ct);
             await db.Database.ExecuteSqlRawAsync(allJobs
-                ? "LOCK TABLE job_postings, job_applications, raw_job_postings, submission_attempts, submission_attempt_events, job_application_documents, job_application_events, raw_job_posting_attachments, discovery_candidates, discovery_candidate_reviews, discovery_candidate_review_events IN SHARE ROW EXCLUSIVE MODE"
+                ? "LOCK TABLE discovery_executions, discovery_execution_attempts, discovery_execution_events, discovery_execution_observations, discovery_execution_vacancies, job_postings, job_applications, raw_job_postings, submission_attempts, submission_attempt_events, job_application_documents, job_application_events, raw_job_posting_attachments, discovery_candidates, discovery_candidate_reviews, discovery_candidate_review_events IN SHARE ROW EXCLUSIVE MODE"
                 : "LOCK TABLE discovery_candidates, discovery_candidate_reviews, discovery_candidate_review_events IN SHARE ROW EXCLUSIVE MODE", ct);
+            if(allJobs)await JobDataReset.RequireInactiveExecutionAsync(db,ct);
             return new Transaction(tx, db, allJobs);
         }
         catch { await tx.DisposeAsync(); throw; }
@@ -28,11 +30,14 @@ public sealed class NpgsqlDiscoveryCleanupTransactionFactory(ApplicationDbContex
         public async Task DeleteAllJobDataAsync(CancellationToken ct = default)
         {
             if (!allJobs) throw new InvalidOperationException("Reset-all requires the full job-data transaction scope.");
+            await JobDataReset.RequireInactiveExecutionAsync(db,ct);
             // Static, explicit FK order; never TRUNCATE/CASCADE or touch unrelated tables.
             await db.Database.ExecuteSqlRawAsync("""
                 DELETE FROM discovery_candidate_review_events;
                 DELETE FROM discovery_candidate_reviews;
                 DELETE FROM discovery_candidates;
+                DELETE FROM discovery_execution_vacancies;
+                DELETE FROM discovery_execution_observations;
                 DELETE FROM submission_attempt_events;
                 DELETE FROM submission_attempts;
                 DELETE FROM job_application_documents;
