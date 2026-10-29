@@ -54,6 +54,7 @@ public sealed class DiscoveryCleanupPostgresTests
                 foreach(var sql in db.GetService<IMigrationsSqlGenerator>().Generate(migration.UpOperations))
                 {await using var command=new NpgsqlCommand(sql.CommandText,connection);await command.ExecuteNonQueryAsync();}
             }
+            await using (var origin = new NpgsqlCommand("ALTER TABLE discovery_candidates ADD COLUMN candidate_origin varchar(40) NOT NULL DEFAULT 'CLASSIFIER'", connection)) await origin.ExecuteNonQueryAsync();
             await using(var cmd=new NpgsqlCommand("INSERT INTO admin_users(id) VALUES (@id)",connection)){cmd.Parameters.AddWithValue("id",Actor.Id);await cmd.ExecuteNonQueryAsync();}
             foreach(var run in new[]{"legacy-pg",FormerRun})db.DiscoveryCandidates.Add(new(){Id=Guid.NewGuid(),RunId=run,Query="Backend",PageNumber=1,ItemIndex=0,
                 ContentStatus="VALID_RECRUITMENT",TargetStatus="NOT_MATCHED",Payload="{}",PayloadHash=new string('a',64),IngestedAt=DateTimeOffset.UtcNow});

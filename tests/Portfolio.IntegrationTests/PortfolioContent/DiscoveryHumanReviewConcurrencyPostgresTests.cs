@@ -41,6 +41,7 @@ public sealed class DiscoveryHumanReviewConcurrencyPostgresTests
             var b45=assembly.CreateMigration(assembly.Migrations[next],seed.Database.ProviderName!);
             foreach(var sql in seed.GetService<IMigrationsSqlGenerator>().Generate(b44.UpOperations.Concat(b45.UpOperations).ToArray()))
             {await using var cmd=new NpgsqlCommand(sql.CommandText,connection);await cmd.ExecuteNonQueryAsync();}
+            await using (var origin = new NpgsqlCommand("ALTER TABLE discovery_candidates ADD COLUMN candidate_origin varchar(40) NOT NULL DEFAULT 'CLASSIFIER'", connection)) await origin.ExecuteNonQueryAsync();
             await using(var cmd=new NpgsqlCommand("INSERT INTO admin_users(id) VALUES (@id)",connection))
             {cmd.Parameters.AddWithValue("id",Actor.Id);await cmd.ExecuteNonQueryAsync();}
             var id=Guid.NewGuid();
