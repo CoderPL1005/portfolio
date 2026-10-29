@@ -10,13 +10,28 @@ export interface DiscoveryReviewItem {
 export interface DiscoveryReviewDetail {
   id: string; runId: string; query: string; pageNumber: number; ingestedAt: string; duplicateCount: number; item: DiscoveryReviewItem;
   humanReview?: HumanReview;
+  origin?: 'CLASSIFIER'; recovery?: null; originalQuery?:string|null; queryAvailability?:'AVAILABLE';
 }
+export interface DiscoveryRecoveryEnvelope {
+  origin:'PERSISTED_OBSERVATION_RECOVERY';version:'recovery-review-v1';executionId:string;observationId:string;workflowRunId:string;
+  operationId:string;receiptId:string;auditId:string;itemIndex:number;sourceFingerprint:string;
+  originalQuery:null;originalClassifierResult:null;originalReviewBundle:null;providerPostId:string;
+  sourceUrl:string|null;providerSourceUrl:string|null;rawContent:string;contentHash:string;contentGroupHash:string;publishedAt:string|null;
+  recoveryDecision:{contentStatus:'NEEDS_REVIEW';targetStatus:'INSUFFICIENT_DATA';verificationStatus:'NOT_CHECKED'};
+  sourceWarnings:string[];missingFields:string[];recoveryAt:string;
+}
+export interface DiscoveryRecoveryDetail {
+  id:string;runId:string;query:'';pageNumber:number;ingestedAt:string;duplicateCount:number;
+  origin:'PERSISTED_OBSERVATION_RECOVERY';item:null;originalQuery:null;originalClassifierResult:null;queryAvailability:'UNAVAILABLE';
+  recovery:DiscoveryRecoveryEnvelope;humanReview?:HumanReview;identityWarning:boolean;
+}
+export type DiscoveryReviewRecord=DiscoveryReviewDetail|DiscoveryRecoveryDetail;
 export interface HumanReview {
-  status: 'UNREVIEWED'|'CONFIRMED'|'CORRECTED'|'UNCERTAIN'; version: number;
+  status: 'UNREVIEWED'|'CONFIRMED'|'CORRECTED'|'UNCERTAIN'|'REVIEWED_RECOVERY'; version: number;
   contentStatus: string|null; targetStatus: string|null; notes: string|null;
   reviewedAt: string|null; reviewedByAdminId: string|null;
 }
-export interface HumanReviewWrite { expectedVersion: number; action: 'CONFIRMED'|'CORRECTED'|'UNCERTAIN'; contentStatus?: string; targetStatus?: string; notes: string }
+export interface HumanReviewWrite { expectedVersion: number; action: 'CONFIRMED'|'CORRECTED'|'UNCERTAIN'|'REVIEW_RECOVERY'; contentStatus?: string; targetStatus?: string; notes: string }
 export interface ReviewHistory extends PagedResult<HumanReview> { current: HumanReview }
 export interface QualityCounts { total:number; reviewed:number; unreviewed:number; confirmed:number; corrected:number; uncertain:number }
 export interface DimensionQuality {
@@ -26,8 +41,10 @@ export interface DimensionQuality {
 }
 export interface QualityLevel { contentValidity:DimensionQuality; targetMatching:DimensionQuality }
 export interface QualityCohort { classifierVersion:string;profileFingerprint:string|null;preferencesFingerprint:string|null;counts:QualityCounts;observationLevel:QualityLevel;uniqueContentLevel:QualityLevel }
-export interface DiscoveryQualityReport { counts:QualityCounts;observationLevel:QualityLevel;uniqueContentLevel:QualityLevel;cohorts:QualityCohort[];overallMatricesAvailable:boolean;evaluatedAt:string;notice:string }
-export interface DiscoveryReviewList {
-  results: PagedResult<DiscoveryReviewDetail>;
+export interface DiscoveryQualityReport { counts:QualityCounts;observationLevel:QualityLevel;uniqueContentLevel:QualityLevel;cohorts:QualityCohort[];overallMatricesAvailable:boolean;evaluatedAt:string;notice:string;
+  recoveryCoverage?:{origin:string;version:string;total:number;reviewed:number;unreviewed:number;uncertain:number;reviewedRecovery:number;uniqueContents:number;predictionUnavailable:true;precision:null;recall:null};
+}
+export interface DiscoveryReviewList<T extends DiscoveryReviewRecord=DiscoveryReviewDetail> {
+  results: PagedResult<T>;
   counts: { total: number; valid: number; invalid: number; needsReview: number; targetMatch: number; identityWarnings: number; duplicateItems: number };
 }

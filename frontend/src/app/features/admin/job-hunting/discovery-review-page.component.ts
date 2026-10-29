@@ -1,11 +1,11 @@
-import { Component, DestroyRef, inject, signal } from '@angular/core';
+import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { DatePipe, JsonPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { combineLatest } from 'rxjs';
 import { JobHuntingService } from './job-hunting.service';
-import { DiscoveryReviewDetail, DiscoveryReviewList, DiscoveryQualityReport, ReviewHistory, HumanReviewWrite } from './discovery-review.models';
+import { DiscoveryReviewDetail, DiscoveryRecoveryDetail, DiscoveryReviewRecord, DiscoveryReviewList, DiscoveryQualityReport, ReviewHistory, HumanReviewWrite } from './discovery-review.models';
 import { DiscoveryQualityComponent } from './discovery-quality.component';
 import { DiscoveryJobInformationComponent, discoveryTitle, evidenceText } from './discovery-job-information.component';
 import { safeAdminError } from '../shared/admin-api';
@@ -23,8 +23,34 @@ import { DiscoveryExecutionComponent } from './discovery-execution.component';
       @if(error()){<p role="alert" class="admin-error feedback">{{error()}}</p>}
       @if(message()){<p role="status">{{message()}}</p>}
       @if(loading()){<p role="status">Đang tải…</p>}
-      @if(detail(); as d){
+      @if(displayedDetail(); as d){
         <a routerLink="/admin/job-hunting/discovery" class="back-link">← Tất cả cơ hội</a>
+        @if(d.recovery;as r){
+          <section class="detail-layout">
+            <header class="job-heading"><h2>Khôi phục để đánh giá</h2><p>Không có dữ liệu truy vấn gốc</p><p>{{r.publishedAt ? ('Ngày đăng: ' + (r.publishedAt | date:'medium')) : 'Chưa xác định ngày đăng'}}</p></header>
+            <section class="detail-section original-post"><h3>Nội dung bài đăng gốc</h3>
+              @if(safeLink(r.sourceUrl);as link){<a [href]="link" target="_blank" rel="noopener noreferrer" class="source-link">Mở bài viết Facebook</a>}
+              @else{<p>Nguồn chưa xác minh</p>}
+              @if(r.sourceWarnings.includes('POST_ID_URL_MISMATCH')){<p role="status">Provider trả ID và URL chưa được xác minh tương đương. Chỉ giữ để đánh giá, không dùng để tạo Job.</p>}
+              <pre data-testid="raw-content">{{r.rawContent}}</pre>
+            </section>
+            <section class="detail-section assessment"><h3>Không có kết quả phân loại gốc</h3><p>Chưa đủ dữ liệu để kết luận. Recovery không tái tạo query, classifier hoặc vacancy đã mất.</p></section>
+            <section class="detail-section human-review admin-form" aria-label="Human review">
+              <h3>Human Review · đánh giá nguồn đã lưu</h3><p>{{label(d.humanReview?.status ?? 'UNREVIEWED')}} · phiên bản {{d.humanReview?.version ?? 0}}</p>
+              @if(d.humanReview?.notes){<p>{{d.humanReview?.notes}} · {{d.humanReview?.reviewedAt | date:'medium'}}</p>}
+              <div class="admin-form-grid"><label>Kết luận nội dung <select [(ngModel)]="draft(d).contentStatus" [disabled]="savingReview()">@for(s of contentStatuses;track s){<option [value]="s">{{label(s)}}</option>}</select></label>
+              <label>Kết luận phù hợp <select [(ngModel)]="draft(d).targetStatus" [disabled]="savingReview()">@for(s of targetStatuses;track s){<option [value]="s">{{label(s)}}</option>}</select></label></div>
+              <label for="human-notes">Lý do (bắt buộc)</label><textarea id="human-notes" [value]="draft(d).notes" (input)="recoveryNotesChanged(d,$event)" [disabled]="savingReview()" maxlength="2000" rows="3"></textarea>
+              <div class="admin-actions"><button type="button" class="admin-button primary" [disabled]="!draft(d).notes.trim() || savingReview() || reviewConflict()" (click)="saveReview('REVIEW_RECOVERY')">Lưu đánh giá</button>
+              <button type="button" class="admin-button" [disabled]="!draft(d).notes.trim() || savingReview() || reviewConflict()" (click)="saveReview('UNCERTAIN')">Chưa thể kết luận</button></div>
+              @if(reviewConflict()){<p role="alert">Review đã thay đổi. Draft được giữ lại; tải lại quyết định trước khi tự lưu lần nữa.</p><button type="button" class="admin-button" (click)="load()">Tải lại quyết định</button>}
+              <button type="button" class="admin-button" (click)="loadHistory(1)" [disabled]="historyLoading()">Xem lịch sử đánh giá</button>
+              @if(history();as h){<ol class="review-history">@for(e of h.items;track e.version){<li>v{{e.version}} · {{label(e.status)}}<p>{{e.notes}}</p><p>{{e.reviewedAt | date:'medium'}} · Admin {{e.reviewedByAdminId}}</p></li>}</ol>
+              <div class="admin-actions"><button class="admin-button" (click)="loadHistory(h.page-1)" [disabled]="h.page<=1 || historyLoading()">Trước</button><button class="admin-button" (click)="loadHistory(h.page+1)" [disabled]="h.page>=h.totalPages || historyLoading()">Sau</button></div>}
+            </section>
+            <details class="technical detail-section"><summary>Technical Details · recovery provenance</summary><p>{{r.origin}} · {{r.version}} · {{r.executionId}} · item {{r.itemIndex}}</p><p>Receipt {{r.receiptId}} · operation {{r.operationId}}</p><p>{{r.sourceWarnings.join(', ')}}</p><p>Provider ID: {{r.providerPostId}} · URL provider (chưa xác minh): {{r.providerSourceUrl}}</p><p>Thiếu: {{r.missingFields.join(', ')}}</p></details>
+          </section>
+        }@else if(d.item){
         <section class="detail-layout">
           <header class="job-heading"><h2>{{title(d.item.extracted)}}</h2><p>{{text(d.item.extracted['company']) || 'Chưa xác định công ty'}} · {{text(d.item.extracted['location']) || 'Chưa xác định địa điểm'}}</p>
             <p>{{d.item.publishedAt ? ('Ngày đăng: ' + (d.item.publishedAt | date:'medium')) : 'Chưa xác định ngày đăng'}}</p>
@@ -74,6 +100,7 @@ import { DiscoveryExecutionComponent } from './discovery-execution.component';
             <p>{{d.item.classifierVersion}} · Profile {{d.item.profileFingerprint ?? 'UNKNOWN'}} · Preferences {{d.item.preferencesFingerprint ?? 'UNKNOWN'}}</p>
           </details>
         </section>
+        }
       }@else if(!detailMode()){
         @if(list(); as data){@if(data.results.total > 0 && !loading()){
           <section class="summary" aria-label="Tổng quan trong phạm vi lọc">
@@ -102,14 +129,18 @@ import { DiscoveryExecutionComponent } from './discovery-execution.component';
           @if(!loading() && !error()){
             @if(data.results.total){
               <section class="candidate-list" aria-label="Danh sách cơ hội">
-                @for(d of data.results.items;track d.id){<article class="job-card">
+                @for(d of data.results.items;track d.id){@if(d.recovery;as r){<article class="job-card"><div class="badges"><span class="status-badge neutral">Khôi phục để đánh giá</span><span class="status-badge">{{label(d.humanReview?.status ?? 'UNREVIEWED')}}</span></div>
+                  <h2><a [routerLink]="['/admin/job-hunting/discovery',d.id]">Bài viết chờ Human Review</a></h2><p>Không có kết quả phân loại gốc</p>
+                  @if(r.sourceWarnings.includes('POST_ID_URL_MISMATCH')){<p>Nguồn chưa xác minh</p>}
+                  <footer><span>{{r.publishedAt ? ('Ngày đăng: ' + (r.publishedAt | date:'shortDate')) : 'Chưa xác định ngày đăng'}}</span><a [routerLink]="['/admin/job-hunting/discovery',d.id]">Xem chi tiết →</a></footer>
+                </article>}@else if(d.item){<article class="job-card">
                   <div class="badges"><span class="status-badge" [class.match]="d.item.targetMatching.status==='TARGET_MATCH'">{{label(d.item.targetMatching.status)}}</span><span class="status-badge neutral">{{label(d.humanReview?.status ?? 'UNREVIEWED')}}</span></div>
                   <h2><a [routerLink]="['/admin/job-hunting/discovery',d.id]">{{title(d.item.extracted)}}</a></h2>
                   <p class="company">{{text(d.item.extracted['company']) || 'Chưa xác định công ty'}}</p>
                   <p class="muted">{{text(d.item.extracted['location']) || 'Chưa xác định địa điểm'}}</p>
                   <div class="job-tags">@if(text(d.item.extracted['technologies']);as tech){<span>{{tech}}</span>}@if(seniority(d);as level){<span>{{level}}</span>}</div>
                   <footer><span>{{d.item.publishedAt ? ('Ngày đăng: ' + (d.item.publishedAt | date:'shortDate')) : 'Chưa xác định ngày đăng'}}</span><a [routerLink]="['/admin/job-hunting/discovery',d.id]" [attr.aria-label]="'Xem chi tiết: ' + title(d.item.extracted)">Xem chi tiết →</a></footer>
-                </article>}
+                </article>}}
               </section>
               @if(data.results.totalPages>1){<nav aria-label="Phân trang" class="pagination"><button class="admin-button" type="button" [disabled]="page <= 1 || loading()" (click)="changePage(-1)">Trước</button><span>Trang {{page}} / {{data.results.totalPages}}</span><button class="admin-button" type="button" [disabled]="page >= data.results.totalPages || loading()" (click)="changePage(1)">Sau</button></nav>}
             }@else{
@@ -133,16 +164,21 @@ import { DiscoveryExecutionComponent } from './discovery-execution.component';
 })
 export class DiscoveryReviewPageComponent {
   private api = inject(JobHuntingService); private route = inject(ActivatedRoute); private destroyRef = inject(DestroyRef);
-  list = signal<DiscoveryReviewList | null>(null); detail = signal<DiscoveryReviewDetail | null>(null);
+  list = signal<DiscoveryReviewList<DiscoveryReviewRecord> | null>(null);
+  // Preserve the normal-item editing seam without pretending a recovery Item
+  // exists. The rendering boundary remains a discriminated union.
+  detail = signal<DiscoveryReviewDetail | null>(null);
+  private recoveredDetail = signal<DiscoveryRecoveryDetail | null>(null);
+  displayedDetail = computed<DiscoveryReviewRecord | null>(() => this.recoveredDetail() ?? this.detail());
   detailMode = signal(false);
   error = signal(''); message = signal(''); loading = signal(false);
   contentStatus = ''; targetStatus = ''; runId = ''; collectedDate = ''; identityOnly = false; duplicatesOnly = false; page = 1;
   title=discoveryTitle; text=evidenceText;
-  seniority(d:DiscoveryReviewDetail){return this.title(d.item.extracted).match(/\b(?:intern(?:ship)?|fresher|junior|middle|senior|lead)\b/gi)?.join(' / ') || '';}
+  seniority(d:DiscoveryReviewRecord){return d.item ? this.title(d.item.extracted).match(/\b(?:intern(?:ship)?|fresher|junior|middle|senior|lead)\b/gi)?.join(' / ') || '' : '';}
   readonly tabs = [{id:'all',label:'Tất cả'},{id:'matched',label:'Phù hợp'},{id:'needs-review',label:'Cần xem xét'},{id:'reviewed',label:'Đã đánh giá'}];
   label(value:string):string {
     const labels:Record<string,string>={TARGET_MATCH:'Phù hợp mục tiêu',FALLBACK_MATCH:'Cơ hội dự phòng',POTENTIAL_MATCH:'Có thể phù hợp',NOT_MATCHED:'Không phù hợp',INSUFFICIENT_DATA:'Chưa đủ dữ liệu',VALID_RECRUITMENT:'Có nội dung tuyển dụng',INVALID_RECRUITMENT:'Không phải tin tuyển dụng',NEEDS_REVIEW:'Cần xem xét nội dung',UNREVIEWED:'Chưa đánh giá',REVIEWED:'Đã đánh giá',CONFIRMED:'Đã xác nhận',CORRECTED:'Đã chỉnh sửa',UNCERTAIN:'Chưa thể kết luận'};
-    return labels[value] ?? 'Chưa có nhãn';
+    return value==='REVIEWED_RECOVERY' ? 'Đã đánh giá nguồn khôi phục' : labels[value] ?? 'Chưa có nhãn';
   }
   activeTab(){
     if(!this.contentStatus && !this.targetStatus && !this.reviewState)return 'all';
@@ -158,22 +194,28 @@ export class DiscoveryReviewPageComponent {
   clearFilters(){this.contentStatus=this.targetStatus=this.reviewState=this.runId=this.collectedDate='';this.identityOnly=this.duplicatesOnly=false;this.filter();}
   targetStatuses = ['TARGET_MATCH','FALLBACK_MATCH','POTENTIAL_MATCH','NOT_MATCHED','INSUFFICIENT_DATA'];
   contentStatuses = ['VALID_RECRUITMENT','INVALID_RECRUITMENT','NEEDS_REVIEW'];
-  reviewStates = ['REVIEWED','UNREVIEWED','CONFIRMED','CORRECTED','UNCERTAIN']; reviewState='';
+  reviewStates = ['REVIEWED','UNREVIEWED','CONFIRMED','CORRECTED','UNCERTAIN','REVIEWED_RECOVERY']; reviewState='';
   savingReview=signal(false); reviewConflict=signal(false); historyLoading=signal(false); metricsLoading=signal(false);
   history=signal<ReviewHistory|null>(null); metrics=signal<DiscoveryQualityReport|null>(null);
   private drafts:Record<string,{notes:string;contentStatus:string;targetStatus:string}>={};
-  draft(d:DiscoveryReviewDetail){return this.drafts[d.id] ??= {notes:'',contentStatus:d.humanReview?.contentStatus ?? d.item.contentValidity.status,targetStatus:d.humanReview?.targetStatus ?? d.item.targetMatching.status};}
+  draft(d:DiscoveryReviewRecord){return this.drafts[d.id] ??= {notes:'',contentStatus:d.humanReview?.contentStatus ?? d.item?.contentValidity.status ?? 'NEEDS_REVIEW',targetStatus:d.humanReview?.targetStatus ?? d.item?.targetMatching.status ?? 'INSUFFICIENT_DATA'};}
+  recoveryNotesChanged(d:DiscoveryReviewRecord,event:Event){
+    const input=event.target as HTMLTextAreaElement|null;
+    if(input)this.draft(d).notes=input.value;
+  }
   saveReview(action:HumanReviewWrite['action']) {
-    const d=this.detail();if(!d || this.savingReview() || this.reviewConflict())return;
+    const d=this.displayedDetail();if(!d || this.savingReview() || this.reviewConflict())return;
     const draft=this.draft(d);if(!draft.notes.trim())return;
     const body:HumanReviewWrite={expectedVersion:d.humanReview?.version ?? 0,action,notes:draft.notes};
-    if(action==='CORRECTED'){body.contentStatus=draft.contentStatus;body.targetStatus=draft.targetStatus;}
+    if(action==='CORRECTED'||action==='REVIEW_RECOVERY'){body.contentStatus=draft.contentStatus;body.targetStatus=draft.targetStatus;}
     this.savingReview.set(true);this.error.set('');
     this.api.saveDiscoveryReview(d.id,body).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({next:review=>{
-      this.savingReview.set(false);delete this.drafts[d.id];if(this.detail()?.id===d.id){this.detail.set({...d,humanReview:review});this.history.set(null);this.message.set('Đã lưu đánh giá.');}
-    },error:e=>{this.savingReview.set(false);if(this.detail()?.id===d.id){this.error.set(safeAdminError(e));if(e?.status===409)this.reviewConflict.set(true);}}});
+      this.savingReview.set(false);delete this.drafts[d.id];if(this.displayedDetail()?.id===d.id){
+        if(d.origin==='PERSISTED_OBSERVATION_RECOVERY')this.recoveredDetail.set({...d,humanReview:review});else this.detail.set({...d,humanReview:review});
+        this.history.set(null);this.message.set('Đã lưu đánh giá.');}
+    },error:e=>{this.savingReview.set(false);if(this.displayedDetail()?.id===d.id){this.error.set(safeAdminError(e));if(e?.status===409)this.reviewConflict.set(true);}}});
   }
-  loadHistory(page:number){const d=this.detail();if(!d || this.historyLoading())return;this.historyLoading.set(true);
+  loadHistory(page:number){const d=this.displayedDetail();if(!d || this.historyLoading())return;this.historyLoading.set(true);
     const request=this.requestNumber;
     this.api.discoveryHistory(d.id,page).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({next:h=>{this.historyLoading.set(false);if(request===this.requestNumber)this.history.set(h);},error:e=>{this.historyLoading.set(false);if(request===this.requestNumber)this.error.set(safeAdminError(e));}});}
   private metricsRequest = 0;
@@ -192,7 +234,7 @@ export class DiscoveryReviewPageComponent {
   load() {
     const request = ++this.requestNumber; this.loading.set(true); this.error.set('');
     const id = this.route.snapshot.paramMap.get('id');
-    this.detailMode.set(!!id); this.detail.set(null);
+    this.detailMode.set(!!id); this.detail.set(null); this.recoveredDetail.set(null);
     this.history.set(null);
     const params: Record<string,string|number|boolean> = { page: this.page, pageSize: 20 };
     if (this.contentStatus) params['contentStatus'] = this.contentStatus;
@@ -203,7 +245,9 @@ export class DiscoveryReviewPageComponent {
     if (this.reviewState) params['reviewState'] = this.reviewState;
     if(this.collectedDate){const from=new Date(`${this.collectedDate}T00:00:00`),before=new Date(from);before.setDate(before.getDate()+1);params['collectedFrom']=from.toISOString();params['collectedBefore']=before.toISOString();}
     const failed = (e: unknown) => { if(request === this.requestNumber){this.error.set(safeAdminError(e)); this.loading.set(false);} };
-    if (id) this.api.discoveryItem(id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({next:d=>{if(request===this.requestNumber){this.detail.set(d);this.reviewConflict.set(false);this.loading.set(false);}},error:failed});
+    if (id) this.api.discoveryItem(id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({next:d=>{if(request===this.requestNumber){
+      if(d.origin==='PERSISTED_OBSERVATION_RECOVERY')this.recoveredDetail.set(d);else this.detail.set(d);
+      this.reviewConflict.set(false);this.loading.set(false);}},error:failed});
     else {this.detail.set(null);this.api.discovery(params).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({next:d=>{if(request===this.requestNumber){this.list.set(d);this.loading.set(false);}},error:failed});}
   }
   safeLink(value: string | null): string | null {

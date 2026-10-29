@@ -5,6 +5,7 @@ public sealed class DiscoveryCandidate
 {
     public Guid Id { get; set; }
     public string RunId { get; set; } = null!;
+    public string CandidateOrigin { get; set; } = "CLASSIFIER";
     public string Query { get; set; } = null!;
     public int PageNumber { get; set; }
     public int ItemIndex { get; set; }

@@ -670,9 +670,10 @@ function reviewAdapter(rows) {
   });
 }
 
-test('B44 RED: numeric/PFBID mismatch survives in review with observed URL, not a verified alias', () => {
+test('B44 RED: numeric/PFBID mismatch survives in review with observed URL, not a verified alias', async () => {
   const observedUrl = 'https://www.facebook.com/fixture/posts/pfbidSyntheticUnverified';
-  const adapter = reviewAdapter([reviewRow('84001', reviewText, observedUrl)]);
+  const row = reviewRow('84001', reviewText, observedUrl);
+  const adapter = reviewAdapter([row]);
   // Existing strict acceptance must not be relaxed to satisfy review retention.
   assert.equal(adapter.records.size, 0);
   assert.equal(adapter.itemStats.rejectionReasons[0].reason, 'POST_ID_URL_MISMATCH');
@@ -680,9 +681,48 @@ test('B44 RED: numeric/PFBID mismatch survives in review with observed URL, not 
     index: item.itemIndex, providerPostId: item.providerPostId, sourceUrl: item.sourceUrl,
     rawContent: item.rawContent, warnings: item.sourceWarnings, verification: item.verificationStatus
   })), [{
-    index: 0, providerPostId: '84001', sourceUrl: observedUrl, rawContent: reviewText,
-    warnings: ['POST_ID_URL_MISMATCH'], verification: 'NOT_CHECKED'
+    index: 0, providerPostId: '84001', sourceUrl: null, rawContent: reviewText,
+    warnings: ['POST_ID_URL_MISMATCH', 'POST_URL_INVALID_OR_UNSUPPORTED'], verification: 'NOT_CHECKED'
   }], 'Missing content-first review observation; rejection must not discard the item');
+
+  // The original URL belongs to the worker observation, not the canonical URL
+  // or a fabricated field on DiscoveryReviewItem. Exercise the actual mapping.
+  const { runDiscoveryExecution } = await import('../src/discovery-execution-worker.mjs');
+  const previousKey = process.env.SOCIALAPIS_API_KEY;
+  const previousFetch = globalThis.fetch;
+  let savedObservations; let mockRequests = 0;
+  try {
+    process.env.SOCIALAPIS_API_KEY = 'SYNTHETIC_B44_OFFLINE_KEY';
+    globalThis.fetch = () => { throw new Error('REAL_NETWORK_FORBIDDEN'); };
+    const backend = {
+      getConfiguration: async () => ({ maxRequests: 1, maxCredits: 1, freePlanConfirmed: true,
+        noCashConfirmed: true, query: reviewQuery, semanticEnabled: false }),
+      claim: async () => ({ claimed: true }),
+      saveObservations: async (_id, observations) => { savedObservations = structuredClone(observations); },
+      extract: async () => assert.fail('SEMANTIC_CALL_FORBIDDEN'),
+      complete: async (_id, result) => result
+    };
+    await runDiscoveryExecution({ executionId: '11111111-1111-4111-8111-111111111111', workflowRunId: '10001' }, {
+      backend, providerTransport: async () => {
+        mockRequests++;
+        return new Response(JSON.stringify({ data: { items: [row] }, meta: { creditsCharged: 1 } }), {
+          status: 200, headers: { 'content-type': 'application/json', 'X-SocialAPIs-Credits-Deducted': '1' }
+        });
+      }
+    });
+    assert.equal(mockRequests, 1);
+    assert.equal(savedObservations.length, 1);
+    const observation = savedObservations[0];
+    assert.equal(observation.sourceUrl, null);
+    assert.equal(observation.providerSourceUrl, observedUrl);
+    assert.equal(observation.outcome, 'POST_ID_URL_MISMATCH');
+    assert.equal(observation.providerPostId, '84001');
+    assert.equal(observation.rawContent, reviewText);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousKey === undefined) delete process.env.SOCIALAPIS_API_KEY;
+    else process.env.SOCIALAPIS_API_KEY = previousKey;
+  }
 });
 
 test('B44 RED: every input index has an outcome, including malformed, blank, oversized and duplicate items', () => {

@@ -5,6 +5,7 @@ import { DiscoveryQualityReport } from './discovery-review.models';
 @Component({selector:'app-discovery-quality',standalone:true,imports:[DatePipe],template:`
   @if(report();as r){<section class="space-y-4 rounded border p-4" aria-label="Chất lượng trên tập gán nhãn">
     <h2 class="text-xl font-semibold">Chất lượng classifier trên tập được Admin đánh giá</h2>
+    @if(r.recoveryCoverage;as recovery){@if(recovery.total){<section><h3>Khôi phục để đánh giá</h3><p>Không có kết quả phân loại gốc</p><p>{{recovery.total}} observations · {{recovery.reviewed}} đã đánh giá. Không tính vào precision/recall của classifier.</p></section>}}
     <p>{{r.notice}}</p><p>Đánh giá lúc {{r.evaluatedAt | date:'medium'}}. Không suy rộng từ mẫu nhỏ ra toàn bộ Facebook.</p>
     <p>Total {{r.counts.total}} · Reviewed {{r.counts.reviewed}} · Unreviewed {{r.counts.unreviewed}} · Confirmed {{r.counts.confirmed}} · Corrected {{r.counts.corrected}} · Uncertain {{r.counts.uncertain}}</p>
     @for(c of r.cohorts;track $index){<section class="space-y-3 border-t pt-3">

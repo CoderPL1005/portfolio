@@ -798,6 +798,14 @@ namespace Portfolio.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.Property<string>("CandidateOrigin")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasDefaultValue("CLASSIFIER")
+                        .HasColumnName("candidate_origin");
+
                     b.Property<string>("ContentGroupHash")
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)")
@@ -924,7 +932,7 @@ namespace Portfolio.Infrastructure.Persistence.Migrations
 
                     b.ToTable("discovery_candidate_reviews", null, t =>
                         {
-                            t.HasCheckConstraint("ck_discovery_review_labels", "(status = 'UNCERTAIN' AND content_status IS NULL AND target_status IS NULL) OR (status IN ('CONFIRMED','CORRECTED') AND content_status IS NOT NULL AND target_status IS NOT NULL AND content_status IN ('VALID_RECRUITMENT','INVALID_RECRUITMENT','NEEDS_REVIEW') AND target_status IN ('TARGET_MATCH','FALLBACK_MATCH','POTENTIAL_MATCH','NOT_MATCHED','INSUFFICIENT_DATA'))");
+                            t.HasCheckConstraint("ck_discovery_review_labels", "(status = 'UNCERTAIN' AND content_status IS NULL AND target_status IS NULL) OR (status IN ('CONFIRMED','CORRECTED','REVIEWED_RECOVERY') AND content_status IS NOT NULL AND target_status IS NOT NULL AND content_status IN ('VALID_RECRUITMENT','INVALID_RECRUITMENT','NEEDS_REVIEW') AND target_status IN ('TARGET_MATCH','FALLBACK_MATCH','POTENTIAL_MATCH','NOT_MATCHED','INSUFFICIENT_DATA'))");
 
                             t.HasCheckConstraint("ck_discovery_review_notes", "length(btrim(notes)) BETWEEN 1 AND 2000");
 
@@ -993,7 +1001,7 @@ namespace Portfolio.Infrastructure.Persistence.Migrations
                         {
                             t.HasCheckConstraint("ck_discovery_review_event_hash", "observation_payload_hash ~ '^[0-9a-f]{64}$'");
 
-                            t.HasCheckConstraint("ck_discovery_review_event_labels", "(status = 'UNCERTAIN' AND content_status IS NULL AND target_status IS NULL) OR (status IN ('CONFIRMED','CORRECTED') AND content_status IS NOT NULL AND target_status IS NOT NULL AND content_status IN ('VALID_RECRUITMENT','INVALID_RECRUITMENT','NEEDS_REVIEW') AND target_status IN ('TARGET_MATCH','FALLBACK_MATCH','POTENTIAL_MATCH','NOT_MATCHED','INSUFFICIENT_DATA'))");
+                            t.HasCheckConstraint("ck_discovery_review_event_labels", "(status = 'UNCERTAIN' AND content_status IS NULL AND target_status IS NULL) OR (status IN ('CONFIRMED','CORRECTED','REVIEWED_RECOVERY') AND content_status IS NOT NULL AND target_status IS NOT NULL AND content_status IN ('VALID_RECRUITMENT','INVALID_RECRUITMENT','NEEDS_REVIEW') AND target_status IN ('TARGET_MATCH','FALLBACK_MATCH','POTENTIAL_MATCH','NOT_MATCHED','INSUFFICIENT_DATA'))");
 
                             t.HasCheckConstraint("ck_discovery_review_event_notes", "length(btrim(notes)) BETWEEN 1 AND 2000");
 
@@ -1140,6 +1148,11 @@ namespace Portfolio.Infrastructure.Persistence.Migrations
                         .HasColumnType("text");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ExecutionId", "State")
+                        .IsUnique()
+                        .HasDatabaseName("uq_discovery_recovery_event")
+                        .HasFilter("\"State\" IN ('RECOVERY_RECEIPT','RECOVERY_AUDIT')");
 
                     b.ToTable("discovery_execution_events", (string)null);
                 });

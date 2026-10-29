@@ -7,6 +7,7 @@ namespace Portfolio.Application.Features.JobHunting;
 
 public sealed partial class DiscoveryExecutionService
 {
+    internal static bool RecoveryEvidenceValid(DiscoveryExecutionResult evidence) => evidence.ActualRequests == 1 && evidence.ProviderOperation == "SUCCEEDED" && ProviderSucceeded(evidence);
     private static readonly string[] PostingFields = ["companyName","positionTitle","location","employmentType","workplaceType","salaryMinimum","salaryMaximum",
         "salaryCurrency","salaryPeriod","experienceRequirements","description","technologyStack","applicationEmail","applicationUrl","expiresAt","notes"];
     private static string? Text(JsonElement element, string key) => element.ValueKind == JsonValueKind.Object && element.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;

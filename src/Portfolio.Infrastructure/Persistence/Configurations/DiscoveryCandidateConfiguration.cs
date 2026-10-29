@@ -19,6 +19,7 @@ public sealed class DiscoveryCandidateConfiguration : IEntityTypeConfiguration<D
         b.Property(x => x.Id).HasColumnName("id");
         b.Property(x => x.RunId).HasColumnName("run_id").HasMaxLength(100);
         b.Property(x => x.Query).HasColumnName("query").HasMaxLength(300);
+        b.Property(x => x.CandidateOrigin).HasColumnName("candidate_origin").HasMaxLength(40).HasDefaultValue("CLASSIFIER");
         b.Property(x => x.PageNumber).HasColumnName("page_number");
         b.Property(x => x.ItemIndex).HasColumnName("item_index");
         b.Property(x => x.ContentStatus).HasColumnName("content_status").HasMaxLength(30);

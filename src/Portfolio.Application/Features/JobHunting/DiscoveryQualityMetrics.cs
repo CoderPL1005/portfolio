@@ -18,11 +18,14 @@ public sealed record QualityLevel(DimensionQuality ContentValidity, DimensionQua
 public sealed record QualityCohort(string ClassifierVersion, string? ProfileFingerprint, string? PreferencesFingerprint,
     QualityCounts Counts, QualityLevel ObservationLevel, QualityLevel UniqueContentLevel);
 public sealed record DiscoveryQualityReport(QualityCounts Counts, QualityLevel ObservationLevel, QualityLevel UniqueContentLevel,
-    IReadOnlyList<QualityCohort> Cohorts, bool OverallMatricesAvailable, DateTimeOffset EvaluatedAt, string Notice);
+    IReadOnlyList<QualityCohort> Cohorts, bool OverallMatricesAvailable, DateTimeOffset EvaluatedAt, string Notice,
+    RecoveryQualityCoverage? RecoveryCoverage = null);
+public sealed record RecoveryQualityCoverage(string Origin,string Version,int Total,int Reviewed,int Unreviewed,int Uncertain,int ReviewedRecovery,
+    int UniqueContents,bool PredictionUnavailable=true,decimal? Precision=null,decimal? Recall=null);
 public sealed record QualitySample(Guid Id, string? ContentGroupHash, string ContentPrediction, string TargetPrediction,
     string ClassifierVersion, string? ProfileFingerprint, string? PreferencesFingerprint, HumanReviewSummary Review);
 public sealed record DiscoveryQualityInput(Guid Id, string? ContentGroupHash, string ContentStatus, string TargetStatus,
-    string Payload, string Status, int Version, string? HumanContent, string? HumanTarget);
+    string Payload, string Status, int Version, string? HumanContent, string? HumanTarget, string CandidateOrigin="CLASSIFIER");
 
 public static class DiscoveryQualityMetrics
 {
@@ -86,16 +89,23 @@ public sealed class GetDiscoveryQualityMetricsHandler(IApplicationDbContext db, 
          orderby c.Id
          select new DiscoveryQualityInput(c.Id, c.ContentGroupHash, c.ContentStatus, c.TargetStatus, c.Payload,
              v == null ? "UNREVIEWED" : v.Status, v == null ? 0 : v.Version,
-             v == null ? null : v.ContentStatus, v == null ? null : v.TargetStatus)).Take(MaximumObservations + 1);
+             v == null ? null : v.ContentStatus, v == null ? null : v.TargetStatus,c.CandidateOrigin)).Take(MaximumObservations + 1);
     public async Task<DiscoveryQualityReport> HandleAsync(GetDiscoveryQualityMetricsQuery r, CancellationToken ct = default)
     {
         // Bounded private read; never expose original text/notes in statistics.
         // One streamed SELECT avoids paging drift and keeps private payloads out of retained samples.
         // No row locks or writes. EvaluatedAt denotes evaluation, not a serializable transaction.
         var samples = new List<QualitySample>();
+        var recoveryRows=new List<DiscoveryQualityInput>();var seen=0;
         await foreach (var row in Query(db, r.RunId).AsAsyncEnumerable().WithCancellation(ct))
         {
-            if (samples.Count == MaximumObservations) throw new ServiceUnavailableException("DISCOVERY_METRICS_COHORT_TOO_LARGE", "Filter by run to evaluate a complete bounded cohort.");
+            if (++seen > MaximumObservations) throw new ServiceUnavailableException("DISCOVERY_METRICS_COHORT_TOO_LARGE", "Filter by run to evaluate a complete bounded cohort.");
+            if(row.CandidateOrigin==DiscoveryRecoveryProvenance.Origin){
+                var recovery=JsonSerializer.Deserialize<DiscoveryRecoveryEnvelope>(row.Payload,DiscoveryReviewRules.Json);
+                if(recovery is null||!DiscoveryReviewRules.ValidRecoveryContent(recovery))throw DiscoveryRecoveryProvenance.Invalid();
+                recoveryRows.Add(row);continue;
+            }
+            if(row.CandidateOrigin!=DiscoveryRecoveryProvenance.Normal)throw DiscoveryRecoveryProvenance.Invalid();
             using var payload = JsonDocument.Parse(row.Payload);
             var p = payload.RootElement;
             samples.Add(new(row.Id, row.ContentGroupHash, row.ContentStatus, row.TargetStatus,
@@ -111,6 +121,9 @@ public sealed class GetDiscoveryQualityMetricsHandler(IApplicationDbContext db, 
         var single = cohorts.Length <= 1;
         return new(DiscoveryQualityMetrics.Counts(samples), single ? DiscoveryQualityMetrics.Level(samples, false) : DiscoveryQualityMetrics.Level([], false),
             single ? DiscoveryQualityMetrics.Level(samples, true) : DiscoveryQualityMetrics.Level([], true), cohorts, single, clock.GetUtcNow(),
-            "Chỉ tập được Admin gán nhãn; không đại diện toàn bộ Facebook. Metrics không theo review-state filter. Một SELECT, không row locks/write transaction. Khi nhiều cohorts, chỉ xem matrices từng cohort.");
+            "Chỉ tập được Admin gán nhãn; không đại diện toàn bộ Facebook. Metrics không theo review-state filter. Một SELECT, không row locks/write transaction. Khi nhiều cohorts, chỉ xem matrices từng cohort.",
+            new(DiscoveryRecoveryProvenance.Origin,DiscoveryRecoveryProvenance.Version,recoveryRows.Count,
+                recoveryRows.Count(x=>x.Status!="UNREVIEWED"),recoveryRows.Count(x=>x.Status=="UNREVIEWED"),recoveryRows.Count(x=>x.Status=="UNCERTAIN"),
+                recoveryRows.Count(x=>x.Status=="REVIEWED_RECOVERY"),recoveryRows.Select(x=>x.ContentGroupHash??x.Id.ToString()).Distinct().Count()));
     }
 }

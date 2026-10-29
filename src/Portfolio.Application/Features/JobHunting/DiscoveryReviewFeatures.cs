@@ -26,7 +26,9 @@ public sealed record GetDiscoveryReviewQuery(int Page = 1, int PageSize = 20, st
     DateTimeOffset? CollectedFrom = null, DateTimeOffset? CollectedBefore = null) : IRequest<DiscoveryReviewList>;
 public sealed record GetDiscoveryCandidateQuery(Guid Id) : IRequest<DiscoveryReviewDetail>;
 public sealed record DiscoveryReviewDetail(Guid Id, string RunId, string Query, int PageNumber, DateTimeOffset IngestedAt,
-    int DuplicateCount, DiscoveryReviewItem Item, HumanReviewSummary HumanReview);
+    int DuplicateCount, DiscoveryReviewItem? Item, HumanReviewSummary HumanReview,
+    string Origin = "CLASSIFIER", string? OriginalQuery = null, string QueryAvailability = "AVAILABLE",
+    object? OriginalClassifierResult = null, DiscoveryRecoveryEnvelope? Recovery = null, bool IdentityWarning = false);
 public sealed record DiscoveryReviewCounts(int Total, int Valid, int Invalid, int NeedsReview, int TargetMatch, int IdentityWarnings, int DuplicateItems);
 public sealed record DiscoveryReviewList(PagedResult<DiscoveryReviewDetail> Results, DiscoveryReviewCounts Counts);
 
@@ -84,8 +86,32 @@ public static class DiscoveryReviewRules
             && i.SourceWarnings is { Length: <= 20 } && i.SourceWarnings.All(s => s is not null && Regex.IsMatch(s, "^[A-Z0-9_]{1,80}$"))
             && i.Extracted.ValueKind == JsonValueKind.Object && Extraction(i.Extracted)).All(v => v);
     }
-    public static DiscoveryReviewDetail Detail(DiscoveryCandidate c, int duplicates, DiscoveryCandidateReview? review = null) => new(c.Id, c.RunId, c.Query, c.PageNumber, c.IngestedAt,
-        duplicates, JsonSerializer.Deserialize<DiscoveryReviewItem>(c.Payload, Json)!, HumanReviewSummary.From(review));
+    public static bool ValidRecoveryContent(DiscoveryRecoveryEnvelope e)
+    {
+        try { return ValidRecoveryCore(e); }
+        catch(Exception error) when(error is ArgumentException or JsonException or InvalidOperationException){return false;}
+    }
+    private static bool ValidRecoveryCore(DiscoveryRecoveryEnvelope e) => e is not null && e.Origin == DiscoveryRecoveryProvenance.Origin && e.Version == DiscoveryRecoveryProvenance.Version &&
+        e.ExecutionId != Guid.Empty && e.ObservationId != Guid.Empty && e.OperationId != Guid.Empty && e.ReceiptId != Guid.Empty && e.AuditId != Guid.Empty &&
+        e.ItemIndex is >= 0 and < 200 && e.WorkflowRunId is not null && Regex.IsMatch(e.WorkflowRunId, "^[1-9][0-9]{0,19}$") && HashValid(e.SourceFingerprint) &&
+        e.OriginalQuery is null && e.OriginalClassifierResult is null && e.OriginalReviewBundle is null &&
+        Text(e.RawContent,24000,true) && e.ContentHash == Hash(e.RawContent) && e.ContentGroupHash == Hash(e.RawContent.Normalize().Replace("\r\n","\n").Replace('\r','\n').Trim()) &&
+        e.ProviderPostId is not null && Regex.IsMatch(e.ProviderPostId,"^(?:[0-9]{1,100}|pfbid[A-Za-z0-9]{1,200})$") && SafeUrl(e.SourceUrl) &&
+        Text(e.ProviderSourceUrl,2048) && e.RecoveryAt != default && e.RecoveryDecision == new RecoveryDecision("NEEDS_REVIEW","INSUFFICIENT_DATA","NOT_CHECKED") &&
+        e.SourceWarnings is {Length:<=20} && e.SourceWarnings.All(x=>x is not null && Regex.IsMatch(x,"^[A-Z0-9_]{1,80}$")) &&
+        e.MissingFields is {Length:<=20} && e.MissingFields.All(x=>x is not null && Regex.IsMatch(x,"^[A-Z0-9_]{1,80}$")) &&
+        (e.SourceWarnings.Contains("POST_ID_URL_MISMATCH") ? e.SourceUrl is null && e.ProviderSourceUrl is not null && SafeUrl(e.ProviderSourceUrl) &&
+            new Uri(e.ProviderSourceUrl).AbsolutePath.TrimEnd('/').Split('/').Last()!=e.ProviderPostId :
+            e.SourceUrl is not null && new Uri(e.SourceUrl).AbsolutePath.TrimEnd('/').Split('/').Last()==e.ProviderPostId);
+    public static DiscoveryReviewDetail Detail(DiscoveryCandidate c, int duplicates, DiscoveryCandidateReview? review = null)
+    {
+        if(c.CandidateOrigin==DiscoveryRecoveryProvenance.Origin) return new(c.Id,c.RunId,c.Query,c.PageNumber,c.IngestedAt,duplicates,null,
+            HumanReviewSummary.From(review),c.CandidateOrigin,null,"UNAVAILABLE",null,DiscoveryRecoveryProvenance.Read(c),c.IdentityWarning);
+        if(c.CandidateOrigin!=DiscoveryRecoveryProvenance.Normal) throw DiscoveryRecoveryProvenance.Invalid();
+        var item=JsonSerializer.Deserialize<DiscoveryReviewItem>(c.Payload,Json)!;
+        return new(c.Id,c.RunId,c.Query,c.PageNumber,c.IngestedAt,duplicates,item,HumanReviewSummary.From(review),
+            DiscoveryRecoveryProvenance.Normal,c.Query,"AVAILABLE",item,null,c.IdentityWarning);
+    }
 }
 
 public sealed class ImportDiscoveryReviewValidator : IRequestValidator<ImportDiscoveryReviewCommand>
@@ -108,7 +134,7 @@ public sealed class ImportDiscoveryReviewHandler(IApplicationDbContext db, TimeP
             var previous = existing.SingleOrDefault(c => c.ItemIndex == item.ItemIndex);
             if (previous is not null)
             {
-                if (previous.PayloadHash != payloadHash) throw new ConflictException("DISCOVERY_IMPORT_CONFLICT", "Immutable observation differs from existing import.");
+                if (previous.CandidateOrigin != DiscoveryRecoveryProvenance.Normal || previous.PayloadHash != payloadHash) throw new ConflictException("DISCOVERY_IMPORT_CONFLICT", "Immutable observation differs from existing import.");
                 unchanged++; continue;
             }
             added.Add(new DiscoveryCandidate { Id = Guid.NewGuid(), RunId = b.RunId, Query = b.Query, PageNumber = b.PageNumber, ItemIndex = item.ItemIndex,
@@ -136,7 +162,7 @@ public sealed class GetDiscoveryReviewValidator : IRequestValidator<GetDiscovery
         if (r.TargetStatus is not null && !DiscoveryReviewRules.TargetStatuses.Contains(r.TargetStatus)) f.Add(new("targetStatus", "Invalid target status."));
         if (r.RunId?.Length > 100) f.Add(new("runId", "Invalid run ID."));
         if (r.CollectedFrom >= r.CollectedBefore) f.Add(new("collectedFrom", "Invalid collection date range."));
-        if (r.ReviewState is not null && !new[] { "REVIEWED", "UNREVIEWED", "CONFIRMED", "CORRECTED", "UNCERTAIN" }.Contains(r.ReviewState)) f.Add(new("reviewState", "Invalid review filter."));
+        if (r.ReviewState is not null && !new[] { "REVIEWED", "UNREVIEWED", "CONFIRMED", "CORRECTED", "UNCERTAIN", "REVIEWED_RECOVERY" }.Contains(r.ReviewState)) f.Add(new("reviewState", "Invalid review filter."));
         return Task.FromResult<IReadOnlyCollection<ValidationFailure>>(f);
     }
 }

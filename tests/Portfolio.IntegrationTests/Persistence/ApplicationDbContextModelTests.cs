@@ -65,7 +65,7 @@ public sealed class ApplicationDbContextModelTests
         // Five additive execution tables: seven RESTRICT FKs, four checks, eight indexes.
         Assert.Equal(42, model.GetEntityTypes().SelectMany(entity => entity.GetForeignKeys()).Count());
         Assert.Equal(111, model.GetEntityTypes().SelectMany(entity => entity.GetCheckConstraints()).Count());
-        Assert.Equal(64, model.GetEntityTypes().SelectMany(entity => entity.GetIndexes()).Count());
+        Assert.Equal(65, model.GetEntityTypes().SelectMany(entity => entity.GetIndexes()).Count());
         var executionTypes = model.GetEntityTypes().Where(e => e.GetTableName()!.StartsWith("discovery_execution", StringComparison.Ordinal)).ToArray();
         Assert.Equal(5, executionTypes.Length);
         Assert.Equal(7, executionTypes.SelectMany(e => e.GetForeignKeys()).Count());
@@ -119,7 +119,7 @@ public sealed class ApplicationDbContextModelTests
         using var context = CreateContext();
         var migrations = context.Database.GetMigrations().ToArray();
 
-        Assert.Equal(19, migrations.Length);
+        Assert.Equal(20, migrations.Length);
         Assert.EndsWith("_InitialPortfolioSchema", migrations[0], StringComparison.Ordinal);
         Assert.EndsWith("_RemoveContactMessages", migrations[1], StringComparison.Ordinal);
         Assert.EndsWith("_AllowDuplicateSocialLinkPlatforms", migrations[2], StringComparison.Ordinal);
@@ -139,6 +139,7 @@ public sealed class ApplicationDbContextModelTests
         Assert.EndsWith("_AddDiscoveryReviewCandidates", migrations[16], StringComparison.Ordinal);
         Assert.EndsWith("_AddDiscoveryHumanReviews", migrations[17], StringComparison.Ordinal);
         Assert.Equal(DiscoveryReleaseMigration.Executions, migrations[18]);
+        Assert.Equal(DiscoveryReleaseMigration.Recovery, migrations[19]);
     }
 
     [Fact]

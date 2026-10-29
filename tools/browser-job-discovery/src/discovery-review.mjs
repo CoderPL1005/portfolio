@@ -58,7 +58,7 @@ export function buildReviewItems(rows, context = {}, budget) {
       : originalText.length > 24_000 ? 'POST_TEXT_TOO_LARGE' : originalText.includes('\0') ? 'POST_TEXT_UNSAFE' : null;
     const rawContent = invalid ? null : originalText;
     const rawUrl = object(fields) ? (Object.hasOwn(row, 'basic_info') ? fields.url : fields.permalink ?? fields.url ?? fields.post_url ?? fields.post_link) : null;
-    const sourceUrl = canonicalFacebookPost(rawUrl)?.url ?? null;
+    const sourceUrl = normalized?.sourceUrl ?? null;
     const sourceWarnings = [];
     if (normalized?.idUrlConflict) sourceWarnings.push('POST_ID_URL_MISMATCH');
     const providerPostId = normalized?.sourceExternalId && /^(?:\d{1,100}|pfbid[A-Za-z0-9]{1,200})$/u.test(normalized.sourceExternalId) ? normalized.sourceExternalId : null;

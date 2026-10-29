@@ -33,7 +33,7 @@ public sealed class SaveDiscoveryHumanReviewValidator : IRequestValidator<SaveDi
         var v = r.Review;
         return r.Id != Guid.Empty && v is not null && v.ExpectedVersion is >= 0 and < int.MaxValue
             && v.Notes is { Length: > 0 and <= 2000 } && !string.IsNullOrWhiteSpace(v.Notes) && !v.Notes.Contains('\0')
-            && (v.Action == "CORRECTED"
+            && (v.Action is "CORRECTED" or "REVIEW_RECOVERY"
                 ? DiscoveryReviewRules.ContentStatuses.Contains(v.ContentStatus) && DiscoveryReviewRules.TargetStatuses.Contains(v.TargetStatus)
                 : v.Action is "CONFIRMED" or "UNCERTAIN" && v.ContentStatus is null && v.TargetStatus is null);
     }
@@ -49,6 +49,11 @@ public sealed class SaveDiscoveryHumanReviewHandler(IApplicationDbContext db, IC
         if (!SaveDiscoveryHumanReviewValidator.Valid(r)) throw new ValidationException([new("review", "Invalid review.")]);
         var candidate = await db.DiscoveryCandidates.AsNoTracking().SingleOrDefaultAsync(x => x.Id == r.Id, ct)
             ?? throw new NotFoundException("DISCOVERY_CANDIDATE_NOT_FOUND", "Discovery observation not found.");
+        var recovery=candidate.CandidateOrigin==DiscoveryRecoveryProvenance.Origin;
+        if(recovery) DiscoveryRecoveryProvenance.Read(candidate);
+        else if(candidate.CandidateOrigin!=DiscoveryRecoveryProvenance.Normal) throw DiscoveryRecoveryProvenance.Invalid();
+        if(recovery && r.Review.Action is not("REVIEW_RECOVERY" or "UNCERTAIN") || !recovery && r.Review.Action=="REVIEW_RECOVERY")
+            throw new ValidationException([new("review","This action does not apply to the observation provenance.")]);
         var review = await db.DiscoveryCandidateReviews.SingleOrDefaultAsync(x => x.CandidateId == r.Id, ct);
         if ((review?.Version ?? 0) != r.Review.ExpectedVersion) throw Stale();
         var v = r.Review;
@@ -57,9 +62,9 @@ public sealed class SaveDiscoveryHumanReviewHandler(IApplicationDbContext db, IC
         var creating = review is null;
         review ??= new DiscoveryCandidateReview { CandidateId = r.Id };
         review.Version = checked(review.Version + 1);
-        review.Status = v.Action;
-        review.ContentStatus = v.Action == "CONFIRMED" ? candidate.ContentStatus : v.Action == "CORRECTED" ? v.ContentStatus : null;
-        review.TargetStatus = v.Action == "CONFIRMED" ? candidate.TargetStatus : v.Action == "CORRECTED" ? v.TargetStatus : null;
+        review.Status = v.Action=="REVIEW_RECOVERY" ? "REVIEWED_RECOVERY" : v.Action;
+        review.ContentStatus = v.Action == "CONFIRMED" ? candidate.ContentStatus : v.Action is "CORRECTED" or "REVIEW_RECOVERY" ? v.ContentStatus : null;
+        review.TargetStatus = v.Action == "CONFIRMED" ? candidate.TargetStatus : v.Action is "CORRECTED" or "REVIEW_RECOVERY" ? v.TargetStatus : null;
         review.Notes = v.Notes.Trim(); review.ReviewedAt = clock.GetUtcNow(); review.ReviewedByAdminId = actor;
         if (creating) db.DiscoveryCandidateReviews.Add(review);
         var audit = new DiscoveryCandidateReviewEvent { Id = Guid.NewGuid(), CandidateId = r.Id, Version = review.Version,

@@ -6,7 +6,7 @@ namespace Portfolio.Infrastructure.Persistence.Configurations;
 
 public sealed class DiscoveryCandidateReviewConfiguration : IEntityTypeConfiguration<DiscoveryCandidateReview>
 {
-    internal const string Labels = "(status = 'UNCERTAIN' AND content_status IS NULL AND target_status IS NULL) OR (status IN ('CONFIRMED','CORRECTED') AND content_status IS NOT NULL AND target_status IS NOT NULL AND content_status IN ('VALID_RECRUITMENT','INVALID_RECRUITMENT','NEEDS_REVIEW') AND target_status IN ('TARGET_MATCH','FALLBACK_MATCH','POTENTIAL_MATCH','NOT_MATCHED','INSUFFICIENT_DATA'))";
+    internal const string Labels = "(status = 'UNCERTAIN' AND content_status IS NULL AND target_status IS NULL) OR (status IN ('CONFIRMED','CORRECTED','REVIEWED_RECOVERY') AND content_status IS NOT NULL AND target_status IS NOT NULL AND content_status IN ('VALID_RECRUITMENT','INVALID_RECRUITMENT','NEEDS_REVIEW') AND target_status IN ('TARGET_MATCH','FALLBACK_MATCH','POTENTIAL_MATCH','NOT_MATCHED','INSUFFICIENT_DATA'))";
     public void Configure(EntityTypeBuilder<DiscoveryCandidateReview> b)
     {
         b.ToTable("discovery_candidate_reviews", t =>

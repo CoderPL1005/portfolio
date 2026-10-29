@@ -110,6 +110,9 @@ public static class DependencyInjection
         services.AddSingleton<ICanonicalCvConflictDetector, NpgsqlCanonicalCvConflictDetector>();
         services.AddSingleton<IDiscoveryReviewConflictDetector, NpgsqlDiscoveryReviewConflictDetector>();
         services.AddScoped<IDiscoveryCleanupTransactionFactory, NpgsqlDiscoveryCleanupTransactionFactory>();
+        services.AddScoped<Portfolio.Application.Features.JobHunting.IDiscoveryRecoveryTransactions, DiscoveryRecoveryTransactions>();
+        services.AddScoped<Portfolio.Application.Features.JobHunting.IDiscoveryRecoveryReadiness, DiscoveryRecoveryReadiness>();
+        services.AddOptions<Portfolio.Application.Features.JobHunting.DiscoveryRecoveryOptions>().Bind(configuration.GetSection("DiscoveryRecovery"));
         services.AddScoped<IJobApplicationCreationTransactionFactory, NpgsqlJobApplicationCreationTransactionFactory>();
         services.AddScoped<IApplicationPackageFinalizationTransactionFactory, NpgsqlApplicationPackageFinalizationTransactionFactory>();
         services.AddSingleton<IApplicationPackageConflictDetector, NpgsqlApplicationPackageConflictDetector>();

@@ -49,6 +49,7 @@ public sealed class DiscoveryExecutionConfiguration : IEntityTypeConfiguration<D
     public void Configure(EntityTypeBuilder<DiscoveryExecutionEvent> b)
     {
         b.ToTable("discovery_execution_events"); b.HasKey(x=>x.Id);
+        b.HasIndex(x=>new{x.ExecutionId,x.State}).IsUnique().HasFilter("\"State\" IN ('RECOVERY_RECEIPT','RECOVERY_AUDIT')").HasDatabaseName("uq_discovery_recovery_event");
         b.HasOne<DiscoveryExecution>().WithMany().HasForeignKey(x=>x.ExecutionId).OnDelete(DeleteBehavior.Restrict);
     }
 }

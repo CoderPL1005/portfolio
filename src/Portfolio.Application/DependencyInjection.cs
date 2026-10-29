@@ -40,6 +40,7 @@ public static class DependencyInjection
     {
         services.AddScoped<IRequestDispatcher, RequestDispatcher>();
         services.AddScoped<IDiscoveryExecutionService, DiscoveryExecutionService>();
+        services.AddScoped<IDiscoveryExecutionRecovery, DiscoveryExecutionRecovery>();
         services.AddScoped<IRequestHandler<SaveDiscoveryHumanReviewCommand, HumanReviewSummary>, SaveDiscoveryHumanReviewHandler>();
         services.AddScoped<IRequestValidator<SaveDiscoveryHumanReviewCommand>, SaveDiscoveryHumanReviewValidator>();
         services.AddScoped<IRequestHandler<GetDiscoveryReviewHistoryQuery, DiscoveryReviewHistory>, GetDiscoveryReviewHistoryHandler>();
