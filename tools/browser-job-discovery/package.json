@@ -5,7 +5,7 @@
   "type": "module",
   "engines": { "node": ">=22.12.0" },
   "scripts": {
-    "test": "node --test test/core.test.mjs test/workflow.test.mjs test/discovery-adapters.test.mjs test/socialapis-live-smoke.test.mjs test/pagination.test.mjs test/query-optimization.test.mjs test/backend-discovery.test.mjs test/admin-sync.test.mjs test/demo-once-config.test.mjs test/checkpoint-history.test.mjs test/fresh-demo.test.mjs test/fresh-provenance.test.mjs test/checkpoint-inspection.test.mjs test/checkpoint-comparison.test.mjs test/content-validation-diagnostics.test.mjs test/recovery-v1.test.mjs test/recovery-boundary.test.mjs test/readiness-verify-only.test.mjs test/readiness-runtime.test.mjs test/discovery-execution-red.test.mjs test/discovery-posting-facts.test.mjs test/execution-corrections.test.mjs",
+    "test": "node --test test/core.test.mjs test/workflow.test.mjs test/discovery-adapters.test.mjs test/socialapis-live-smoke.test.mjs test/pagination.test.mjs test/query-optimization.test.mjs test/backend-discovery.test.mjs test/admin-sync.test.mjs test/demo-once-config.test.mjs test/checkpoint-history.test.mjs test/fresh-demo.test.mjs test/fresh-provenance.test.mjs test/checkpoint-inspection.test.mjs test/checkpoint-comparison.test.mjs test/content-validation-diagnostics.test.mjs test/recovery-v1.test.mjs test/recovery-boundary.test.mjs test/readiness-verify-only.test.mjs test/readiness-runtime.test.mjs test/discovery-execution-red.test.mjs test/discovery-posting-facts.test.mjs test/execution-corrections.test.mjs test/execution-processing.test.mjs",
     "test:corrections": "node --test test/execution-corrections.test.mjs",
     "test:browser": "node --test test/browser.test.mjs test/facebook-adapter.browser.test.mjs",
     "simulate": "node src/cli.mjs"

@@ -13,11 +13,12 @@ import { resolveDiscoveryPolicy } from './candidate-technology-profile.mjs';
 const args = process.argv.slice(2);
 if (args.includes('--execution')) {
   try {
-    if(args.length!==2||args[0]!=='--execution')throw new Stop('DISCOVERY_EXECUTION_ID_INVALID');
-    const {runDiscoveryExecution,executionBackendFromEnvironment}=await import('./discovery-execution-worker.mjs');
-    await runDiscoveryExecution({executionId:args[1],workflowRunId:process.env.GITHUB_RUN_ID,runAttempt:Number(process.env.GITHUB_RUN_ATTEMPT)},
-      {backend:executionBackendFromEnvironment()});
-    console.log(JSON.stringify({executionCompleted:true}));
+    if(args[0]!=='--execution'||!((args.length===2)||(args[2]==='--persisted'&&(args.length===3||args.length===4&&args[3]==='--confirm-gemini-free-tier'))))throw new Stop('DISCOVERY_EXECUTION_ID_INVALID');
+    const {runDiscoveryExecution,executionBackendFromEnvironment,replayDiscoveryExecution,persistedBackendFromEnvironment}=await import('./discovery-execution-worker.mjs');
+    const result=args[2]==='--persisted'?await replayDiscoveryExecution({executionId:args[1],confirmGeminiFreeTier:args.includes('--confirm-gemini-free-tier')},{backend:persistedBackendFromEnvironment()}):
+      await runDiscoveryExecution({executionId:args[1],workflowRunId:process.env.GITHUB_RUN_ID,runAttempt:Number(process.env.GITHUB_RUN_ATTEMPT)},{backend:executionBackendFromEnvironment()});
+    console.log(JSON.stringify({state:result?.state??'UNKNOWN',providerRequests:args[2]==='--persisted'?0:undefined}));
+    if(!['SUCCEEDED','PARTIAL','PROCESSED_FOR_REVIEW'].includes(result?.state))process.exitCode=1;
   }catch(error){console.error(error instanceof Stop?error.code:'DISCOVERY_EXECUTION_FAILED');process.exitCode=1;}
 } else if (args.includes('--orchestrate')) {
   try { await (await import('./pagination-cli.mjs')).paginationCli(args); }

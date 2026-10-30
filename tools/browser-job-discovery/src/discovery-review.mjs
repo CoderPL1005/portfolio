@@ -46,18 +46,30 @@ const object = row => row !== null && typeof row === 'object' && !Array.isArray(
 // A review observation is NOT an accepted Facebook identity. Never feed this
 // collection into the legacy registry/ledger or infer aliases from content.
 export function buildReviewItems(rows, context = {}, budget) {
+  return classifyReviewRows(rows, context, budget, false);
+}
+
+// Persisted source is not a reconstructed provider response. Retain its original
+// identity decision (including an unverified/null canonical URL).
+export function buildReviewItemsFromObservations(rows, context = {}, budget) {
+  return classifyReviewRows(rows, context, budget, true);
+}
+
+function classifyReviewRows(rows, context, budget, persisted) {
   const evaluatedAt = context.evaluatedAt ?? new Date().toISOString();
   const seen = new Set();
   return rows.map((row, itemIndex) => {
     budget?.check();
+    try {
     const fields = object(row) ? (Object.hasOwn(row, 'basic_info') ? row.basic_info : row) : null;
-    const normalized = normalizeSocialApisItem(row);
+    const normalized = persisted ? {rawContent: row.rawContent, sourceExternalId: row.providerPostId,
+      sourceUrl: row.sourceUrl, publishedAt: row.publishedAt, idUrlConflict: row.outcome === 'POST_ID_URL_MISMATCH'} : normalizeSocialApisItem(row);
     const originalText = normalized?.rawContent;
     const invalid = !object(row) || !object(fields) ? 'ITEM_NOT_OBJECT'
       : typeof originalText !== 'string' || !originalText.trim() ? 'POST_TEXT_MISSING'
       : originalText.length > 24_000 ? 'POST_TEXT_TOO_LARGE' : originalText.includes('\0') ? 'POST_TEXT_UNSAFE' : null;
     const rawContent = invalid ? null : originalText;
-    const rawUrl = object(fields) ? (Object.hasOwn(row, 'basic_info') ? fields.url : fields.permalink ?? fields.url ?? fields.post_url ?? fields.post_link) : null;
+    const rawUrl = persisted ? row.providerSourceUrl : object(fields) ? (Object.hasOwn(row, 'basic_info') ? fields.url : fields.permalink ?? fields.url ?? fields.post_url ?? fields.post_link) : null;
     const sourceUrl = normalized?.sourceUrl ?? null;
     const sourceWarnings = [];
     if (normalized?.idUrlConflict) sourceWarnings.push('POST_ID_URL_MISMATCH');
@@ -119,6 +131,11 @@ export function buildReviewItems(rows, context = {}, budget) {
       extracted, missingFields, sourceWarnings, classifierVersion: REVIEW_VERSION, evaluatedAt,
       profileFingerprint: context.profile ? hash(JSON.stringify(context.profile)) : null,
       preferencesFingerprint: context.targetJobPreferences ? hash(JSON.stringify(context.targetJobPreferences)) : null };
+    } catch (error) {
+      if (!context.onItemError) throw error;
+      context.onItemError(itemIndex);
+      return null; // Failure is not a classifier prediction.
+    }
   });
 }
 

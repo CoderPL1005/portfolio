@@ -143,7 +143,7 @@ public sealed class DiscoveryExecutionRedTests(AuthApiFactory root) : IClassFixt
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode); Assert.Empty(s.Transport.ProviderCalls);
     }
 
-    [Fact] public async Task T09_T14_T20_Real_ingestion_handlers_persist_JD_and_raw_link_idempotently()
+    [Fact] public async Task T09_T14_T20_Real_ingestion_handlers_stage_JD_and_raw_link_idempotently()
     {
         using var s = Setup(); using var admin = Admin(s); var id = await Start(admin); using var worker = Worker(s);
         await Data(await worker.PostAsJsonAsync($"{WorkerPath}/{id}/claim", new { }));
@@ -155,14 +155,14 @@ public sealed class DiscoveryExecutionRedTests(AuthApiFactory root) : IClassFixt
         Assert.Equal(1, status.GetProperty("creditsDeducted").GetInt32());
         Assert.Equal(6, status.GetProperty("creditsUsedAlternateHeader").GetInt32());
         using var scope = s.Factory.Services.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
-        var job = Assert.Single(await db.JobPostings.ToListAsync()); var raw = Assert.Single(await db.RawJobPostings.ToListAsync());
-        Assert.Equal("Synthetic Software", job.CompanyName); Assert.Equal("PENDING", job.VerificationStatus);
-        Assert.Equal("PENDING_ANALYSIS", job.SelectionStatus); Assert.Equal("9001", raw.SourceExternalId);
-        Assert.Contains("Fresher", raw.RawContent); Assert.Null(job.VerifiedAt);
+        Assert.Empty(await db.JobPostings.ToListAsync()); var raw = Assert.Single(await db.RawJobPostings.ToListAsync());
+        var vacancy=Assert.Single(await db.DiscoveryExecutionVacancies.ToListAsync());
+        Assert.Equal(raw.Id,vacancy.RawJobPostingId);Assert.Null(vacancy.JobPostingId);Assert.Null(raw.JobPostingId);
+        Assert.Equal("Synthetic Software",JsonDocument.Parse(vacancy.FieldsJson).RootElement.GetProperty("companyName").GetProperty("value").GetString());
+        Assert.Equal("NEEDS_REVIEW",vacancy.Status);Assert.Equal("9001", raw.SourceExternalId);
+        Assert.Contains("Fresher", raw.RawContent);
         Assert.Empty(await db.JobApplications.ToListAsync()); Assert.Empty(await db.SubmissionAttempts.ToListAsync());
-        var detail = await Data(await admin.GetAsync($"/api/v1/admin/job-postings/{job.Id}"));
-        Assert.Equal(job.Id, detail.GetProperty("id").GetGuid());
-        Assert.NotEmpty(detail.GetProperty("sources").EnumerateArray());
+        Assert.True(status.GetProperty("results")[0].GetProperty("staging").GetBoolean());
         Assert.Empty(s.Transport.ProviderCalls);
     }
 
@@ -186,7 +186,8 @@ public sealed class DiscoveryExecutionRedTests(AuthApiFactory root) : IClassFixt
         var changed = await worker.PostAsJsonAsync($"{WorkerPath}/{id}/results", Result(missing: true));
         Assert.Equal(HttpStatusCode.Conflict, changed.StatusCode);
         using var scope = s.Factory.Services.CreateScope();
-        Assert.Single(await scope.ServiceProvider.GetRequiredService<IApplicationDbContext>().JobPostings.ToListAsync());
+        Assert.Empty(await scope.ServiceProvider.GetRequiredService<IApplicationDbContext>().JobPostings.ToListAsync());
+        Assert.Single(await scope.ServiceProvider.GetRequiredService<IApplicationDbContext>().DiscoveryExecutionVacancies.ToListAsync());
     }
 
     [Fact] public async Task T08_Cross_execution_reposts_keep_raw_identity_without_duplicate_Jobs()
@@ -199,11 +200,12 @@ public sealed class DiscoveryExecutionRedTests(AuthApiFactory root) : IClassFixt
             await Data(await worker.PostAsJsonAsync($"{WorkerPath}/{id}/results", Result()));
         }
         using var scope = s.Factory.Services.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
-        Assert.Single(await db.JobPostings.ToListAsync());
+        Assert.Empty(await db.JobPostings.ToListAsync());
+        Assert.Equal(2,await db.DiscoveryExecutionObservations.CountAsync());
         Assert.Equal("9001", Assert.Single(await db.RawJobPostings.ToListAsync()).SourceExternalId);
     }
 
-    [Fact] public async Task T10_Multiple_vacancies_share_one_raw_source_with_traceable_Job_links()
+    [Fact] public async Task T10_Multiple_vacancies_share_one_raw_source_without_automatic_Job_creation()
     {
         using var s = Setup(); using var admin = Admin(s); using var worker = Worker(s); var id = await Start(admin);
         await Data(await worker.PostAsJsonAsync($"{WorkerPath}/{id}/claim", new { }));
@@ -216,12 +218,11 @@ public sealed class DiscoveryExecutionRedTests(AuthApiFactory root) : IClassFixt
         vacancies.Add(second);
         await Data(await worker.PostAsJsonAsync($"{WorkerPath}/{id}/results", result));
         using var scope = s.Factory.Services.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
-        var jobs = await db.JobPostings.ToListAsync(); Assert.Equal(2, jobs.Count);
+        Assert.Empty(await db.JobPostings.ToListAsync());
+        var staged=await db.DiscoveryExecutionVacancies.ToListAsync();Assert.Equal(2,staged.Count);
         Assert.Equal("9001", Assert.Single(await db.RawJobPostings.ToListAsync()).SourceExternalId);
-        foreach (var job in jobs) {
-            var detail = await Data(await admin.GetAsync($"/api/v1/admin/job-postings/{job.Id}"));
-            Assert.Contains(detail.GetProperty("sources").EnumerateArray(), r => r.GetProperty("sourceExternalId").GetString() == "9001");
-        }
+        Assert.All(staged,v=>{Assert.NotNull(v.RawJobPostingId);Assert.Null(v.JobPostingId);});
+        Assert.Single(staged.Select(v=>v.RawJobPostingId).Distinct());
     }
 
     [Fact] public void T18_Application_has_one_reusable_orchestration_port_not_only_a_controller()

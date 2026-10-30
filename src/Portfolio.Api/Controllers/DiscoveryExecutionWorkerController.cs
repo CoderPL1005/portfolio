@@ -16,4 +16,5 @@ public sealed class DiscoveryExecutionWorkerController(IDiscoveryExecutionServic
     [HttpPost("observations"),RequestSizeLimit(8*1024*1024)] public async Task<IActionResult> Observations(Guid id,DiscoveryExecutionResult result,CancellationToken ct)=>Ok(ApiResponse<object>.Ok(await service.ObservationsAsync(id,Run,result,ct)));
     [HttpPost("results"),RequestSizeLimit(8*1024*1024)] public async Task<IActionResult> Result(Guid id,DiscoveryExecutionResult result,CancellationToken ct)=>Ok(ApiResponse<object>.Ok(await service.CompleteAsync(id,Run,result,ct)));
     [HttpPost("extract"),RequestSizeLimit(100*1024)] public async Task<IActionResult> Extract(Guid id,DiscoverySemanticRequest request,CancellationToken ct)=>Ok(ApiResponse<DiscoveryTextGeneration>.Ok(await service.ExtractAsync(id,Run,request,ct)));
+    [HttpPost("processing"),RequestSizeLimit(1024*1024)] public async Task<IActionResult> Process(Guid id,DiscoveryProcessingRequest request,CancellationToken ct)=>Ok(ApiResponse<object>.Ok(await service.ProcessAsync(id,request,Run,ct)));
 }

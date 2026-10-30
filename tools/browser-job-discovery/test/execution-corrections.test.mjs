@@ -20,7 +20,7 @@ for(const scenario of ['unknown','contradictory'])test(`R4 ${scenario} cost stop
 });
 for(const scenario of ['zero','success'])test(`R4 bounded known usage ${scenario} remains usable`,async()=>{
   const {result,requests}=await captureExecution(scenario);assert.equal(requests,1);
-  assert.equal(result.state,'SUCCEEDED');assert.equal(result.creditsDeducted,scenario==='zero'?0:1);
+  assert.equal(result.state,'PARTIAL');assert.equal(result.providerOperation,'SUCCEEDED');assert.equal(result.creditsDeducted,scenario==='zero'?0:1);
 });
 for(const overrides of [{bodyCost:0},{bodyCost:-1},{bodyCost:'1'},{bodyCost:null},{headerCost:'invalid'},{headerCost:'0.5',bodyCost:1}])
   test(`R4 contradictory/malformed usage ${JSON.stringify(overrides)} stops safely`,async()=>{
@@ -29,8 +29,8 @@ for(const overrides of [{bodyCost:0},{bodyCost:-1},{bodyCost:'1'},{bodyCost:null
     assert.deepEqual(result.observations[0].vacancies,[]);
   });
 test('R4 known fractional cost and absent optional body evidence do not invent charge',async()=>{
-  const {result}=await captureExecution('success',{headerCost:'0.5',bodyCost:0.5});assert.equal(result.creditsDeducted,0.5);assert.equal(result.state,'SUCCEEDED');
-  const absent=await captureExecution('success',{omitBodyCost:true});assert.equal(absent.result.usageEvidence.bodyCostPresent,false);assert.equal(absent.result.state,'SUCCEEDED');
+  const {result}=await captureExecution('success',{headerCost:'0.5',bodyCost:0.5});assert.equal(result.creditsDeducted,0.5);assert.equal(result.state,'PARTIAL');assert.equal(result.providerOperation,'SUCCEEDED');
+  const absent=await captureExecution('success',{omitBodyCost:true});assert.equal(absent.result.usageEvidence.bodyCostPresent,false);assert.equal(absent.result.state,'PARTIAL');assert.equal(absent.result.providerOperation,'SUCCEEDED');
 });
 test('R2 headers received followed by ambiguous body failure holds execution',async()=>{
   const {result,requests,semantic}=await captureExecution('body-read-failure');

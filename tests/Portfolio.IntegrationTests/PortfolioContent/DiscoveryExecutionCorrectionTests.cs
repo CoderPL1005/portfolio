@@ -15,14 +15,35 @@ public sealed class DiscoveryExecutionCorrectionTests
 {
     private static readonly JsonSerializerOptions Json=new(JsonSerializerDefaults.Web);
     [Theory]
+    [InlineData(true,true,true,1)] [InlineData(false,true,true,0)]
+    [InlineData(true,false,true,0)] [InlineData(true,true,false,0)]
+    public async Task Admin_replay_uses_current_consent_and_budget_without_rewriting_frozen_configuration(bool enabled,bool free,bool consent,int calls)
+    {
+        var wire=await Capture("success");await using var db=Database();await Seed(db);
+        var execution=await db.DiscoveryExecutions.SingleAsync();execution.ConfigurationJson="{\"semanticEnabled\":false}";await db.SaveChangesAsync();
+        var semantic=new CountingSemantic();
+        var service=new DiscoveryExecutionService(db,new GitHub(),semantic,Options.Create(new DiscoveryExecutionOptions{SemanticEnabled=enabled,GeminiFreeTierConfirmed=free}),new Actor(),TimeProvider.System);
+        var saved=wire.GetProperty("saved").Deserialize<DiscoveryExecutionResult>(Json)!;
+        await service.ObservationsAsync(Id,"10001",saved,default);
+        var o=saved.Observations[0];var request=new DiscoveryPersistedSemanticRequest(0,o.GetProperty("rawContent").GetString()!,o.GetProperty("contentHash").GetString()!,execution.Version,"10001",consent);
+        if(calls==0)await Assert.ThrowsAsync<Portfolio.Application.Common.Exceptions.ConflictException>(()=>service.ExtractPersistedAsync(Id,request,default));
+        else {
+            await service.ExtractPersistedAsync(Id,request,default); // Synthetic failure is durably UNKNOWN, never retried.
+            await Assert.ThrowsAsync<Portfolio.Application.Common.Exceptions.ConflictException>(()=>service.ExtractPersistedAsync(Id,request with {ExpectedVersion=execution.Version},default));
+        }
+        Assert.Equal(calls,semantic.Calls);Assert.Equal(calls,execution.SemanticAttempts);
+        Assert.Equal("{\"semanticEnabled\":false}",execution.ConfigurationJson);Assert.Equal("INGESTING",execution.State);Assert.Null(execution.ResultHash);
+        Assert.Equal(1,(await db.DiscoveryExecutionAttempts.SingleAsync()).CreditsDeducted);Assert.Empty(await db.JobPostings.ToListAsync());
+    }
+    [Theory]
     [InlineData("provider-error","FAILED",0)]
     [InlineData("contradictory","PROVIDER_UNKNOWN",0)]
     [InlineData("unknown","PROVIDER_UNKNOWN",0)]
     [InlineData("invalid-url","FAILED",0)]
     [InlineData("incomplete","PARTIAL",0)]
-    [InlineData("success","SUCCEEDED",1)]
-    [InlineData("zero","SUCCEEDED",1)]
-    [InlineData("multi","SUCCEEDED",2)]
+    [InlineData("success","PARTIAL",0)]
+    [InlineData("zero","PARTIAL",0)]
+    [InlineData("multi","PARTIAL",0)]
     public async Task Worker_callback_preserves_failure_promotion_and_evidence(string scenario,string expected,int jobs)
     {
         var wire=await Capture(scenario);var result=wire.GetProperty("result").Deserialize<DiscoveryExecutionResult>(Json)!;
@@ -31,6 +52,11 @@ public sealed class DiscoveryExecutionCorrectionTests
         await service.CompleteAsync(Id,"10001",result,default);
         Assert.Equal(expected,(await db.DiscoveryExecutions.SingleAsync()).State);
         Assert.Equal(jobs,await db.JobPostings.CountAsync());Assert.Single(await db.DiscoveryExecutionAttempts.ToListAsync());
+        if(scenario is "success" or "zero" or "multi"){
+            var staged=await db.DiscoveryExecutionVacancies.ToListAsync();
+            Assert.Equal(scenario=="multi"?2:1,staged.Count);
+            Assert.All(staged,v=>{Assert.Null(v.JobPostingId);Assert.Equal("NEEDS_REVIEW",v.Status);});
+        }
         Assert.Equal(1,(await db.DiscoveryExecutionAttempts.SingleAsync()).ActualRequests);
         Assert.Equal(6m,(await db.DiscoveryExecutionAttempts.SingleAsync()).CreditsUsedAlternateHeader);
         if(expected=="PROVIDER_UNKNOWN")Assert.NotNull((await db.DiscoveryExecutions.SingleAsync()).ActiveKey);

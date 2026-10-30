@@ -121,13 +121,16 @@ public sealed partial class DiscoveryExecutionService
         var resultHash=Hash(result);
         if(execution.ResultHash is not null){if(execution.ResultHash!=resultHash)throw Conflict("DISCOVERY_RESULT_CONFLICT");return await ViewAsync(execution,ct);}
         if(execution.State is not("CLAIMED" or "INGESTING"))throw Conflict("DISCOVERY_EXECUTION_NOT_CLAIMED");
-        Usage(attempt,result);await RecordProviderEvidenceAsync(execution,result,ct);var observations=await StoreRawAsync(execution,result.Observations,ct);var normalized=0;var missing=0;
+        Usage(attempt,result);await RecordProviderEvidenceAsync(execution,result,ct);var observations=await StoreRawAsync(execution,result.Observations,ct);var missing=0;
         var knownCost=KnownCost(result);var providerSucceeded=ProviderSucceeded(result);
         foreach(var observation in observations)
         {
             var item=result.Observations[observation.ItemIndex];var raw=Text(item,"rawContent")??"";
             // Keep latest validated extraction as a separate layer, never rewrite raw.
-            observation.PayloadJson=item.GetRawText();
+            var merged=System.Text.Json.Nodes.JsonNode.Parse(item.GetRawText())!;
+            var saved=System.Text.Json.Nodes.JsonNode.Parse(observation.PayloadJson)!;
+            if(saved["processing"] is {} processing)merged["processing"]=processing.DeepClone();
+            observation.PayloadJson=merged.ToJsonString();
             var vacancies=Array(item,"vacancies");
             if(vacancies.Length>30)throw Invalid("vacancies");
             var starts=vacancies.Select(v=>Text(v,"positionTitle") is {Length:>0} title?raw.IndexOf(title,StringComparison.Ordinal):-1).ToArray();
@@ -142,23 +145,9 @@ public sealed partial class DiscoveryExecutionService
                 var row=new DiscoveryExecutionVacancy{Id=Guid.NewGuid(),ObservationId=observation.Id,VacancyIndex=i,
                     RawJobPostingId=observation.RawJobPostingId,Fingerprint=fingerprint,FieldsJson=JsonSerializer.Serialize(fields,Json),
                     MissingFieldsJson=JsonSerializer.Serialize(mapped.Missing,Json)};
-                if(mapped.Command is not null && observation.RawJobPostingId is not null && providerSucceeded && Promotable(item,result.ProviderOperation is null&&result.UsageEvidence is null))
-                {
-                    var duplicate=db.DiscoveryExecutionVacancies.Local.FirstOrDefault(v=>v.Fingerprint==fingerprint&&v.JobPostingId!=null)??
-                        await db.DiscoveryExecutionVacancies.AsNoTracking().FirstOrDefaultAsync(v=>v.Fingerprint==fingerprint&&v.JobPostingId!=null,ct);
-                    if(duplicate is not null){row.JobPostingId=duplicate.JobPostingId;row.Status="DUPLICATE";}
-                    else
-                    {
-                        var r=mapped.Command;var now=clock.GetUtcNow();var job=new JobPosting{Id=Guid.NewGuid(),CreatedAt=now,UpdatedAt=now};
-                        JobPostingMapping.Assign(job,r.CompanyName,r.PositionTitle,r.Location,r.EmploymentType,r.WorkplaceType,r.SalaryMinimum,r.SalaryMaximum,
-                            r.SalaryCurrency,r.SalaryPeriod,r.ExperienceRequirements,r.Description,r.TechnologyStack,r.ApplicationEmail,r.ApplicationUrl,r.ExpiresAt,r.Notes);
-                        db.JobPostings.Add(job);row.JobPostingId=job.Id;row.Status="NORMALIZED";
-                    }
-                    var source=db.RawJobPostings.Local.SingleOrDefault(x=>x.Id==observation.RawJobPostingId)??await db.RawJobPostings.SingleAsync(x=>x.Id==observation.RawJobPostingId,ct);
-                    if(vacancies.Length==1)source.JobPostingId=row.JobPostingId;
-                    source.IngestionStatus="NORMALIZED";source.UpdatedAt=clock.GetUtcNow();normalized++;
-                }
-                else missing++;
+                // Discovery supplies reviewable evidence only. Creating a JobPosting
+                // remains an explicit user action, even for a fully extracted JD.
+                missing++;
                 db.DiscoveryExecutionVacancies.Add(row);
             }
             if(vacancies.Length==0)missing++;
@@ -186,7 +175,9 @@ public sealed partial class DiscoveryExecutionService
             var observation=result.Observations[item.ItemIndex];
             // Review cannot substitute another raw source or attach another execution.
             var raw=Text(observation,"rawContent");
-            if(item.RawContent is not null && item.RawContent!=raw || item.ProviderPostId!=Text(observation,"providerPostId") || item.SourceUrl!=Text(observation,"sourceUrl"))throw Invalid("reviewBundle");
+            var observedId=Text(observation,"providerPostId");
+            var reviewableId=observedId is not null&&Regex.IsMatch(observedId,"^(?:[0-9]{1,100}|pfbid[A-Za-z0-9]{1,200})$")?observedId:null;
+            if(item.RawContent is not null && item.RawContent!=raw || item.ProviderPostId!=reviewableId || item.SourceUrl!=Text(observation,"sourceUrl"))throw Invalid("reviewBundle");
             var payload=JsonSerializer.Serialize(item,DiscoveryReviewRules.Json);
             var hash=DiscoveryReviewRules.Hash(bundle.Query+"\n"+payload);
             var prior=existing.SingleOrDefault(c=>c.PageNumber==1&&c.ItemIndex==item.ItemIndex);

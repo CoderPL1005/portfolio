@@ -33,6 +33,10 @@ public sealed record DiscoveryExecutionResult(int ActualRequests, decimal? Credi
 public sealed record DiscoveryUsageEvidence(bool BodyCostPresent, JsonElement BodyCreditsCharged,
     string? DeductedHeader = null,string? AlternateHeader = null);
 public sealed record DiscoverySemanticRequest(int ItemIndex, string RawContent, string ContentHash);
+public sealed record DiscoveryProcessingRequest(int ItemIndex, string? ContentHash, DiscoveryReviewItem? Review,
+    JsonElement[] Vacancies, string? ExtractionError = null, int? ExpectedVersion = null, string? ExpectedWorkflowRunId = null);
+public sealed record DiscoveryPersistedSemanticRequest(int ItemIndex, string RawContent, string ContentHash,
+    int ExpectedVersion, string ExpectedWorkflowRunId, bool ConfirmGeminiFreeTier = false);
 public sealed record DiscoveryTextGeneration(string ModelIdentity, string CacheVersion, string Output, int? InputTokens, int? OutputTokens);
 public interface IDiscoveryTextExtractor
 {
@@ -54,4 +58,6 @@ public interface IDiscoveryExecutionService
     Task<object> ObservationsAsync(Guid id, string runId, DiscoveryExecutionResult result, CancellationToken ct);
     Task<object> CompleteAsync(Guid id, string runId, DiscoveryExecutionResult result, CancellationToken ct);
     Task<DiscoveryTextGeneration> ExtractAsync(Guid id, string runId, DiscoverySemanticRequest request, CancellationToken ct);
+    Task<object> ProcessAsync(Guid id, DiscoveryProcessingRequest request, string? workerRunId, CancellationToken ct);
+    Task<object> ExtractPersistedAsync(Guid id, DiscoveryPersistedSemanticRequest request, CancellationToken ct);
 }

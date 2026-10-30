@@ -22,6 +22,17 @@ import { DiscoveryExecution } from './discovery-execution.models';
         @if(run.errorCode){<p>{{run.errorCode}}</p>}
         @for(result of run.results ?? []; track $index){
           <article><h3>Post {{(result.itemIndex ?? $index) + 1}} · {{result.status}}</h3>
+            <p>Gemini: {{result.semanticState ?? 'NOT_REQUESTED'}}</p>
+            @if(result.processing; as processing){
+              @if(processing.review){
+              <p>Recruitment: {{processing.review.contentValidity.status}} · {{processing.review.contentValidity.explanation}}</p>
+              <p>Profile matching: {{processing.review.targetMatching.status}} · {{processing.review.targetMatching.explanation}}</p>
+              @if(processing.review.sourceWarnings.length){<p>Source warnings: {{processing.review.sourceWarnings.join(', ')}}</p>}
+              @if(processing.review.missingFields.length){<p>Missing / uncertain: {{processing.review.missingFields.join(', ')}}</p>}
+              } @else {<p>Classification unavailable. Original post is preserved for review.</p>}
+              @if(processing.extractionError){<p role="status">Processing: {{processing.extractionError}}. Original post remains available.</p>}
+              @for(v of processing.vacancies; track $index){<details><summary>Extracted fields and evidence — vacancy {{$index + 1}}</summary><pre>{{v.fields | json}}</pre><p>Missing / uncertain: {{v.missingFields?.join(', ')}}</p></details>}
+            }@else{<p>Classification has not been persisted yet. This does not mean the post is invalid.</p>}
             @if(result.jobPostingId){<a [routerLink]="['/admin/job-hunting/jobs',result.jobPostingId]">Open Job</a>}
             @if(result.missingFields?.length){<p>Missing / uncertain: {{result.missingFields?.join(', ')}}</p>}
             @for(v of result.vacancies ?? []; track $index){
@@ -29,7 +40,7 @@ import { DiscoveryExecution } from './discovery-execution.models';
               @if(v.missingFields?.length){<p>Missing / uncertain: {{v.missingFields?.join(', ')}}</p>}
               <details><summary>Field evidence and status</summary><pre>{{v.fields | json}}</pre></details>
             }
-            @if(result.observation; as o){<details><summary>Preserved source / staging</summary><p>{{o.outcome}}</p><pre>{{o.rawContent ?? 'No source text supplied'}}</pre><p>{{o.sourceUrl}}</p></details>}
+            @if(result.observation; as o){<section aria-label="Original Facebook post"><p>{{o.outcome}}</p><pre>{{o.rawContent ?? 'No source text supplied'}}</pre><p>Canonical source: {{o.sourceUrl ?? 'Unverified / unavailable'}}</p><details><summary>Source provenance</summary><p>Provider post ID: {{o.providerPostId}}</p><p>Observed provider URL (not verified): {{o.providerSourceUrl}}</p></details></section>}
           </article>
         }
       }
@@ -56,7 +67,9 @@ export class DiscoveryExecutionComponent {
     if(typeof this.api.discoveryExecutions !== 'function')return;
     this.api.discoveryExecutions().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({next:h=>{
       this.history.set(h.items);this.historyKnown.set(true);
-      const active=h.items.find(r=>!this.terminal(r));if(active)this.select(active.id);
+      const selected=this.current()?.id;
+      const active=h.items.find(r=>!this.terminal(r));
+      const id=selected??active?.id??h.items[0]?.id;if(id)this.select(id);
     },error:()=>{this.historyKnown.set(false);this.error.set('Run history unavailable. Discovery cannot be started safely.');}});
   }
   start(){

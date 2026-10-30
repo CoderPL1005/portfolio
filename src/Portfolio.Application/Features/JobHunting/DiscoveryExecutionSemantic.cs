@@ -15,6 +15,12 @@ public sealed partial class DiscoveryExecutionService
         var recorded=JsonSerializer.Deserialize<DiscoveryExecutionResult>(evidence,Json);
         if(recorded is null||!ProviderSucceeded(recorded))throw Conflict("DISCOVERY_PROVIDER_NOT_SUCCESSFUL");
         if(execution.State!="INGESTING"||!Settings.SemanticEnabled||!Settings.GeminiFreeTierConfirmed)throw Conflict("DISCOVERY_SEMANTIC_DISABLED");
+        return await ExtractSavedAsync(execution,request,ct);
+    }
+    private async Task<DiscoveryTextGeneration> ExtractSavedAsync(Portfolio.Domain.Entities.DiscoveryExecution execution,DiscoverySemanticRequest request,CancellationToken ct)
+    {
+        if(request.RawContent is null||request.RawContent.Length>24000||request.ContentHash!=DiscoveryReviewRules.Hash(request.RawContent))throw Invalid("rawContent");
+        var id=execution.Id;
         var observation=await db.DiscoveryExecutionObservations.SingleOrDefaultAsync(x=>x.ExecutionId==id&&x.ItemIndex==request.ItemIndex,ct);
         if(observation is null||observation.ContentHash!=request.ContentHash||Text(JsonDocument.Parse(observation.PayloadJson).RootElement,"rawContent")!=request.RawContent)throw Conflict("DISCOVERY_SEMANTIC_SOURCE_CONFLICT");
         var cacheKey=Hash(new{request.ContentHash,model=semantic.ModelIdentity,contract="ai-job-extraction-v1/ai-extraction-prompt-v1"});
@@ -25,7 +31,7 @@ public sealed partial class DiscoveryExecutionService
         if(observation.SemanticState!="NOT_REQUESTED"||execution.SemanticAttempts>=Math.Clamp(Settings.MaximumSemanticAttempts,1,5))throw Conflict("DISCOVERY_SEMANTIC_BUDGET_OR_ATTEMPT_USED");
         // Commit reservation before external generation; crashes never auto-retry.
         observation.SemanticState="CLAIMED";observation.SemanticCacheKey=cacheKey;execution.SemanticAttempts++;
-        Transition(execution,"INGESTING");await SaveAsync(ct);
+        execution.Version++;execution.UpdatedAt=clock.GetUtcNow();await SaveAsync(ct);
         try
         {
             using var timeout=CancellationTokenSource.CreateLinkedTokenSource(ct);timeout.CancelAfter(TimeSpan.FromSeconds(20));

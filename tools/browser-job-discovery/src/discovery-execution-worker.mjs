@@ -4,7 +4,7 @@ import {normalizeSocialApisItem,parseSocialApisSearchResponse} from './socialapi
 import {JobPostExtractor,ActivityBudget,Stop} from './core.mjs';
 import {resolveOneRequestPolicy} from './candidate-technology-profile.mjs';
 import {extractRecruitmentPost} from './ai-job-extraction.mjs';
-import {buildReviewItems,reviewExport} from './discovery-review.mjs';
+import {buildReviewItemsFromObservations,reviewExport} from './discovery-review.mjs';
 import {supportedPostingFacts} from './discovery-posting-facts.mjs';
 
 const sha=value=>createHash('sha256').update(value,'utf8').digest('hex');
@@ -41,7 +41,8 @@ function deterministic(observation){
       const start=block.toLowerCase().indexOf(technology.toLowerCase());
       return start<0?[]:[{start:offset+start,end:offset+start+technology.length,quote:raw.slice(offset+start,offset+start+technology.length)}];
     });
-    return {fields:facts(values,raw,supported,spans),...values};
+    return {fields:facts(values,raw,supported,spans),...values,
+      experienceKnown:typeof v.experience?.evidence==='string'&&raw.includes(v.experience.evidence)};
   });
   return {recruitment:job.structuredMatch?.recruitment===true,vacancies};
 }
@@ -103,26 +104,64 @@ export async function runDiscoveryExecution({executionId,workflowRunId,runAttemp
   // Raw goes durable before semantic generation. Failure leaves a visible claimed
   // execution; never retry provider, release claim, or use a public artifact.
   await backend.saveObservations(executionId,observations,usage);
-  const results=[];const completed=[];
+  const {results,completed,reviewItems}=await processObservations({executionId,observations,config,policy,providerOperation,backend});
+  const state=providerOperation==='UNKNOWN'?'PROVIDER_UNKNOWN':providerOperation==='FAILED'?'FAILED':results.some(r=>r.status==='NEEDS_REVIEW')?'PARTIAL':'SUCCEEDED';
+  return await backend.complete(executionId,{...usage,state,errorCode,triggerSource:config.triggerSource??'ADMIN_MANUAL',observations:completed,results,
+    reviewBundle:reviewItems.every(Boolean)?reviewExport(reviewItems,{runId:executionId,query}):null});
+}
+
+async function processObservations({executionId,observations,config,policy,providerOperation,backend}){
+  const classificationFailures=new Set();
+  const reviewItems=buildReviewItemsFromObservations(observations,{profile:policy?.profile,targetJobPreferences:policy?.targetJobPreferences,
+    onItemError:index=>classificationFailures.add(index)});
+  const results=[];const completed=[];const persistenceErrors=[];
   for(const observation of observations){
-    let extracted=providerOperation==='SUCCEEDED'?deterministic(observation):{recruitment:false,vacancies:[]},semanticError=false;
-    const incomplete=!extracted.vacancies.length||extracted.vacancies.some(v=>['companyName','positionTitle','location'].some(k=>v.fields[k].value===null));
-    if(incomplete&&config.semanticEnabled&&providerOperation==='SUCCEEDED'&&observation.rawContent&&observation.rawContent.length<=24000&&observation.providerPostId&&observation.outcome==='READY_FOR_EXTRACTION'){
+    let review=reviewItems[observation.itemIndex];
+    // Oversized/unsafe text may be retained in the raw layer but is not a valid
+    // review payload. Never suppress that source to manufacture a prediction.
+    if(review&&(review.rawContent!==observation.rawContent||review.contentHash!==observation.contentHash)){
+      classificationFailures.add(observation.itemIndex);review=null;reviewItems[observation.itemIndex]=null;
+    }
+    let extracted={vacancies:[]},semanticError=false,processingError=classificationFailures.has(observation.itemIndex)?'CLASSIFICATION_FAILED':null;
+    try { if(providerOperation==='SUCCEEDED'&&!processingError)extracted=deterministic(observation); }
+    catch { processingError='DETERMINISTIC_EXTRACTION_FAILED'; }
+    const incomplete=!extracted.vacancies.length||extracted.vacancies.some(v=>
+      ['companyName','positionTitle','location','experienceRequirements'].some(k=>!v.fields[k].value)||
+      !v.experienceKnown||
+      !v.fields.technologyStack.value?.length||
+      (v.fields.salaryMinimum.value===null&&v.fields.salaryMaximum.value===null)||
+      !v.fields.salaryCurrency.value||!v.fields.salaryPeriod.value||
+      (!v.fields.applicationEmail.value&&!v.fields.applicationUrl.value));
+    if(incomplete&&review&&review.contentValidity.status!=='INVALID_RECRUITMENT'&&config.semanticEnabled&&providerOperation==='SUCCEEDED'&&observation.rawContent&&observation.rawContent.length<=24000&&observation.providerPostId&&observation.outcome==='READY_FOR_EXTRACTION'){
       try{
+        // Make classification durable even if generation or this process dies.
+        if(backend.saveProcessing)await backend.saveProcessing(executionId,{itemIndex:observation.itemIndex,contentHash:observation.contentHash,review,
+          vacancies:extracted.vacancies.map(v=>({...Object.fromEntries(fields.map(key=>[key,v.fields[key].value])),fields:v.fields})),extractionError:processingError});
+        // The backend owns current consent, model and the durable attempt/cache.
+        // Never invent a model name when an older configuration omits it.
+        const generation=await backend.extract(executionId,{itemIndex:observation.itemIndex,rawContent:observation.rawContent,contentHash:observation.contentHash});
+        if(!generation?.modelIdentity||config.semanticModel&&generation.modelIdentity!==config.semanticModel)throw Error('MODEL_UNVERIFIED');
         const ai=await extractRecruitmentPost({sourcePostId:observation.providerPostId,sourceUrl:observation.sourceUrl,rawContent:observation.rawContent,
-          contentHash:observation.contentHash,publishedAt:observation.publishedAt},{provider:{modelIdentity:config.semanticModel??'backend-configured-gemini',
-            extract:async()=>{
-              const result=await backend.extract(executionId,{itemIndex:observation.itemIndex,rawContent:observation.rawContent,contentHash:observation.contentHash});
-              if(result?.modelIdentity&&config.semanticModel&&result.modelIdentity!==config.semanticModel)throw Error('MODEL_CHANGED');
-              return result?.output;
-            }}});
-        extracted={recruitment:ai.vacancies.length>0,vacancies:ai.vacancies.map(v=>{
+          contentHash:observation.contentHash,publishedAt:observation.publishedAt},{provider:{modelIdentity:generation.modelIdentity,extract:async()=>generation.output}});
+        const supplemented={vacancies:ai.vacancies.map(v=>{
           const supported=ai.vacancies.length===1?supportedPostingFacts(observation.rawContent):{};
           const values={companyName:ai.employer.value,positionTitle:v.title.value,location:v.location.value??ai.sharedLocation.value,description:observation.rawContent,
             technologyStack:v.technologies.value??[],experienceRequirements:v.requirements.value??ai.sharedRequirements.value,applicationUrl:v.applicationUrl.value??ai.applicationUrl.value,
             ...Object.fromEntries(Object.entries(supported).map(([key,fact])=>[key,fact.value]))};
           return {...values,fields:facts(values,observation.rawContent,supported,v.technologies.evidence)};
         })};
+        // Do not erase deterministic facts when the semantic response abstains.
+        if(supplemented.vacancies.length){
+          for(const vacancy of supplemented.vacancies){
+            const title=vacancy.fields.positionTitle.value;
+            const matches=title?extracted.vacancies.filter(v=>v.fields.positionTitle.value===title):[];
+            const prior=matches.length===1?matches[0]:null;
+            if(prior)for(const field of fields)if(vacancy.fields[field].value===null&&prior.fields[field].value!==null)vacancy.fields[field]=prior.fields[field];
+          }
+          // Do not union a generic deterministic heading with the validated
+          // role split: that would fabricate an extra vacancy for the same post.
+          extracted=supplemented;
+        }
       }catch{semanticError=true;}
     }
     const vacancies=extracted.vacancies.map(v=>{
@@ -132,15 +171,40 @@ export async function runDiscoveryExecution({executionId,workflowRunId,runAttemp
     });
     const missingFields=[...new Set(vacancies.flatMap(v=>['companyName','positionTitle','location','description'].filter(key=>!v.fields[key].value)))];
     if(!vacancies.length)missingFields.push('VACANCIES');
-    const status=semanticError||missingFields.length||observation.outcome!=='READY_FOR_EXTRACTION'?'NEEDS_REVIEW':'NORMALIZED';
-    const outcome=providerOperation!=='SUCCEEDED'||observation.outcome!=='READY_FOR_EXTRACTION'?observation.outcome:extracted.recruitment?observation.outcome:'INVALID_RECRUITMENT';
+    const status='NEEDS_REVIEW'; // Extraction is staging, never automatic JobPosting promotion.
+    const outcome=providerOperation!=='SUCCEEDED'||observation.outcome!=='READY_FOR_EXTRACTION'?observation.outcome:review?.contentValidity.status==='INVALID_RECRUITMENT'?'INVALID_RECRUITMENT':observation.outcome;
     results.push({itemIndex:observation.itemIndex,status,missingFields,vacancies});
-    completed.push({...observation,outcome,vacancies,extractionError:semanticError?'SEMANTIC_UNAVAILABLE':null});
+    const processed={...observation,outcome,vacancies,extractionError:semanticError?'SEMANTIC_UNAVAILABLE':processingError};
+    completed.push(processed);
+    // Durable per-item layer before the final result; old injectable transports
+    // remain compatible. The production transport always implements this port.
+    if(backend.saveProcessing){
+      try{await backend.saveProcessing(executionId,{itemIndex:observation.itemIndex,contentHash:observation.contentHash,
+        review,vacancies,extractionError:processed.extractionError});}
+      catch{persistenceErrors.push(observation.itemIndex);config.semanticEnabled=false;}
+    }
   }
-  const state=providerOperation==='UNKNOWN'?'PROVIDER_UNKNOWN':providerOperation==='FAILED'?'FAILED':results.some(r=>r.status==='NEEDS_REVIEW')?'PARTIAL':'SUCCEEDED';
-  const reviewItems=buildReviewItems(parsed?.rows??[],{profile:policy?.profile,targetJobPreferences:policy?.targetJobPreferences});
-  return await backend.complete(executionId,{...usage,state,errorCode,triggerSource:config.triggerSource??'ADMIN_MANUAL',observations:completed,results,
-    reviewBundle:reviewExport(reviewItems,{runId:executionId,query})});
+  return {results,completed,reviewItems,persistenceErrors};
+}
+
+export async function replayDiscoveryExecution({executionId,confirmGeminiFreeTier=false},{backend}={}){
+  if(!uuid(executionId))throw new Stop('DISCOVERY_EXECUTION_ID_INVALID');
+  const snapshot=await backend.getPersisted(executionId);
+  if(snapshot.id!==executionId||!/^\d{1,20}$/u.test(snapshot.workflowRunId??'')||!Number.isInteger(snapshot.version))throw new Stop('DISCOVERY_REPLAY_PROVENANCE_INVALID');
+  const observations=snapshot.results.map(r=>r.observation);
+  if(observations.some((o,i)=>o.itemIndex!==i||o.rawContent!==null&&sha(o.rawContent)!==o.contentHash))throw new Stop('DISCOVERY_REPLAY_SOURCE_INVALID');
+  const config={...snapshot.configuration,semanticEnabled:confirmGeminiFreeTier===true&&snapshot.semanticReplay?.enabled===true&&typeof snapshot.semanticReplay?.modelIdentity==='string'&&!!snapshot.semanticReplay.modelIdentity.trim(),
+    semanticModel:snapshot.semanticReplay?.modelIdentity??null};
+  const policy=config.portfolioSnapshot?resolveOneRequestPolicy({portfolioSnapshot:config.portfolioSnapshot},config.preferences):null;
+  let version=snapshot.version;
+  const ports={extract:async(id,body)=>{const response=await backend.extractPersisted(id,{...body,expectedVersion:version,expectedWorkflowRunId:snapshot.workflowRunId,confirmGeminiFreeTier});version=response.version;return response.generation;},
+    saveProcessing:async(id,body)=>{
+      const prior=snapshot.results[body.itemIndex];
+      if(!confirmGeminiFreeTier&&prior.semanticState==='COMPLETED'&&prior.processing)return;
+      const response=await backend.saveProcessing(id,{...body,expectedVersion:version,expectedWorkflowRunId:snapshot.workflowRunId});version=response.version;
+    }};
+  const result=await processObservations({executionId,observations,config,policy,providerOperation:'SUCCEEDED',backend:ports});
+  return {state:result.persistenceErrors.length?'PROCESSING_INCOMPLETE':'PROCESSED_FOR_REVIEW',providerRequests:0,observations:observations.length,failedItemIndexes:result.persistenceErrors};
 }
 
 export function executionBackendFromEnvironment(){
@@ -160,6 +224,24 @@ export function executionBackendFromEnvironment(){
     getConfiguration:async id=>{const data=await request(id,'config');return {...data.configuration,executionId:id,triggerSource:data.triggerSource};},
     claim:id=>request(id,'claim',{}),
     saveObservations:(id,observations,usage)=>request(id,'observations',{...usage,observations}),
+    saveProcessing:(id,body)=>request(id,'processing',body),
     extract:(id,body)=>request(id,'extract',body),complete:(id,body)=>request(id,'results',body)
   };
+}
+
+// Uses an existing authenticated Admin session; never a worker key, provider key
+// or an invented result receipt. No provider request port exists in replay.
+export function persistedBackendFromEnvironment(){
+  const origin=process.env.DISCOVERY_EXECUTION_ORIGIN??'https://portfolio-api-forn.onrender.com';
+  const token=process.env.DISCOVERY_ADMIN_TOKEN;
+  if(origin!=='https://portfolio-api-forn.onrender.com'||!token||/[\r\n]/u.test(token))throw new Stop('DISCOVERY_ADMIN_CONFIGURATION_INVALID');
+  const request=async(id,suffix,body)=>{
+    if(!uuid(id))throw new Stop('DISCOVERY_EXECUTION_ID_INVALID');
+    const response=await fetch(`${origin}/api/v1/admin/job-hunting/discovery/executions/${id}${suffix}`,{method:body===undefined?'GET':'POST',redirect:'manual',credentials:'omit',
+      headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(30000)});
+    if(!response.ok)throw new Stop(response.status===409?'DISCOVERY_EXECUTION_CONFLICT':'DISCOVERY_ADMIN_UNAVAILABLE');
+    const text=await response.text();if(Buffer.byteLength(text)>8*1024*1024)throw new Stop('DISCOVERY_BACKEND_RESPONSE_TOO_LARGE');
+    return JSON.parse(text).data;
+  };
+  return {getPersisted:id=>request(id,''),saveProcessing:(id,body)=>request(id,'/processing',body),extractPersisted:(id,body)=>request(id,'/extract-persisted',body)};
 }
