@@ -133,27 +133,97 @@ function supportedValue(name, value, quotes, sourceContext = quotes.join('\n')) 
   return quotes.some(q => literal(q, value));
 }
 
-export function validateExtractionEvidence(output, rawContent) {
+// Explicit opt-in for the smoke validator. Existing worker callers remain strict.
+export const EVIDENCE_POLICY_V2 = Object.freeze({ realignUniqueQuotes: true, inlineRecruitmentTitles: true });
+const utf16Boundary = (raw, index) => index >= 0 && index <= raw.length && !(index > 0 && index < raw.length &&
+  raw.charCodeAt(index - 1) >= 0xd800 && raw.charCodeAt(index - 1) <= 0xdbff && raw.charCodeAt(index) >= 0xdc00 && raw.charCodeAt(index) <= 0xdfff);
+const exactSpan = (raw, e) => Number.isInteger(e.start) && Number.isInteger(e.end) && e.start >= 0 && e.end > e.start && e.end <= raw.length &&
+  utf16Boundary(raw, e.start) && utf16Boundary(raw, e.end) && raw.slice(e.start, e.end) === e.quote;
+
+function realignEvidence(output, raw, report, failed) {
+  const copy = structuredClone(output);
+  function ground(fact, path) {
+    if (fact.value === null) return;
+    if (!fact.evidence.length) { report(path, 'EVIDENCE_MISSING'); failed.add(path); return; }
+    fact.evidence = fact.evidence.map((e, index) => {
+      if (exactSpan(raw, e)) return e;
+      const start = raw.indexOf(e.quote), diagnosticPath = `${path}.evidence[${index}]`;
+      let error;
+      if (start < 0) error = 'EVIDENCE_QUOTE_NOT_FOUND';
+      else if (raw.indexOf(e.quote, start + 1) >= 0) error = 'EVIDENCE_QUOTE_AMBIGUOUS';
+      else if (!utf16Boundary(raw, start) || !utf16Boundary(raw, start + e.quote.length)) error = 'EVIDENCE_SURROGATE_BOUNDARY_INVALID';
+      if (error) { report(diagnosticPath, error); failed.add(path); return e; }
+      // No fuzzy search, normalization, quote/value synthesis or byte slicing.
+      // The exact quote determines canonical UTF-16 offsets; all semantic and
+      // vacancy-attribution checks still run after this correction.
+      const encoder = new TextEncoder(), byteStart = encoder.encode(raw.slice(0, start)).length;
+      const byteEnd = byteStart + encoder.encode(e.quote).length;
+      report(diagnosticPath, e.start === byteStart && e.end === byteEnd
+        ? 'EVIDENCE_UTF8_OFFSETS_REALIGNED_EXACT' : 'EVIDENCE_OFFSETS_REALIGNED_EXACT');
+      return { start, end: start + e.quote.length, quote: e.quote };
+    });
+  }
+  for (const key of POST_FIELDS) ground(copy[key], key);
+  copy.vacancies.forEach((v, i) => { for (const key of VACANCY_FIELDS) ground(v[key], `vacancies[${i}].${key}`); });
+  return copy;
+}
+
+function inlineRecruitment(line) {
+  // A narrow anchored hiring statement, not an arbitrary role mention. Company
+  // text is context only: this does not establish employer identity/verification.
+  const prefix = line.match(/^[\p{Lu}\p{N}][\p{L}\p{N} .&'-]{0,79}?[ \t]+(?:đang[ \t]+)?(?:tuyển dụng|tuyển|is hiring|hiring)[ \t]+/u);
+  if (!prefix) return null;
+  // Application/contact instructions have no recruiting subject. They are
+  // neither a vacancy nor an independent role boundary in a shared footer.
+  if (/^(?:ứng|liên hệ|cách|hồ sơ|yêu cầu|quyền lợi|apply|contact|application)(?:[ \t]|$)/iu.test(line) ||
+    /(?:^|\s)(?:nếu|bạn|ví|dụ|example|candidate)(?:\s|$)/iu.test(prefix[0])) return null;
+  const safePrefix = !negated(prefix[0]) && !/(?:^|\s)(?:previously|former|từng|đã)(?:\s|$)/iu.test(prefix[0]);
+  const rest = line.slice(prefix[0].length);
+  const role = rest.match(/^(?:(?:Intern|Fresher|Junior|Middle|Senior|Lead)[ \t]+)?(?:Backend|Frontend|Full[- ]?stack|Mobile|QA|PQA|DevOps|Data|Security)[ \t]+(?:Developer|Engineer|Tester|Analyst)(?:[ \t]+(?:Intern|Fresher))?(?=$|[\s(.!])/iu);
+  if (!role) return { title: null, offset: prefix[0].length, eligible: false };
+  const suffix = rest.slice(role[0].length);
+  const eligible = safePrefix && !negated(line) && !/đóng|ngừng|closed|paused/iu.test(line) &&
+    /^[ \t]*(?:\([A-Za-z0-9#.+ /-]{1,40}\))?(?:[ \t]+(?:tại|in)[ \t]+[\p{L}\p{N}][\p{L}\p{N} ,'-]{0,79})?[.!]?[ \t]*$/iu.test(suffix);
+  // Even an ambiguous suffix cuts the preceding role's scope. It cannot make
+  // the ambiguous role itself eligible or lend its technology to another role.
+  return { title: role[0], offset: prefix[0].length, eligible };
+}
+
+export function validateExtractionEvidence(output, rawContent, policy = {}) {
   const diagnostics = [];
   const report = (path, code) => diagnostics.push({ path, code });
+  const failed = new Set();
+  if (policy.realignUniqueQuotes === true) output = realignEvidence(output, rawContent, report, failed);
   // Only supported title anchors may establish another vacancy's boundaries.
   const titleAnchor = fact => {
     if (typeof fact.value !== 'string' || !fact.evidence.length) return undefined;
     const e = fact.evidence[0];
-    if (fact.evidence.some(s => /[\r\n]/u.test(s.quote) || rawContent.slice(s.start, s.end) !== s.quote)) return undefined;
+    if (fact.evidence.some(s => /[\r\n]/u.test(s.quote) || !exactSpan(rawContent, s))) return undefined;
     const lineStart = rawContent.lastIndexOf('\n', e.start - 1) + 1;
     const lineEnd = rawContent.indexOf('\n', lineStart);
-    if (!sourceHeading(rawContent.slice(lineStart, lineEnd < 0 ? rawContent.length : lineEnd))) return undefined;
+    const end = lineEnd < 0 ? rawContent.length : lineEnd, line = rawContent.slice(lineStart, end);
+    if (policy.inlineRecruitmentTitles === true) {
+      const inline = inlineRecruitment(line);
+      if (inline) {
+        const start = lineStart + inline.offset;
+        return inline.eligible && fold(fact.value) === fold(inline.title) &&
+          fact.evidence.every(s => s.start >= lineStart && s.end <= end) && e.start <= start && e.end >= start + inline.title.length ? start : undefined;
+      }
+    }
+    if (!sourceHeading(line)) return undefined;
     const offset = fold(e.quote).indexOf(fold(fact.value));
     if (offset < 0 || !/^(?:\s*(?:\d+[.)]|[-*#])?\s*)$/u.test(rawContent.slice(lineStart, e.start + offset))) return undefined;
     return lineStart;
   };
   const modelBounds = output.vacancies.filter(v => v.title.value !== null && v.title.evidence.length &&
-    v.title.evidence.every(e => e.start >= 0 && e.end > e.start && rawContent.slice(e.start, e.end) === e.quote) &&
+    v.title.evidence.every(e => exactSpan(rawContent, e)) &&
     supportedValue('title', v.title.value, v.title.evidence.map(e => e.quote)))
     .map(v => titleAnchor(v.title)).filter(n => n !== undefined);
   // Source headings remain boundaries even when the model omits a vacancy.
-  const sourceBounds = [...rawContent.matchAll(/[^\r\n]+/gu)].filter(m => sourceHeading(m[0])).map(m => m.index);
+  const sourceBounds = [...rawContent.matchAll(/[^\r\n]+/gu)].flatMap(m => {
+    const inline = policy.inlineRecruitmentTitles === true ? inlineRecruitment(m[0]) : null;
+    return inline ? [m.index + inline.offset] : sourceHeading(m[0]) ? [m.index] : [];
+  });
   const bounds = [...new Set([...modelBounds, ...sourceBounds])].sort((a, b) => a - b);
   // Recognize only explicitly common sections. An ambiguous last-role footer
   // is not automatically attributed to that role or silently shared with all.
@@ -165,7 +235,8 @@ export function validateExtractionEvidence(output, rawContent) {
       return unknown();
     }
     if (fact.status === 'CONFLICTING' || fact.status === 'UNKNOWN') { report(path, 'CONFLICTING_OR_UNKNOWN_FACT'); return unknown(); }
-    if (!fact.evidence.length || fact.evidence.some(e => e.start < 0 || e.end <= e.start || e.end > rawContent.length || rawContent.slice(e.start, e.end) !== e.quote)) {
+    if (failed.has(path)) return unknown();
+    if (!fact.evidence.length || fact.evidence.some(e => !exactSpan(rawContent, e))) {
       report(path, 'EVIDENCE_SPAN_INVALID'); return unknown();
     }
     const sourceContext = [...new Set(fact.evidence.map(e => {
