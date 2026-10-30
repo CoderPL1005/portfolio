@@ -19,7 +19,7 @@ function facts(values,raw,supported={},arrayEvidence=[]){
     const valid=value!==null&&(quote!==null||Array.isArray(value)&&value.length>0&&value.every(v=>typeof v==='string'&&spans.some(e=>e.quote.toLowerCase().includes(v.toLowerCase()))));
     const start=quote===null?-1:raw.indexOf(quote);
     return [key,{value:valid?value:null,status:value===null?'NOT_PROVIDED':valid?'EXTRACTED':'NEEDS_REVIEW',
-      evidence:valid&&Array.isArray(value)?spans:quote===null?[]:[{start,end:start+quote.length,quote}]}];
+      origin:'DETERMINISTIC',evidence:valid&&Array.isArray(value)?spans:quote===null?[]:[{start,end:start+quote.length,quote}]}];
   }));
 }
 function deterministic(observation){
@@ -125,17 +125,21 @@ async function processObservations({executionId,observations,config,policy,provi
     let extracted={vacancies:[]},semanticError=false,processingError=classificationFailures.has(observation.itemIndex)?'CLASSIFICATION_FAILED':null;
     try { if(providerOperation==='SUCCEEDED'&&!processingError)extracted=deterministic(observation); }
     catch { processingError='DETERMINISTIC_EXTRACTION_FAILED'; }
+    const saved=config.savedProcessing?.[observation.itemIndex];
+    if(saved?.semanticState==='COMPLETED'&&saved.processing?.vacancies?.length&&!processingError&&
+      saved.processing.vacancies.every(v=>v?.fields&&fields.every(key=>v.fields[key]&&Object.hasOwn(v.fields[key],'value'))))
+      extracted={vacancies:structuredClone(saved.processing.vacancies)};
     const incomplete=!extracted.vacancies.length||extracted.vacancies.some(v=>
-      ['companyName','positionTitle','location','experienceRequirements'].some(k=>!v.fields[k].value)||
+      ['companyName','positionTitle','location','experienceRequirements','employmentType','workplaceType','notes'].some(k=>!v.fields[k].value)||
       !v.experienceKnown||
       !v.fields.technologyStack.value?.length||
       (v.fields.salaryMinimum.value===null&&v.fields.salaryMaximum.value===null)||
       !v.fields.salaryCurrency.value||!v.fields.salaryPeriod.value||
       (!v.fields.applicationEmail.value&&!v.fields.applicationUrl.value));
-    if(incomplete&&review&&review.contentValidity.status!=='INVALID_RECRUITMENT'&&config.semanticEnabled&&providerOperation==='SUCCEEDED'&&observation.rawContent&&observation.rawContent.length<=24000&&observation.providerPostId&&observation.outcome==='READY_FOR_EXTRACTION'){
+    if(incomplete&&review?.contentValidity.status==='VALID_RECRUITMENT'&&config.semanticEnabled&&providerOperation==='SUCCEEDED'&&observation.rawContent&&observation.rawContent.length<=24000&&observation.providerPostId&&observation.outcome==='READY_FOR_EXTRACTION'){
       try{
         // Make classification durable even if generation or this process dies.
-        if(backend.saveProcessing)await backend.saveProcessing(executionId,{itemIndex:observation.itemIndex,contentHash:observation.contentHash,review,
+        if(backend.saveProcessing&&saved?.semanticState!=='COMPLETED')await backend.saveProcessing(executionId,{itemIndex:observation.itemIndex,contentHash:observation.contentHash,review,
           vacancies:extracted.vacancies.map(v=>({...Object.fromEntries(fields.map(key=>[key,v.fields[key].value])),fields:v.fields})),extractionError:processingError});
         // The backend owns current consent, model and the durable attempt/cache.
         // Never invent a model name when an older configuration omits it.
@@ -148,15 +152,42 @@ async function processObservations({executionId,observations,config,policy,provi
           const values={companyName:ai.employer.value,positionTitle:v.title.value,location:v.location.value??ai.sharedLocation.value,description:observation.rawContent,
             technologyStack:v.technologies.value??[],experienceRequirements:v.requirements.value??ai.sharedRequirements.value,applicationUrl:v.applicationUrl.value??ai.applicationUrl.value,
             ...Object.fromEntries(Object.entries(supported).map(([key,fact])=>[key,fact.value]))};
-          return {...values,fields:facts(values,observation.rawContent,supported,v.technologies.evidence)};
+          const mapped=facts(values,observation.rawContent,supported,v.technologies.evidence);
+          // Carry the validator's exact spans, not a new quote found elsewhere
+          // in the source. Numeric salary stays under the shared strict parser.
+          const inputs={companyName:ai.employer,positionTitle:v.title,location:v.location.value!==null?v.location:ai.sharedLocation,
+            technologyStack:v.technologies,experienceRequirements:v.requirements.value!==null?v.requirements:ai.sharedRequirements,
+            applicationUrl:v.applicationUrl.value!==null?v.applicationUrl:ai.applicationUrl};
+          for(const [key,fact] of Object.entries(inputs))if(fact.value!==null){
+            mapped[key]={value:fact.value,status:'EXTRACTED',origin:'GEMINI',evidence:fact.evidence};
+          }
+          // Preserve other validated schema facts as reviewable, verbatim
+          // source information; never fabricate normalized years/units/dates.
+          const extras={seniority:v.seniority,experience:v.experienceYears,benefits:ai.sharedBenefits,
+            mandatorySkills:v.mandatorySkills,optionalSkills:v.optionalSkills,recruitmentStatus:ai.recruitmentStatus,
+            mentionedPublishedAt:ai.publishedAt};
+          for(const [key,fact] of Object.entries(extras)){
+            const literal=Array.isArray(fact.value)||typeof fact.value==='string'&&fact.evidence.some(e=>e.quote.toLowerCase().includes(fact.value.toLowerCase()));
+            mapped[key]={value:fact.value===null?null:literal?fact.value:fact.evidence[0]?.quote??null,
+              status:fact.value===null?'NOT_PROVIDED':'EXTRACTED',origin:'GEMINI',evidence:fact.evidence};
+          }
+          if(mapped.experienceRequirements.value===null&&mapped.experience.value!==null)mapped.experienceRequirements=mapped.experience;
+          return {...values,fields:mapped};
         })};
         // Do not erase deterministic facts when the semantic response abstains.
         if(supplemented.vacancies.length){
           for(const vacancy of supplemented.vacancies){
             const title=vacancy.fields.positionTitle.value;
-            const matches=title?extracted.vacancies.filter(v=>v.fields.positionTitle.value===title):[];
+            const matches=title?extracted.vacancies.filter(v=>{
+              const prior=v.fields.positionTitle.value;
+              return typeof prior==='string'&&(prior.toLowerCase()===title.toLowerCase()||
+                extracted.vacancies.length===1&&supplemented.vacancies.length===1&&(prior.toLowerCase().includes(title.toLowerCase())||title.toLowerCase().includes(prior.toLowerCase())));
+            }):[];
             const prior=matches.length===1?matches[0]:null;
-            if(prior)for(const field of fields)if(vacancy.fields[field].value===null&&prior.fields[field].value!==null)vacancy.fields[field]=prior.fields[field];
+            if(prior)for(const field of fields)if(prior.fields[field].value!==null){
+              const conflict=vacancy.fields[field].value!==null&&JSON.stringify(vacancy.fields[field].value)!==JSON.stringify(prior.fields[field].value);
+              vacancy.fields[field]={...prior.fields[field],...(conflict?{conflict:true}:{})};
+            }
           }
           // Do not union a generic deterministic heading with the validated
           // role split: that would fabricate an extra vacancy for the same post.
@@ -193,7 +224,7 @@ export async function replayDiscoveryExecution({executionId,confirmGeminiFreeTie
   if(snapshot.id!==executionId||!/^\d{1,20}$/u.test(snapshot.workflowRunId??'')||!Number.isInteger(snapshot.version))throw new Stop('DISCOVERY_REPLAY_PROVENANCE_INVALID');
   const observations=snapshot.results.map(r=>r.observation);
   if(observations.some((o,i)=>o.itemIndex!==i||o.rawContent!==null&&sha(o.rawContent)!==o.contentHash))throw new Stop('DISCOVERY_REPLAY_SOURCE_INVALID');
-  const config={...snapshot.configuration,semanticEnabled:confirmGeminiFreeTier===true&&snapshot.semanticReplay?.enabled===true&&typeof snapshot.semanticReplay?.modelIdentity==='string'&&!!snapshot.semanticReplay.modelIdentity.trim(),
+  const config={...snapshot.configuration,savedProcessing:snapshot.results,semanticEnabled:confirmGeminiFreeTier===true&&snapshot.semanticReplay?.enabled===true&&typeof snapshot.semanticReplay?.modelIdentity==='string'&&!!snapshot.semanticReplay.modelIdentity.trim(),
     semanticModel:snapshot.semanticReplay?.modelIdentity??null};
   const policy=config.portfolioSnapshot?resolveOneRequestPolicy({portfolioSnapshot:config.portfolioSnapshot},config.preferences):null;
   let version=snapshot.version;

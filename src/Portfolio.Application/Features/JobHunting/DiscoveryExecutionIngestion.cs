@@ -140,7 +140,7 @@ public sealed partial class DiscoveryExecutionService
                 var scopeEnd=vacancies.Length==1?raw.Length:starts.Where(x=>x>scopeStart).DefaultIfEmpty(raw.Length).Min();
                 // Ambiguous/missing/duplicate headings cannot attribute arrays.
                 if(vacancies.Length>1&&(starts.Any(x=>x<0)||starts.Distinct().Count()!=starts.Length))scopeStart=-1;
-                var vacancy=vacancies[i];var mapped=MapVacancy(vacancy,raw,vacancies.Length==1,scopeStart,scopeEnd);var fields=mapped.Fields;
+                var vacancy=vacancies[i];var mapped=MapVacancy(vacancy,raw,vacancies.Length==1,scopeStart,scopeEnd,observation.SemanticState=="COMPLETED"?observation.SemanticOutputJson:null);var fields=mapped.Fields;
                 var fingerprint=Hash(new{contentHash=observation.ContentHash,fields});
                 var row=new DiscoveryExecutionVacancy{Id=Guid.NewGuid(),ObservationId=observation.Id,VacancyIndex=i,
                     RawJobPostingId=observation.RawJobPostingId,Fingerprint=fingerprint,FieldsJson=JsonSerializer.Serialize(fields,Json),
@@ -189,7 +189,30 @@ public sealed partial class DiscoveryExecutionService
     }
 
     private sealed record MappedVacancy(Dictionary<string,object> Fields,string[] Missing,CreateJobPostingCommand? Command);
-    private static MappedVacancy MapVacancy(JsonElement value,string raw,bool unambiguousRole,int scopeStart,int scopeEnd)
+    private static bool GeneratedFact(string? generation,string key,JsonElement submitted)
+    {
+        if(generation is null||submitted.ValueKind!=JsonValueKind.Object)return false;
+        try{
+            var saved=JsonSerializer.Deserialize<DiscoveryTextGeneration>(generation,Json);
+            if(saved?.Output is null||saved.Output.Length>65536)return false;
+            using var doc=JsonDocument.Parse(saved.Output);var root=doc.RootElement;
+            if(Text(root,"schemaVersion")!="ai-job-extraction-v1")return false;
+            var names=key switch {
+                "companyName"=>new[]{"employer"},"positionTitle"=>["title"],"location"=>["location","sharedLocation"],
+                "technologyStack"=>["technologies"],"experienceRequirements"=>["requirements","sharedRequirements","experienceYears"],
+                "applicationUrl"=>["applicationUrl"],"benefits"=>["sharedBenefits"],"experience"=>["experienceYears"],
+                "mentionedPublishedAt"=>["publishedAt"],_=>[key]};
+            foreach(var scope in new[]{root}.Concat(Array(root,"vacancies")))foreach(var name in names){
+                if(!scope.TryGetProperty(name,out var fact)||fact.ValueKind!=JsonValueKind.Object||Text(fact,"status") is not("POST_MENTIONED" or "VERIFIED")||
+                    !fact.TryGetProperty("value",out var original)||original.ValueKind==JsonValueKind.Null||!submitted.TryGetProperty("value",out var proposed))continue;
+                var spans=Array(fact,"evidence");
+                if(Canonical(JsonSerializer.SerializeToElement(spans))!=Canonical(JsonSerializer.SerializeToElement(Array(submitted,"evidence"))))continue;
+                if(Canonical(original)==Canonical(proposed)||key is "experience" or "experienceRequirements" or "seniority" or "recruitmentStatus"&&spans.Any(s=>Text(s,"quote")==Text(submitted,"value")))return true;
+            }
+        }catch(Exception e) when(e is JsonException or InvalidOperationException){return false;}
+        return false;
+    }
+    private static MappedVacancy MapVacancy(JsonElement value,string raw,bool unambiguousRole,int scopeStart,int scopeEnd,string? semanticOutput=null)
     {
         var exact=unambiguousRole?DiscoveryPostingFacts.Extract(raw):new Dictionary<string,DiscoveryPostingFacts.Fact>();
         var fields=new Dictionary<string,object>();var values=new Dictionary<string,JsonElement>();var missing=new List<string>();
@@ -200,23 +223,42 @@ public sealed partial class DiscoveryExecutionService
             var present=element.ValueKind!=JsonValueKind.Null&&element.ValueKind!=JsonValueKind.Undefined;
             var quote=element.ValueKind==JsonValueKind.String?element.GetString():null;
             var supported=present&&(quote is null||raw.Contains(quote,StringComparison.OrdinalIgnoreCase));
+            var field=value.ValueKind==JsonValueKind.Object&&value.TryGetProperty("fields",out var fs)&&fs.ValueKind==JsonValueKind.Object&&fs.TryGetProperty(key,out var f)?f:default;
+            var origin=Text(field,"origin");var spans=Array(field,"evidence");
+            bool ExactSpan(JsonElement span)=>span.ValueKind==JsonValueKind.Object&&span.TryGetProperty("start",out var s)&&s.TryGetInt32(out var a)&&span.TryGetProperty("end",out var e)&&e.TryGetInt32(out var b)&&a>=0&&b>a&&b<=raw.Length&&Text(span,"quote") is {} q&&raw[a..b]==q;
             var arraySpans=key=="technologyStack"&&value.TryGetProperty("fields",out var supplied)&&supplied.ValueKind==JsonValueKind.Object&&supplied.TryGetProperty(key,out var sf)?Array(sf,"evidence"):[];
             bool ValidSpan(JsonElement span)=>span.TryGetProperty("start",out var s)&&s.TryGetInt32(out var a)&&span.TryGetProperty("end",out var e)&&e.TryGetInt32(out var b)&&
                 scopeStart>=0&&a>=scopeStart&&b>a&&b<=scopeEnd&&Text(span,"quote") is { } q&&raw[a..b]==q;
             if(key=="technologyStack")supported=element.ValueKind==JsonValueKind.Array&&element.GetArrayLength()>0&&arraySpans.Length is >0 and <=40&&arraySpans.All(x=>x.ValueKind==JsonValueKind.Object&&ValidSpan(x))&&
                 element.EnumerateArray().All(x=>x.ValueKind==JsonValueKind.String&&arraySpans.Any(s=>Text(s,"quote")!.Contains(x.GetString()!,StringComparison.OrdinalIgnoreCase)));
-            if(key is "salaryMinimum" or "salaryMaximum" or "salaryCurrency" or "salaryPeriod" or "expiresAt")
+            if(key is "salaryMinimum" or "salaryMaximum" or "salaryCurrency" or "salaryPeriod" or "expiresAt" or "employmentType" or "workplaceType")
             {
                 supported=exact.TryGetValue(key,out var fact)&&Canonical(JsonSerializer.SerializeToElement(fact.Value))==Canonical(element);
                 quote=supported?fact!.Quote:null;
             }
             else if(element.ValueKind==JsonValueKind.Number)supported=false;
+            if(origin=="GEMINI")supported=supported&&GeneratedFact(semanticOutput,key,field)&&spans.Length is >0 and <=40&&spans.All(ExactSpan)&&
+                (quote is null||spans.Any(s=>Text(s,"quote")!.Contains(quote,StringComparison.OrdinalIgnoreCase)));
             if(!supported)element=JsonSerializer.SerializeToElement<object?>(null);
             values[key]=element;
             var status=!present?"NOT_PROVIDED":supported?"EXTRACTED":"NEEDS_REVIEW";
             var start=supported&&quote is not null?raw.IndexOf(quote,StringComparison.OrdinalIgnoreCase):-1;
-            fields[key]=new{value=element,status,evidence=key=="technologyStack"&&supported?(object)arraySpans:start>=0?new[]{new{start,end=start+quote!.Length,quote=raw.Substring(start,quote.Length)}}:[]};
+            fields[key]=new{value=element,status,origin=supported&&origin is "GEMINI" or "DETERMINISTIC"?origin:"UNSPECIFIED",
+                conflict=field.ValueKind==JsonValueKind.Object&&field.TryGetProperty("conflict",out var conflict)&&conflict.ValueKind==JsonValueKind.True,
+                evidence=supported&&origin=="GEMINI"?(object)spans:key=="technologyStack"&&supported?(object)arraySpans:start>=0?new[]{new{start,end=start+quote!.Length,quote=raw.Substring(start,quote.Length)}}:[]};
             if(key is "companyName" or "positionTitle" or "location" or "description" && (!supported||element.ValueKind!=JsonValueKind.String||string.IsNullOrWhiteSpace(element.GetString())))missing.Add(key);
+        }
+        // Extra schema facts are review-only exact source statements, not new
+        // JobPosting fields, normalized experience numbers or publication times.
+        foreach(var key in new[]{"seniority","experience","benefits","mandatorySkills","optionalSkills","recruitmentStatus","mentionedPublishedAt"}){
+            if(value.ValueKind!=JsonValueKind.Object||!value.TryGetProperty("fields",out var extras)||extras.ValueKind!=JsonValueKind.Object||!extras.TryGetProperty(key,out var fact)||fact.ValueKind!=JsonValueKind.Object)continue;
+            var spans=Array(fact,"evidence");var present=fact.TryGetProperty("value",out var v)&&v.ValueKind!=JsonValueKind.Null;
+            bool Literal(string s)=>!string.IsNullOrWhiteSpace(s)&&s.Length<=4000&&spans.Any(e=>Text(e,"quote")?.Contains(s,StringComparison.OrdinalIgnoreCase)==true);
+            var valid=GeneratedFact(semanticOutput,key,fact)&&Text(fact,"origin")=="GEMINI"&&Text(fact,"status")=="EXTRACTED"&&spans.Length is >0 and <=8&&spans.All(span=>
+                span.ValueKind==JsonValueKind.Object&&span.TryGetProperty("start",out var a)&&a.TryGetInt32(out var start)&&span.TryGetProperty("end",out var b)&&b.TryGetInt32(out var end)&&
+                start>=0&&end>start&&end<=raw.Length&&Text(span,"quote") is {} q&&raw[start..end]==q)&&
+                (v.ValueKind==JsonValueKind.String&&Literal(v.GetString()!)||v.ValueKind==JsonValueKind.Array&&v.GetArrayLength() is >0 and <=40&&v.EnumerateArray().All(x=>x.ValueKind==JsonValueKind.String&&Literal(x.GetString()!)));
+            fields[key]=new{value=valid?(object)v:null,status=!present?"NOT_PROVIDED":valid?"EXTRACTED":"NEEDS_REVIEW",origin=valid?"GEMINI":"UNSPECIFIED",evidence=valid?spans:[]};
         }
         string? S(string name)=>values[name].ValueKind==JsonValueKind.String?values[name].GetString():null;
         decimal? N(string name)=>values[name].ValueKind==JsonValueKind.Number?values[name].GetDecimal():null;

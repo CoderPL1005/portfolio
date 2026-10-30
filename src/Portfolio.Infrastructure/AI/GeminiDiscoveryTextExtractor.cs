@@ -15,9 +15,10 @@ public sealed class GeminiDiscoveryTextExtractor(HttpClient http,IOptions<Gemini
         using var doc=JsonDocument.Parse(stream);return doc.RootElement.Clone();
     }
     public string ModelIdentity=>string.IsNullOrWhiteSpace(options.Value.JobExtractionModel)?"unconfigured":options.Value.JobExtractionModel.Replace("models/","",StringComparison.Ordinal);
+    public bool IsConfigured=>!string.IsNullOrWhiteSpace(options.Value.ApiKey)&&ModelIdentity!="unconfigured"&&System.Text.RegularExpressions.Regex.IsMatch(ModelIdentity,"^[A-Za-z0-9._-]{1,160}$");
     public async Task<DiscoveryTextGeneration> ExtractAsync(string rawContent,CancellationToken ct)
     {
-        if(string.IsNullOrWhiteSpace(options.Value.ApiKey)||ModelIdentity=="unconfigured"||rawContent.Length>24000||string.IsNullOrWhiteSpace(rawContent))throw new InvalidOperationException("DISCOVERY_SEMANTIC_UNAVAILABLE");
+        if(!IsConfigured||rawContent.Length>24000||string.IsNullOrWhiteSpace(rawContent))throw new InvalidOperationException("DISCOVERY_SEMANTIC_UNAVAILABLE");
         using var request=new HttpRequestMessage(HttpMethod.Post,$"https://generativelanguage.googleapis.com/v1beta/models/{Uri.EscapeDataString(ModelIdentity)}:generateContent");
         request.Headers.Add("x-goog-api-key",options.Value.ApiKey);
         request.Content=JsonContent.Create(new{

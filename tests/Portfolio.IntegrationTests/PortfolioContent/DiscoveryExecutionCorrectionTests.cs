@@ -19,12 +19,14 @@ public sealed class DiscoveryExecutionCorrectionTests
     [InlineData(true,false,true,0)] [InlineData(true,true,false,0)]
     public async Task Admin_replay_uses_current_consent_and_budget_without_rewriting_frozen_configuration(bool enabled,bool free,bool consent,int calls)
     {
-        var wire=await Capture("success");await using var db=Database();await Seed(db);
+        var wire=await Capture("incomplete");await using var db=Database();await Seed(db);
         var execution=await db.DiscoveryExecutions.SingleAsync();execution.ConfigurationJson="{\"semanticEnabled\":false}";await db.SaveChangesAsync();
         var semantic=new CountingSemantic();
         var service=new DiscoveryExecutionService(db,new GitHub(),semantic,Options.Create(new DiscoveryExecutionOptions{SemanticEnabled=enabled,GeminiFreeTierConfirmed=free}),new Actor(),TimeProvider.System);
         var saved=wire.GetProperty("saved").Deserialize<DiscoveryExecutionResult>(Json)!;
         await service.ObservationsAsync(Id,"10001",saved,default);
+        var classified=wire.GetProperty("result").Deserialize<DiscoveryExecutionResult>(Json)!.ReviewBundle!.Items[0];
+        await service.ProcessAsync(Id,new(0,classified.ContentHash,classified,[],ExpectedVersion:execution.Version,ExpectedWorkflowRunId:"10001"),null,default);
         var o=saved.Observations[0];var request=new DiscoveryPersistedSemanticRequest(0,o.GetProperty("rawContent").GetString()!,o.GetProperty("contentHash").GetString()!,execution.Version,"10001",consent);
         if(calls==0)await Assert.ThrowsAsync<Portfolio.Application.Common.Exceptions.ConflictException>(()=>service.ExtractPersistedAsync(Id,request,default));
         else {

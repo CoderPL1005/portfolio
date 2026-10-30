@@ -21,7 +21,7 @@ public sealed partial class DiscoveryExecutionService(IApplicationDbContext db, 
     private static ValidationException Invalid(string field) => new([new(field, "Invalid discovery execution data.")]);
     private DiscoveryExecutionOptions Settings => options.Value;
 
-    public async Task<object> StartAsync(Guid clientRequestId, string triggerSource, CancellationToken ct = default)
+    public async Task<object> StartAsync(Guid clientRequestId, string triggerSource, CancellationToken ct = default, bool confirmGeminiFreeTier = false)
     {
         if (clientRequestId == Guid.Empty || triggerSource is not ("ADMIN_MANUAL" or "DAILY_SCHEDULED")) throw Invalid("clientRequestId");
         // This service is reusable by a future scheduler. No scheduler is registered.
@@ -34,7 +34,7 @@ public sealed partial class DiscoveryExecutionService(IApplicationDbContext db, 
             var prior = await db.DiscoveryExecutions.AsNoTracking().SingleOrDefaultAsync(x => x.ClientRequestId == clientRequestId, ct);
             if (prior is not null) return await ViewAsync(prior, ct);
             if (await db.DiscoveryExecutions.AnyAsync(x => x.ActiveKey != null, ct)) throw Conflict("DISCOVERY_EXECUTION_ACTIVE");
-            var configuration = await BuildConfigurationAsync(ct);
+            var configuration = await BuildConfigurationAsync(ct, confirmGeminiFreeTier && triggerSource == "ADMIN_MANUAL");
             execution = new() { Id = Guid.NewGuid(), ClientRequestId = clientRequestId, CreatedByAdminId = user.AdminUserId,
                 TriggerSource = triggerSource, ConfigurationJson = configuration, CreatedAt = clock.GetUtcNow(), UpdatedAt = clock.GetUtcNow() };
             db.DiscoveryExecutions.Add(execution); Transition(execution, "DISPATCHING");
@@ -63,7 +63,7 @@ public sealed partial class DiscoveryExecutionService(IApplicationDbContext db, 
         return await ViewAsync(execution, CancellationToken.None);
     }
 
-    private async Task<string> BuildConfigurationAsync(CancellationToken ct)
+    private async Task<string> BuildConfigurationAsync(CancellationToken ct, bool confirmGeminiFreeTier)
     {
         var technologies = await db.Technologies.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Id)
             .Select(x => new { x.Id, x.Name, x.Category, x.IsActive }).ToArrayAsync(ct);
@@ -83,7 +83,7 @@ public sealed partial class DiscoveryExecutionService(IApplicationDbContext db, 
         if (preferred.Length == 0 || locations.Length == 0) throw Conflict("DISCOVERY_PREFERENCES_UNAVAILABLE");
         return JsonSerializer.Serialize(new {
             maxRequests = 1, maxCredits = 1, timeoutMs = 20000, freePlanConfirmed = true, noCashConfirmed = true,
-            semanticEnabled = Settings.SemanticEnabled && Settings.GeminiFreeTierConfirmed,
+            semanticEnabled = confirmGeminiFreeTier && Settings.SemanticEnabled && Settings.GeminiFreeTierConfirmed && semantic.IsConfigured,
             semanticModel = semantic.ModelIdentity,
             preferenceVersion = preferences.Version,
             portfolioSnapshot = new { schemaVersion = 1, source = "PORTFOLIO_PUBLIC_API_EXPORT", technologies, skills,
@@ -168,7 +168,8 @@ public sealed partial class DiscoveryExecutionService(IApplicationDbContext db, 
             creditsDeducted = attempt?.CreditsDeducted, creditsUsedAlternateHeader = attempt?.CreditsUsedAlternateHeader, httpStatus = attempt?.HttpStatus,
             execution.CreatedAt, execution.UpdatedAt,
             configuration=JsonSerializer.Deserialize<JsonElement>(execution.ConfigurationJson),
-            semanticReplay=new{enabled=Settings.SemanticEnabled&&Settings.GeminiFreeTierConfirmed,modelIdentity=semantic.ModelIdentity},
+            semanticReplay=new{enabled=Settings.SemanticEnabled&&Settings.GeminiFreeTierConfirmed&&semantic.IsConfigured,modelIdentity=semantic.ModelIdentity,
+                attemptsUsed=execution.SemanticAttempts,maximumAttempts=Math.Clamp(Settings.MaximumSemanticAttempts,1,5),remainingAttempts=Math.Max(0,Math.Clamp(Settings.MaximumSemanticAttempts,1,5)-execution.SemanticAttempts)},
             counts = new { fetched = observations.Length, normalized = vacancies.Count(v => v.Status == "NORMALIZED"),
                 validRecruitment = observations.Count(o => JsonDocument.Parse(o.PayloadJson).RootElement.TryGetProperty("processing",out var p)&&p.TryGetProperty("review",out var r)&&r.ValueKind==JsonValueKind.Object&&r.TryGetProperty("contentValidity",out var c)&&Text(c,"status")=="VALID_RECRUITMENT"),
                 duplicates = vacancies.Count(v => v.Status == "DUPLICATE"), extractionFailures = vacancies.Count(v => v.Status == "NEEDS_REVIEW") }, results,

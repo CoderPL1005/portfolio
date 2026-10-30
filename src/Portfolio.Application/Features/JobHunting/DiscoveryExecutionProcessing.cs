@@ -59,7 +59,7 @@ public sealed partial class DiscoveryExecutionService
         var mapped=vacancies.Select((v,i)=>{
             var start=vacancies.Length==1?0:starts.Any(x=>x<0)||starts.Distinct().Count()!=starts.Length?-1:starts[i];
             var end=vacancies.Length==1?text.Length:starts.Where(x=>x>start).DefaultIfEmpty(text.Length).Min();
-            var m=MapVacancy(v,text,vacancies.Length==1,start,end);
+            var m=MapVacancy(v,text,vacancies.Length==1,start,end,row.SemanticState=="COMPLETED"?row.SemanticOutputJson:null);
             return new{fields=m.Fields,missingFields=m.Missing,status="NEEDS_REVIEW"};
         }).ToArray();
         var payload=JsonNode.Parse(row.PayloadJson)!;

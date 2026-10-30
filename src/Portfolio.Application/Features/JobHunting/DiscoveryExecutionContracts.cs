@@ -25,7 +25,7 @@ public sealed class DiscoveryExecutionOptions
 }
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
-public sealed record StartDiscoveryExecutionRequest(Guid ClientRequestId);
+public sealed record StartDiscoveryExecutionRequest(Guid ClientRequestId, bool ConfirmGeminiFreeTier = false);
 public sealed record DiscoveryExecutionResult(int ActualRequests, decimal? CreditsDeducted,
     decimal? CreditsUsedAlternateHeader, int? HttpStatus, JsonElement[] Observations,
     string? State = null, string? ErrorCode = null, string? TriggerSource = null, DiscoveryReviewImport? ReviewBundle = null,
@@ -41,6 +41,7 @@ public sealed record DiscoveryTextGeneration(string ModelIdentity, string CacheV
 public interface IDiscoveryTextExtractor
 {
     string ModelIdentity { get; }
+    bool IsConfigured => !string.IsNullOrWhiteSpace(ModelIdentity) && ModelIdentity != "unconfigured";
     Task<DiscoveryTextGeneration> ExtractAsync(string rawContent, CancellationToken ct);
 }
 public interface IDiscoveryGitHubClient
@@ -50,7 +51,7 @@ public interface IDiscoveryGitHubClient
 }
 public interface IDiscoveryExecutionService
 {
-    Task<object> StartAsync(Guid clientRequestId, string triggerSource, CancellationToken ct = default);
+    Task<object> StartAsync(Guid clientRequestId, string triggerSource, CancellationToken ct = default, bool confirmGeminiFreeTier = false);
     Task<object> GetAsync(Guid id, CancellationToken ct = default);
     Task<object> HistoryAsync(int page, int pageSize, CancellationToken ct = default);
     Task<object> ConfigurationAsync(Guid id, string runId, CancellationToken ct);

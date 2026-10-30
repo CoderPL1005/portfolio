@@ -4,6 +4,14 @@ export function supportedPostingFacts(raw){
   const out={};
   const money=/^(?:salary|lương)\s*:\s*((?:\d{1,3}(?:[.,]\d{3})+|\d+))(?:\s*[-–]\s*((?:\d{1,3}(?:[.,]\d{3})+|\d+)))?\s*(triệu\s+)?(VND|USD|EUR)(?:\s*\/\s*(tháng|month|năm|year|giờ|hour))?\s*$/iu;
   const lines=raw.split(/\r?\n/u),matches=lines.map(line=>({line,m:line.trim().match(money)})).filter(x=>x.m);
+  for(const [key,pattern] of [
+    ['employmentType',/^employment type:\s*(FULL_TIME|PART_TIME|INTERNSHIP|CONTRACT)\s*$/iu],
+    ['workplaceType',/^workplace type:\s*(ONSITE|REMOTE|HYBRID)\s*$/iu],
+    ['notes',/^(?:application instructions|hướng dẫn ứng tuyển):\s*(\S[^\r\n]{0,3999})\s*$/iu]
+  ]){
+    const items=lines.map(line=>({line,m:line.trim().match(pattern)})).filter(x=>x.m);
+    if(items.length===1)out[key]={value:key==='notes'?items[0].m[1].trim():items[0].m[1].toUpperCase(),quote:items[0].line};
+  }
   const labelled=lines.filter(line=>/^\s*(?:salary|lương)\s*:/iu.test(line));
   if(matches.length===1&&labelled.length===1){
     const {line,m}=matches[0],factor=m[3]?1000000:1;

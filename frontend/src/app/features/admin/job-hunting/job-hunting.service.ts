@@ -10,7 +10,7 @@ import {DiscoveryRunSummary,DiscoveryCleanupPlan,DiscoveryCleanupBackup,Discover
 import { ApplicationCreate, ApplicationDetail, ApplicationItem, ApplicationPackage, ApplicationPackageReadiness, ApplicationSubmissionReadiness, CandidateJobPreferences, CandidateJobPreferencesWrite, CanonicalCv, DocumentItem, EmailApplicationWorkflowResult, JobCreate, JobDetail, JobFitAnalysis, JobSummary, JobWrite, RawJobPostingSummary, ScreenshotSubmissionResult, SubmissionAttempt } from './job-hunting.models';
 @Injectable({ providedIn: 'root' }) export class JobHuntingService {
  private api=inject(ApiClientService);
- startDiscoveryExecution(body:{clientRequestId:string}){return this.api.post<ApiResponse<DiscoveryExecution>>('admin/job-hunting/discovery/executions',body).pipe(map(requireData))}
+ startDiscoveryExecution(body:{clientRequestId:string;confirmGeminiFreeTier?:boolean}){return this.api.post<ApiResponse<DiscoveryExecution>>('admin/job-hunting/discovery/executions',body).pipe(map(requireData))}
  discoveryExecution(id:string){return this.api.get<ApiResponse<DiscoveryExecution>>(`admin/job-hunting/discovery/executions/${id}`).pipe(map(requireData))}
  discoveryExecutions(){return this.api.get<ApiResponse<DiscoveryExecutionHistory>>('admin/job-hunting/discovery/executions',{params:{page:1,pageSize:20}}).pipe(map(requireData))}
  jobDataResetPreview(){return this.api.get<ApiResponse<JobDataResetPlan>>('admin/job-hunting/discovery/cleanup/reset-all/preview').pipe(map(requireData))}

@@ -12,6 +12,13 @@ public static class DiscoveryPostingFacts
         var facts=new Dictionary<string,Fact>();
         var lines=raw.Split('\n').Select(x=>x.TrimEnd('\r')).ToArray();
         var options=RegexOptions.IgnoreCase|RegexOptions.CultureInvariant;
+        foreach(var (key,pattern) in new[]{
+            ("employmentType",@"^employment type:\s*(FULL_TIME|PART_TIME|INTERNSHIP|CONTRACT)\s*$"),
+            ("workplaceType",@"^workplace type:\s*(ONSITE|REMOTE|HYBRID)\s*$"),
+            ("notes",@"^(?:application instructions|hướng dẫn ứng tuyển):\s*(\S[^\r\n]{0,3999})\s*$")}){
+            var found=lines.Select(line=>(line,m:Regex.Match(line.Trim(),pattern,options))).Where(x=>x.m.Success).ToArray();
+            if(found.Length==1)facts[key]=new(key=="notes"?found[0].m.Groups[1].Value.Trim():found[0].m.Groups[1].Value.ToUpperInvariant(),found[0].line);
+        }
         var labelled=lines.Where(x=>Regex.IsMatch(x.Trim(),@"^(?:salary|lương)\s*:",options)).ToArray();
         if(labelled.Length==1)
         {

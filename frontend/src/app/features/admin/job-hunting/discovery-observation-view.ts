@@ -6,7 +6,7 @@ export function observationFact(row:DiscoveryObservationDetail,key:string):strin
   for(const vacancy of row.vacancies){
     const field=vacancy.fields?.[key], value=field?.value;
     if(field?.status==='EXTRACTED'&&typeof value==='string'&&value.trim()&&raw.toLowerCase().includes(value.toLowerCase())&&
-      field.evidence?.some(e=>Number.isInteger(e.start)&&Number.isInteger(e.end)&&e.start>=0&&e.end>e.start&&raw.slice(e.start,e.end)===e.quote))return value;
+      field.evidence?.some(e=>Number.isInteger(e.start)&&Number.isInteger(e.end)&&e.start>=0&&e.end>e.start&&raw.slice(e.start,e.end)===e.quote&&e.quote.toLowerCase().includes(value.toLowerCase())))return value;
   }
   const names:Record<string,string>={positionTitle:'role',companyName:'company',location:'location'};
   const value=row.review?.extracted?.[names[key]];
@@ -31,4 +31,16 @@ export function observationWarnings(row:DiscoveryObservationDetail):string[] {
 }
 export function observationPublishedAt(row:DiscoveryObservationDetail):string|null {
   const date=row.source.publishedAt;return date&&Number.isFinite(Date.parse(date))?date:null;
+}
+export function observationEnriched(row:DiscoveryObservationDetail):boolean {
+  return row.semanticState==='COMPLETED'&&row.vacancies.some(v=>Object.values(v.fields??{}).some(f=>
+    f.origin==='GEMINI'&&f.status==='EXTRACTED'&&f.value!==null&&f.evidence?.some(e=>row.source.rawContent?.slice(e.start,e.end)===e.quote)));
+}
+export const jdFieldLabels:Record<string,string>={companyName:'Công ty',positionTitle:'Vị trí',location:'Địa điểm',technologyStack:'Công nghệ',
+  experienceRequirements:'Yêu cầu',employmentType:'Hình thức làm việc',workplaceType:'Nơi làm việc',salaryMinimum:'Lương tối thiểu',salaryMaximum:'Lương tối đa',
+  salaryCurrency:'Đơn vị tiền',salaryPeriod:'Kỳ lương',applicationEmail:'Email ứng tuyển',applicationUrl:'Link ứng tuyển',expiresAt:'Hạn ứng tuyển',notes:'Hướng dẫn / ghi chú',
+  seniority:'Cấp độ',experience:'Kinh nghiệm (theo nguồn)',benefits:'Quyền lợi',mandatorySkills:'Kỹ năng bắt buộc',optionalSkills:'Kỹ năng ưu tiên',recruitmentStatus:'Tình trạng tuyển dụng (chưa xác minh)',mentionedPublishedAt:'Ngày đăng được đề cập (không thay thế ngày nguồn)'};
+export function observationMissing(row:DiscoveryObservationDetail):string[] {
+  if(!row.vacancies.length)return ['Thông tin vị trí'];
+  return Object.entries(jdFieldLabels).filter(([key])=>!row.vacancies.every(v=>v.fields?.[key]?.status==='EXTRACTED'&&v.fields[key].value!==null)).map(([,label])=>label);
 }

@@ -1,5 +1,6 @@
 import { Component, DestroyRef, inject, output, signal } from '@angular/core';
 import { DatePipe } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Subscription, timer } from 'rxjs';
@@ -7,11 +8,12 @@ import { JobHuntingService } from './job-hunting.service';
 import { DiscoveryExecution } from './discovery-execution.models';
 
 @Component({
-  selector: 'app-discovery-execution', standalone: true, imports: [RouterLink, DatePipe],
+  selector: 'app-discovery-execution', standalone: true, imports: [RouterLink, DatePipe, FormsModule],
   template: `
     <section aria-label="Discovery execution" class="execution">
       <div class="admin-actions"><button class="admin-button primary" type="button" (click)="start()" [disabled]="blocked()">Run Job Discovery</button>
         <button class="admin-button" type="button" (click)="refresh()" [disabled]="starting()">Refresh run status</button></div>
+      <label><input type="checkbox" [(ngModel)]="confirmGeminiFreeTier" [disabled]="blocked()"> Cho phép bổ sung Gemini sau khi đã xác nhận Free Tier / billing. Mặc định tắt; backend vẫn kiểm tra quyền và ngân sách.</label>
       @if(error()){<p role="alert">{{error()}}</p>}
       <details><summary>Discovery · {{current()?.state ?? 'Trạng thái thu thập'}}</summary>
       <p class="muted">One provider request per execution. No automatic retry or application submission.</p>
@@ -33,6 +35,7 @@ export class DiscoveryExecutionComponent {
   private poll?: Subscription;
   private requestKey?: string;
   private observedVersion='';
+  confirmGeminiFreeTier=false;
   observationsChanged=output<void>();
   current = signal<DiscoveryExecution | null>(null);
   history = signal<DiscoveryExecution[]>([]);
@@ -56,7 +59,7 @@ export class DiscoveryExecutionComponent {
   start(){
     if(this.blocked())return;
     this.starting.set(true);this.error.set('');this.requestKey ??= crypto.randomUUID();
-    this.api.startDiscoveryExecution({clientRequestId:this.requestKey}).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({next:r=>{
+    this.api.startDiscoveryExecution({clientRequestId:this.requestKey,...(this.confirmGeminiFreeTier?{confirmGeminiFreeTier:true}:{})}).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({next:r=>{
       this.starting.set(false);this.current.set(r);this.select(r.id);
     },error:()=>{this.starting.set(false);this.uncertain.set(true);this.error.set('UNKNOWN start outcome. Do not retry; refresh authoritative run history.');}});
   }

@@ -8,7 +8,7 @@ namespace Portfolio.Api.Controllers;
 public sealed class DiscoveryExecutionsController(IDiscoveryExecutionService service, IDiscoveryExecutionRecovery recovery):ControllerBase
 {
     [HttpPost,RequestSizeLimit(4096)]
-    public async Task<IActionResult> Start(StartDiscoveryExecutionRequest request,CancellationToken ct)=>Accepted(ApiResponse<object>.Ok(await service.StartAsync(request.ClientRequestId,"ADMIN_MANUAL",ct)));
+    public async Task<IActionResult> Start(StartDiscoveryExecutionRequest request,CancellationToken ct)=>Accepted(ApiResponse<object>.Ok(await service.StartAsync(request.ClientRequestId,"ADMIN_MANUAL",ct,request.ConfirmGeminiFreeTier)));
     [HttpGet,ResponseCache(NoStore=true,Location=ResponseCacheLocation.None)]
     public async Task<IActionResult> History([FromQuery]int page=1,[FromQuery]int pageSize=20,CancellationToken ct=default)=>Ok(ApiResponse<object>.Ok(await service.HistoryAsync(page,pageSize,ct)));
     [HttpGet("{id:guid}"),ResponseCache(NoStore=true,Location=ResponseCacheLocation.None)]
