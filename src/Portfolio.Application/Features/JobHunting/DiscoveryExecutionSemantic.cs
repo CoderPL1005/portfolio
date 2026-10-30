@@ -52,8 +52,11 @@ public sealed partial class DiscoveryExecutionService
             observation.SemanticOutputJson=JsonSerializer.Serialize(result,Json);observation.SemanticState="COMPLETED";execution.Version++;
             await SaveAsync(ct);return result;
         }
-        catch
+        catch(Exception error)
         {
+            if(error is DiscoveryTextExtractionException diagnostic)db.DiscoveryExecutionEvents.Add(new(){
+                Id=Guid.NewGuid(),ExecutionId=execution.Id,State="SEMANTIC_DIAGNOSTIC",At=clock.GetUtcNow(),
+                Reason=JsonSerializer.Serialize(new{request.ItemIndex,httpStatus=diagnostic.HttpStatus,stage=diagnostic.Stage.ToString(),category=diagnostic.Category.ToString()},Json)});
             observation.SemanticState="UNKNOWN";execution.Version++;
             await SaveAsync(CancellationToken.None);
             throw new ServiceUnavailableException("DISCOVERY_SEMANTIC_UNAVAILABLE","Semantic extraction is unavailable. Raw observations are preserved for review.");
