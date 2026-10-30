@@ -15,10 +15,22 @@ describe('Job Hunting admin feature', () => {
   });
   afterEach(() => http.verify());
 
+  it('opts the card list into the authenticated read-only union without changing candidate detail requests',()=>{
+    service.discovery({page:2,pageSize:20,targetStatus:'TARGET_MATCH'}).subscribe();
+    const list=http.expectOne(r=>r.url==='https://api.example/api/v1/admin/job-hunting/discovery');
+    expect(list.request.method).toBe('GET');expect(list.request.params.get('includeObservations')).toBe('true');
+    expect(list.request.params.get('page')).toBe('2');expect(list.request.params.get('targetStatus')).toBe('TARGET_MATCH');
+    list.flush({success:true,data:{results:{items:[],page:2,pageSize:20,total:0,totalPages:0},counts:{total:0}}});
+    service.discoveryItem('real-candidate').subscribe();
+    const detail=http.expectOne('https://api.example/api/v1/admin/job-hunting/discovery/real-candidate');
+    expect(detail.request.method).toBe('GET');expect(detail.request.params.has('includeObservations')).toBe(false);
+    detail.flush({success:true,data:{id:'real-candidate'}});
+  });
+
   it('registers the lazy private routes under the guarded admin shell', () => {
     const admin = routes.find(x => x.path === 'admin')!;
     const feature = admin.children!.filter(x => x.path?.startsWith('job-hunting/'));
-    expect(feature.map(x => x.path)).toEqual(['job-hunting/jobs','job-hunting/discovery','job-hunting/discovery/:id','job-hunting/jobs/new/screenshots','job-hunting/jobs/new','job-hunting/jobs/:id','job-hunting/preferences','job-hunting/applications','job-hunting/applications/:id']);
+    expect(feature.map(x => x.path)).toEqual(['job-hunting/jobs','job-hunting/discovery','job-hunting/discovery/executions/:executionId/observations/:itemIndex','job-hunting/discovery/:id','job-hunting/jobs/new/screenshots','job-hunting/jobs/new','job-hunting/jobs/:id','job-hunting/preferences','job-hunting/applications','job-hunting/applications/:id']);
     expect(feature.every(x => !!x.loadComponent)).toBe(true);
     expect(admin.canActivateChild).toHaveLength(1);
   });

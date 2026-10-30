@@ -5,7 +5,8 @@ import { ActivatedRoute, RouterLink } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { combineLatest } from 'rxjs';
 import { JobHuntingService } from './job-hunting.service';
-import { DiscoveryReviewDetail, DiscoveryRecoveryDetail, DiscoveryReviewRecord, DiscoveryReviewList, DiscoveryQualityReport, ReviewHistory, HumanReviewWrite } from './discovery-review.models';
+import { DiscoveryReviewDetail, DiscoveryRecoveryDetail, DiscoveryReviewRecord, DiscoveryOpportunity, DiscoveryObservationDetail, DiscoveryReviewList, DiscoveryQualityReport, ReviewHistory, HumanReviewWrite } from './discovery-review.models';
+import { observationTitle, observationFact, observationTechnologies, observationLink, observationWarnings, observationPublishedAt } from './discovery-observation-view';
 import { DiscoveryQualityComponent } from './discovery-quality.component';
 import { DiscoveryJobInformationComponent, discoveryTitle, evidenceText } from './discovery-job-information.component';
 import { safeAdminError } from '../shared/admin-api';
@@ -19,11 +20,46 @@ import { DiscoveryExecutionComponent } from './discovery-execution.component';
       <header class="page-header"><div><p class="eyebrow">JOB HUNTING / DISCOVERY</p><h1>Cơ hội việc làm</h1>
         <p>Khám phá bài tuyển dụng và đánh giá cơ hội theo mục tiêu của bạn.</p></div>
         <button class="admin-button" type="button" (click)="load()" [disabled]="loading() || savingReview()">Làm mới</button></header>
-      @if(!detailMode()){<app-discovery-execution />}
+      @if(!detailMode()){<app-discovery-execution (observationsChanged)="refreshObservations()" />}
       @if(error()){<p role="alert" class="admin-error feedback">{{error()}}</p>}
       @if(message()){<p role="status">{{message()}}</p>}
       @if(loading()){<p role="status">Đang tải…</p>}
-      @if(displayedDetail(); as d){
+      @if(observationDetail();as o){
+        <a routerLink="/admin/job-hunting/discovery" class="back-link">← Tất cả cơ hội</a>
+        <section class="detail-layout">
+          <header class="job-heading"><h2>{{observationTitle(o)}}</h2><p>{{observationFact(o,'companyName') || 'Chưa xác định công ty'}} · {{observationFact(o,'location') || 'Chưa xác định địa điểm'}}</p>
+            <p>{{observationPublishedAt(o) ? ('Ngày đăng: ' + (observationPublishedAt(o) | date:'medium')) : 'Chưa xác định ngày đăng'}}</p>
+            <div class="badges"><span class="status-badge">{{label(o.review?.contentValidity?.status ?? 'UNKNOWN')}}</span><span class="status-badge">{{label(o.review?.targetMatching?.status ?? 'UNKNOWN')}}</span><span class="status-badge neutral">Gemini: {{semanticLabel(o.semanticState)}}</span></div>
+          </header>
+          <section class="detail-section job-facts"><h3>Thông tin tuyển dụng</h3>
+            @if(o.vacancies.length){@for(v of o.vacancies;track $index){<section><h4>Vị trí {{$index + 1}}</h4><app-discovery-job-information [data]="vacancyInformation(v.fields)" />
+              @if(v.missingFields?.length){<p>Thiếu / chưa rõ: {{v.missingFields?.join(', ')}}</p>}
+              <details><summary>Các trường trích xuất và bằng chứng</summary><pre>{{v.fields | json}}</pre></details></section>}}
+            @else{<p>Chưa có trường JD được lưu đủ căn cứ. Bài viết vẫn được giữ để xem xét.</p>}
+          </section>
+          <section class="detail-section original-post"><h3>Nội dung bài đăng gốc</h3>
+            @if(safeLink(o.source.sourceUrl);as link){<a [href]="link" target="_blank" rel="noopener noreferrer" class="source-link">Mở bài viết Facebook ↗</a>}
+            @else{<p>Nguồn chưa xác minh; không có permalink an toàn để mở.</p>}
+            <p class="muted">Nguồn chưa được xác minh độc lập.</p><pre data-testid="raw-content">{{o.source.rawContent ?? 'Không có nội dung bài viết được lưu.'}}</pre>
+          </section>
+          <section class="detail-section assessment"><h3>Đánh giá AI / bộ phân loại</h3>
+            @if(o.review;as review){<h4>Nội dung: {{label(review.contentValidity.status)}}</h4><p>{{review.contentValidity.explanation}}</p>
+              @for(s of review.contentValidity.evidenceSnippets;track $index){<blockquote>{{s}}</blockquote>}
+              <h4>Mức độ phù hợp: {{label(review.targetMatching.status)}}</h4><p>{{review.targetMatching.explanation}}</p>
+              @for(s of review.targetMatching.evidenceSnippets;track $index){<blockquote>{{s}}</blockquote>}
+              @if(review.missingFields.length){<p>Thiếu / chưa rõ: {{review.missingFields.join(', ')}}</p>}
+            }@else{<p>Chưa phân loại. Không có kết luận được lưu để xác nhận bài viết hợp lệ hay không hợp lệ.</p>}
+            <p>Gemini: {{semanticLabel(o.semanticState)}}</p>@if(o.extractionError){<p role="status">Lỗi xử lý: {{o.extractionError}}. Nội dung gốc vẫn được bảo toàn.</p>}
+            @if(observationWarnings(o).length){<p>Cảnh báo nguồn: {{observationWarnings(o).join(', ')}}</p>}
+          </section>
+          @if(o.candidateId){<section class="detail-section"><h3>Đánh giá của Admin</h3><p>{{o.humanReview ? label(o.humanReview.status) : 'Có bản ghi review riêng'}}</p><a [routerLink]="['/admin/job-hunting/discovery',o.candidateId]">Mở Human Review đã lưu</a></section>}
+          @else{<p class="muted">Observation này chưa có bản ghi Human Review. Không có thao tác xác nhận hoặc sửa nhãn tại đây.</p>}
+          <details class="technical detail-section"><summary>Thông tin kỹ thuật · Technical Details</summary><p>Execution {{o.executionId}} · item {{o.itemIndex}} · {{o.executionState}}</p>
+            <p>Workflow {{o.workflowRunId}} · nguồn {{o.source.outcome}}</p><p>Provider ID: {{o.source.providerPostId}}</p><p>URL provider chưa xác minh: {{o.source.providerSourceUrl}}</p>
+            @if(o.linkedCandidateIds?.length){<p>Các bản ghi candidate cùng observation:</p>@for(id of o.linkedCandidateIds;track id){<a [routerLink]="['/admin/job-hunting/discovery',id]">{{id}}</a>}}
+            <p>Ngày đăng: {{o.source.publishedAt ?? 'UNKNOWN'}} · phiên bắt đầu {{o.collectedAt | date:'medium'}}</p><p>Không tái tạo query hoặc kết luận gốc chưa được lưu.</p></details>
+        </section>
+      }@else if(displayedDetail(); as d){
         <a routerLink="/admin/job-hunting/discovery" class="back-link">← Tất cả cơ hội</a>
         @if(d.recovery;as r){
           <section class="detail-layout">
@@ -102,12 +138,12 @@ import { DiscoveryExecutionComponent } from './discovery-execution.component';
         </section>
         }
       }@else if(!detailMode()){
-        @if(list(); as data){@if(data.results.total > 0 && !loading()){
+        @if(list(); as data){@if(data.results.total > 0 && !loading() && !error()){
           <section class="summary" aria-label="Tổng quan trong phạm vi lọc">
-            <div><span>Tổng cơ hội</span><strong>{{data.counts.total}}</strong></div>
+            <div><span>Tổng bài đăng</span><strong>{{data.counts.total}}</strong></div>
             <div><span>Phù hợp</span><strong>{{data.counts.targetMatch}}</strong></div>
             <div><span>Cần đánh giá</span><strong>{{data.counts.needsReview}}</strong><small>Nội dung cần xem xét</small></div>
-          </section><p class="scope-note">Số liệu theo bộ lọc hiện tại; mỗi bài ghi nhận chưa chắc là một việc làm riêng biệt.</p>
+          </section><p class="scope-note">Số liệu theo bộ lọc hiện tại, sau khi gộp cùng observation. Có nội dung tuyển dụng: {{data.counts.valid}} · Đã đánh giá: {{data.counts.reviewed ?? 'Chưa có thống kê'}} · Chưa phân loại: {{data.counts.unknown ?? 'Chưa có thống kê'}}. Mỗi bài có thể chứa nhiều vị trí.</p>
         }}
         @if(listControlsVisible()){
         <nav class="admin-tabs filter-tabs" aria-label="Lọc cơ hội">
@@ -129,18 +165,27 @@ import { DiscoveryExecutionComponent } from './discovery-execution.component';
           @if(!loading() && !error()){
             @if(data.results.total){
               <section class="candidate-list" aria-label="Danh sách cơ hội">
-                @for(d of data.results.items;track d.id){@if(d.recovery;as r){<article class="job-card"><div class="badges"><span class="status-badge neutral">Khôi phục để đánh giá</span><span class="status-badge">{{label(d.humanReview?.status ?? 'UNREVIEWED')}}</span></div>
+                @for(d of data.results.items;track rowKey(d)){
+                @if(d.origin==='EXECUTION_OBSERVATION'){<article class="job-card">
+                  <div class="badges"><span class="status-badge">{{label(d.review?.contentValidity?.status ?? 'UNKNOWN')}}</span><span class="status-badge" [class.match]="d.review?.targetMatching?.status==='TARGET_MATCH'">{{label(d.review?.targetMatching?.status ?? 'UNKNOWN')}}</span></div>
+                  <h2><a [routerLink]="observationLink(d)">{{observationTitle(d)}}</a></h2><p class="company">{{observationFact(d,'companyName') || 'Chưa xác định công ty'}}</p><p class="muted">{{observationFact(d,'location') || 'Chưa xác định địa điểm'}}</p>
+                  <div class="job-tags">@if(observationTechnologies(d);as tech){<span>{{tech}}</span>}@if(observationSeniority(d);as level){<span>{{level}}</span>}</div>
+                  <p class="muted">Gemini: {{semanticLabel(d.semanticState)}}</p>
+                  <footer><span>{{observationPublishedAt(d) ? ('Ngày đăng: ' + (observationPublishedAt(d) | date:'shortDate')) : 'Chưa xác định ngày đăng'}}</span><a [routerLink]="observationLink(d)">Xem chi tiết →</a></footer>
+                </article>}
+                @else if(isCandidate(d)){@if(d.recovery;as r){<article class="job-card"><div class="badges"><span class="status-badge neutral">Khôi phục để đánh giá</span><span class="status-badge">{{label(d.humanReview?.status ?? 'UNREVIEWED')}}</span></div>
                   <h2><a [routerLink]="['/admin/job-hunting/discovery',d.id]">Bài viết chờ Human Review</a></h2><p>Không có kết quả phân loại gốc</p>
                   @if(r.sourceWarnings.includes('POST_ID_URL_MISMATCH')){<p>Nguồn chưa xác minh</p>}
                   <footer><span>{{r.publishedAt ? ('Ngày đăng: ' + (r.publishedAt | date:'shortDate')) : 'Chưa xác định ngày đăng'}}</span><a [routerLink]="['/admin/job-hunting/discovery',d.id]">Xem chi tiết →</a></footer>
                 </article>}@else if(d.item){<article class="job-card">
-                  <div class="badges"><span class="status-badge" [class.match]="d.item.targetMatching.status==='TARGET_MATCH'">{{label(d.item.targetMatching.status)}}</span><span class="status-badge neutral">{{label(d.humanReview?.status ?? 'UNREVIEWED')}}</span></div>
-                  <h2><a [routerLink]="['/admin/job-hunting/discovery',d.id]">{{title(d.item.extracted)}}</a></h2>
+                  <div class="badges"><span class="status-badge">{{label(d.item.contentValidity.status)}}</span><span class="status-badge" [class.match]="d.item.targetMatching.status==='TARGET_MATCH'">{{label(d.item.targetMatching.status)}}</span><span class="status-badge neutral">{{label(d.humanReview?.status ?? 'UNREVIEWED')}}</span></div>
+                  <h2><a [routerLink]="['/admin/job-hunting/discovery',d.id]">{{cardTitle(d)}}</a></h2>
                   <p class="company">{{text(d.item.extracted['company']) || 'Chưa xác định công ty'}}</p>
                   <p class="muted">{{text(d.item.extracted['location']) || 'Chưa xác định địa điểm'}}</p>
                   <div class="job-tags">@if(text(d.item.extracted['technologies']);as tech){<span>{{tech}}</span>}@if(seniority(d);as level){<span>{{level}}</span>}</div>
+                  @if(d.observation;as o){<p class="muted">Gemini: {{semanticLabel(o.semanticState)}}</p><a [routerLink]="observationLink(o)">Xem kết quả xử lý đã lưu</a>}
                   <footer><span>{{d.item.publishedAt ? ('Ngày đăng: ' + (d.item.publishedAt | date:'shortDate')) : 'Chưa xác định ngày đăng'}}</span><a [routerLink]="['/admin/job-hunting/discovery',d.id]" [attr.aria-label]="'Xem chi tiết: ' + title(d.item.extracted)">Xem chi tiết →</a></footer>
-                </article>}}
+                </article>}}}
               </section>
               @if(data.results.totalPages>1){<nav aria-label="Phân trang" class="pagination"><button class="admin-button" type="button" [disabled]="page <= 1 || loading()" (click)="changePage(-1)">Trước</button><span>Trang {{page}} / {{data.results.totalPages}}</span><button class="admin-button" type="button" [disabled]="page >= data.results.totalPages || loading()" (click)="changePage(1)">Sau</button></nav>}
             }@else{
@@ -153,7 +198,7 @@ import { DiscoveryExecutionComponent } from './discovery-execution.component';
           }
         }
         @if(list()?.results?.total && !loading() && !error()){
-        <details class="quality-section"><summary>Nâng cao · Chất lượng phân loại</summary><p class="muted">Thống kê từ đánh giá của Admin theo phiên thu thập đang chọn, không theo các bộ lọc phân loại. Không đại diện toàn bộ thị trường.</p>
+        <details class="quality-section"><summary>Nâng cao · Chất lượng phân loại</summary><p class="muted">Chỉ tính bản ghi có Human Review trong kho candidates; chưa bao gồm observation không có nhãn. Theo phiên thu thập đang chọn, không theo các bộ lọc phân loại. Không đại diện toàn bộ thị trường.</p>
           <p class="muted">Facebook chỉ là nguồn phát hiện. Phân loại không xác minh công ty, ngày còn tuyển hoặc cho phép tự động ứng tuyển.</p>
           <button type="button" (click)="loadMetrics()" [disabled]="metricsLoading()" class="admin-button">{{metricsLoading() ? 'Đang tải thống kê…' : 'Xem thống kê chất lượng'}}</button>
           <app-discovery-quality [report]="metrics()" />
@@ -164,7 +209,21 @@ import { DiscoveryExecutionComponent } from './discovery-execution.component';
 })
 export class DiscoveryReviewPageComponent {
   private api = inject(JobHuntingService); private route = inject(ActivatedRoute); private destroyRef = inject(DestroyRef);
-  list = signal<DiscoveryReviewList<DiscoveryReviewRecord> | null>(null);
+  list = signal<DiscoveryReviewList<DiscoveryOpportunity> | null>(null);
+  observationDetail=signal<DiscoveryObservationDetail|null>(null);
+  observationTitle=observationTitle;observationFact=observationFact;observationTechnologies=observationTechnologies;
+  observationLink=observationLink;observationWarnings=observationWarnings;observationPublishedAt=observationPublishedAt;
+  rowKey(row:DiscoveryOpportunity){return row.origin==='EXECUTION_OBSERVATION'?`observation:${row.executionId}:${row.itemIndex}`:`candidate:${row.id}`;}
+  isCandidate(row:DiscoveryOpportunity):row is DiscoveryReviewRecord{return row.origin!=='EXECUTION_OBSERVATION';}
+  cardTitle(row:DiscoveryReviewRecord){const value=row.item?this.title(row.item.extracted):'Bài viết chờ Human Review';return value.slice(0,120)+(value.length>120?'…':'');}
+  observationSeniority(row:DiscoveryObservationDetail){return observationFact(row,'positionTitle').match(/\b(?:intern(?:ship)?|fresher|junior|middle|senior|lead)\b/giu)?.join(' / ')??'';}
+  semanticLabel(value:string){return ({NOT_REQUESTED:'Chưa xử lý',CLAIMED:'Đang xử lý',COMPLETED:'Đã xử lý',UNKNOWN:'Chưa xác định kết quả'} as Record<string,string>)[value]??'Chưa có dữ liệu';}
+  vacancyInformation(fields:Record<string,{value:unknown;status:string;evidence?:{quote:string}[]}>|undefined):Record<string,unknown>{
+    const value=(key:string)=>fields?.[key]?.status==='EXTRACTED'?fields[key].value:null;
+    return {company:value('companyName'),role:value('positionTitle'),location:value('location'),technologies:value('technologyStack'),requirements:value('experienceRequirements'),
+      contact:{email:value('applicationEmail'),method:value('applicationUrl')},salary:['salaryMinimum','salaryMaximum'].map(key=>value(key)!==null?fields?.[key]?.evidence?.[0]?.quote:null).find(Boolean)??null};
+  }
+  refreshObservations(){if(!this.detailMode())this.load();}
   // Preserve the normal-item editing seam without pretending a recovery Item
   // exists. The rendering boundary remains a discriminated union.
   detail = signal<DiscoveryReviewDetail | null>(null);
@@ -178,7 +237,7 @@ export class DiscoveryReviewPageComponent {
   readonly tabs = [{id:'all',label:'Tất cả'},{id:'matched',label:'Phù hợp'},{id:'needs-review',label:'Cần xem xét'},{id:'reviewed',label:'Đã đánh giá'}];
   label(value:string):string {
     const labels:Record<string,string>={TARGET_MATCH:'Phù hợp mục tiêu',FALLBACK_MATCH:'Cơ hội dự phòng',POTENTIAL_MATCH:'Có thể phù hợp',NOT_MATCHED:'Không phù hợp',INSUFFICIENT_DATA:'Chưa đủ dữ liệu',VALID_RECRUITMENT:'Có nội dung tuyển dụng',INVALID_RECRUITMENT:'Không phải tin tuyển dụng',NEEDS_REVIEW:'Cần xem xét nội dung',UNREVIEWED:'Chưa đánh giá',REVIEWED:'Đã đánh giá',CONFIRMED:'Đã xác nhận',CORRECTED:'Đã chỉnh sửa',UNCERTAIN:'Chưa thể kết luận'};
-    return value==='REVIEWED_RECOVERY' ? 'Đã đánh giá nguồn khôi phục' : labels[value] ?? 'Chưa có nhãn';
+    return value==='REVIEWED_RECOVERY' ? 'Đã đánh giá nguồn khôi phục' : value==='UNKNOWN'?'Chưa phân loại':labels[value] ?? 'Chưa có nhãn';
   }
   activeTab(){
     if(!this.contentStatus && !this.targetStatus && !this.reviewState)return 'all';
@@ -233,8 +292,8 @@ export class DiscoveryReviewPageComponent {
   changePage(delta: number) { this.page += delta; this.load(); }
   load() {
     const request = ++this.requestNumber; this.loading.set(true); this.error.set('');
-    const id = this.route.snapshot.paramMap.get('id');
-    this.detailMode.set(!!id); this.detail.set(null); this.recoveredDetail.set(null);
+    const id = this.route.snapshot.paramMap.get('id'),executionId=this.route.snapshot.paramMap.get('executionId'),index=this.route.snapshot.paramMap.get('itemIndex');
+    this.detailMode.set(!!id||!!executionId); this.detail.set(null); this.recoveredDetail.set(null);this.observationDetail.set(null);
     this.history.set(null);
     const params: Record<string,string|number|boolean> = { page: this.page, pageSize: 20 };
     if (this.contentStatus) params['contentStatus'] = this.contentStatus;
@@ -245,7 +304,14 @@ export class DiscoveryReviewPageComponent {
     if (this.reviewState) params['reviewState'] = this.reviewState;
     if(this.collectedDate){const from=new Date(`${this.collectedDate}T00:00:00`),before=new Date(from);before.setDate(before.getDate()+1);params['collectedFrom']=from.toISOString();params['collectedBefore']=before.toISOString();}
     const failed = (e: unknown) => { if(request === this.requestNumber){this.error.set(safeAdminError(e)); this.loading.set(false);} };
-    if (id) this.api.discoveryItem(id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({next:d=>{if(request===this.requestNumber){
+    if(executionId){
+      if(!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/iu.test(executionId)||! /^(?:0|[1-9]\d*)$/u.test(index??'')||Number(index)>=200){this.error.set('Đường dẫn observation không hợp lệ.');this.loading.set(false);return;}
+      this.api.discovery({page:1,pageSize:1,executionId,itemIndex:Number(index)}).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({next:data=>{if(request!==this.requestNumber)return;
+        const row=data.results.items[0],o=row?.origin==='EXECUTION_OBSERVATION'?row:row?.observation;
+        if(o?.executionId.toLowerCase()!==executionId.toLowerCase()||o.itemIndex!==Number(index)){this.error.set('Không tìm thấy bài viết đã lưu.');this.loading.set(false);return;}
+        this.observationDetail.set(o);this.loading.set(false);
+      },error:failed});
+    }else if (id) this.api.discoveryItem(id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({next:d=>{if(request===this.requestNumber){
       if(d.origin==='PERSISTED_OBSERVATION_RECOVERY')this.recoveredDetail.set(d);else this.detail.set(d);
       this.reviewConflict.set(false);this.loading.set(false);}},error:failed});
     else {this.detail.set(null);this.api.discovery(params).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({next:d=>{if(request===this.requestNumber){this.list.set(d);this.loading.set(false);}},error:failed});}

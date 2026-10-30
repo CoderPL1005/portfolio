@@ -28,8 +28,11 @@ public sealed class AdminDiscoveryReviewController(IRequestDispatcher dispatcher
     public async Task<ActionResult<ApiResponse<DiscoveryDemoResetPlan>>> ResetPlan([FromBody] PlanDiscoveryDemoResetQuery query, CancellationToken ct) =>
         Ok(ApiResponse<DiscoveryDemoResetPlan>.Ok(await dispatcher.DispatchAsync(query, ct)));
     [HttpGet]
-    public async Task<ActionResult<ApiResponse<DiscoveryReviewList>>> List([FromQuery] GetDiscoveryReviewQuery query, CancellationToken ct) =>
-        Ok(ApiResponse<DiscoveryReviewList>.Ok(await dispatcher.DispatchAsync(query, ct)));
+    public async Task<IActionResult> List([FromQuery] GetDiscoveryReviewQuery query,[FromQuery] bool includeObservations,[FromQuery] Guid? executionId,[FromQuery] int? itemIndex,CancellationToken ct)
+    {
+        if(includeObservations)return Ok(ApiResponse<DiscoveryOpportunityList>.Ok(await dispatcher.DispatchAsync(new GetDiscoveryOpportunitiesQuery(query,executionId,itemIndex),ct)));
+        return Ok(ApiResponse<DiscoveryReviewList>.Ok(await dispatcher.DispatchAsync(query,ct)));
+    }
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<ApiResponse<DiscoveryReviewDetail>>> Detail(Guid id, CancellationToken ct) =>
         Ok(ApiResponse<DiscoveryReviewDetail>.Ok(await dispatcher.DispatchAsync(new GetDiscoveryCandidateQuery(id), ct)));

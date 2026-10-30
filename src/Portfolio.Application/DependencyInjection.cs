@@ -50,6 +50,8 @@ public static class DependencyInjection
         services.AddScoped<IRequestHandler<ImportDiscoveryReviewCommand, DiscoveryImportResult>, ImportDiscoveryReviewHandler>();
         services.AddScoped<IRequestValidator<ImportDiscoveryReviewCommand>, ImportDiscoveryReviewValidator>();
         services.AddScoped<IRequestHandler<GetDiscoveryReviewQuery, DiscoveryReviewList>, GetDiscoveryReviewHandler>();
+        services.AddScoped<IRequestHandler<GetDiscoveryOpportunitiesQuery, DiscoveryOpportunityList>, GetDiscoveryOpportunitiesHandler>();
+        services.AddScoped<IRequestValidator<GetDiscoveryOpportunitiesQuery>, GetDiscoveryOpportunitiesValidator>();
         services.AddScoped<IRequestValidator<GetDiscoveryReviewQuery>, GetDiscoveryReviewValidator>();
         services.AddScoped<IRequestHandler<GetDiscoveryCandidateQuery, DiscoveryReviewDetail>, GetDiscoveryCandidateHandler>();
         services.AddScoped<IRequestHandler<PlanDiscoveryDemoResetQuery, DiscoveryDemoResetPlan>, PlanDiscoveryDemoResetHandler>();

@@ -42,6 +42,7 @@ export const routes: Routes = [
       { path: 'agent/conversations/:id', loadComponent:()=>import('./features/admin/agent/conversation-detail-page.component').then(m=>m.ConversationDetailPageComponent) },
       { path: 'job-hunting/jobs', loadComponent:()=>import('./features/admin/job-hunting/job-list-page.component').then(m=>m.JobListPageComponent) },
       { path: 'job-hunting/discovery', loadComponent:()=>import('./features/admin/job-hunting/discovery-review-page.component').then(m=>m.DiscoveryReviewPageComponent) },
+      { path: 'job-hunting/discovery/executions/:executionId/observations/:itemIndex', loadComponent:()=>import('./features/admin/job-hunting/discovery-review-page.component').then(m=>m.DiscoveryReviewPageComponent) },
       { path: 'job-hunting/discovery/:id', loadComponent:()=>import('./features/admin/job-hunting/discovery-review-page.component').then(m=>m.DiscoveryReviewPageComponent) },
       { path: 'job-hunting/jobs/new/screenshots', canDeactivate:[unsavedChangesGuard], loadComponent:()=>import('./features/admin/job-hunting/screenshot-inbox-page.component').then(m=>m.ScreenshotInboxPageComponent) },
       { path: 'job-hunting/jobs/new', canDeactivate:[unsavedChangesGuard], loadComponent:()=>import('./features/admin/job-hunting/job-edit-page.component').then(m=>m.JobEditPageComponent) },

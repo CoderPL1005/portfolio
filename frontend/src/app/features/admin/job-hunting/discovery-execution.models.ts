@@ -3,7 +3,7 @@ export interface DiscoveryExecutionVacancy {
   status?: string;
   jobPostingId?: string | null;
   missingFields?: string[];
-  fields?: Record<string, { value: unknown; status: string }>;
+  fields?: Record<string, { value: unknown; status: string; evidence?:{start:number;end:number;quote:string}[] }>;
 }
 export interface DiscoveryExecution {
   id: string;

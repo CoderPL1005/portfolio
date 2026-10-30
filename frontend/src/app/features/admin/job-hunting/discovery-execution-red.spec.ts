@@ -50,7 +50,7 @@ describe('Semi-automated Discovery T15 test-only RED',()=>{
     expect(h.api.startDiscoveryExecution).toHaveBeenCalledTimes(1);
     expect(h.fixture.nativeElement.textContent).toMatch(/unknown|không xác định|chưa xác nhận|không rõ/iu);
   });
-  it('partial terminal result includes counts, uncertain fields and normalized Job links',()=>{
+  it('partial terminal result keeps accounting and links to unified observations without per-post output',()=>{
     const h=mount();expect(h.button(),'Run Job Discovery action is not implemented').toBeDefined();
     h.api.discoveryExecution.mockReturnValue(of({id,state:'PARTIAL',actualRequests:1,creditsDeducted:1,
       counts:{fetched:3,validRecruitment:2,normalized:1,duplicates:1,extractionFailures:1},
@@ -58,7 +58,9 @@ describe('Semi-automated Discovery T15 test-only RED',()=>{
     h.button()!.click();h.pending.next({id,state:'PARTIAL'});h.pending.complete();h.fixture.detectChanges();
     const el:HTMLElement=h.fixture.nativeElement;
     expect(el.textContent).toMatch(/partial|một phần/iu);
-    expect(el.querySelector('a[href*="22222222-2222-4222-8222-222222222222"]')).not.toBeNull();
+    expect(el.querySelector('a[href*="runId="]')?.getAttribute('href')).toContain(id);
+    expect(el.textContent).toContain('Requests: 1');expect(el.textContent).toContain('Deducted credits: 1');
+    expect(el.querySelector('.execution article')).toBeNull();expect(el.querySelector('.execution > details')?.hasAttribute('open')).toBe(false);
     expect(h.api.importDiscovery).not.toHaveBeenCalled();expect(h.api.saveDiscoveryReview).not.toHaveBeenCalled();
   });
   it('T16 control: existing empty Discovery does not auto-start, import or review',()=>{

@@ -28,7 +28,8 @@ public sealed record GetDiscoveryCandidateQuery(Guid Id) : IRequest<DiscoveryRev
 public sealed record DiscoveryReviewDetail(Guid Id, string RunId, string Query, int PageNumber, DateTimeOffset IngestedAt,
     int DuplicateCount, DiscoveryReviewItem? Item, HumanReviewSummary HumanReview,
     string Origin = "CLASSIFIER", string? OriginalQuery = null, string QueryAvailability = "AVAILABLE",
-    object? OriginalClassifierResult = null, DiscoveryRecoveryEnvelope? Recovery = null, bool IdentityWarning = false);
+    object? OriginalClassifierResult = null, DiscoveryRecoveryEnvelope? Recovery = null, bool IdentityWarning = false,
+    DiscoveryObservationRead? Observation = null);
 public sealed record DiscoveryReviewCounts(int Total, int Valid, int Invalid, int NeedsReview, int TargetMatch, int IdentityWarnings, int DuplicateItems);
 public sealed record DiscoveryReviewList(PagedResult<DiscoveryReviewDetail> Results, DiscoveryReviewCounts Counts);
 
