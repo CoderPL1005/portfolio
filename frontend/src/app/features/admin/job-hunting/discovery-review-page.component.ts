@@ -6,7 +6,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { combineLatest } from 'rxjs';
 import { JobHuntingService } from './job-hunting.service';
 import { DiscoveryReviewDetail, DiscoveryRecoveryDetail, DiscoveryReviewRecord, DiscoveryOpportunity, DiscoveryObservationDetail, DiscoveryReviewList, DiscoveryQualityReport, ReviewHistory, HumanReviewWrite } from './discovery-review.models';
-import { observationTitle, observationFact, observationTechnologies, observationLink, observationWarnings, observationPublishedAt, observationEnriched, observationMissing, jdFieldLabels } from './discovery-observation-view';
+import { observationTitle, observationFact, observationTechnologies, observationLink, observationWarnings, observationPublishedAt, observationEnriched, observationMissing, observationOrigins, jdFieldLabels } from './discovery-observation-view';
 import { DiscoveryQualityComponent } from './discovery-quality.component';
 import { DiscoveryJobInformationComponent, discoveryTitle, evidenceText } from './discovery-job-information.component';
 import { safeAdminError } from '../shared/admin-api';
@@ -177,12 +177,23 @@ import { DiscoveryExecutionComponent } from './discovery-execution.component';
                   <h2><a [routerLink]="observationLink(d)">{{observationTitle(d)}}</a></h2><p class="company">{{observationFact(d,'companyName') || 'Chưa xác định công ty'}}</p><p class="muted">{{observationFact(d,'location') || 'Chưa xác định địa điểm'}}</p>
                   <div class="job-tags">@if(observationTechnologies(d);as tech){<span>{{tech}}</span>}@if(observationSeniority(d);as level){<span>{{level}}</span>}</div>
                   <p class="muted">Gemini: {{semanticLabel(d.semanticState)}}</p>
+                  @if(observationFact(d,'experienceRequirements');as requirements){<p>{{requirements}}</p>}
+                  @if(observationOrigins(d);as origins){<p class="muted">Nguồn bằng chứng: {{origins}} · Theo bài đăng, chưa xác minh bên ngoài</p>}
                   @if(observationEnriched(d)){<p class="muted">Đã bổ sung có bằng chứng</p>}
                   <p class="muted">Chưa rõ: {{observationMissing(d).slice(0,3).join(' · ') || 'Không ghi nhận'}}</p>
                   <footer><span>{{observationPublishedAt(d) ? ('Ngày đăng: ' + (observationPublishedAt(d) | date:'shortDate')) : 'Chưa xác định ngày đăng'}}</span><a [routerLink]="observationLink(d)">Xem chi tiết →</a></footer>
                 </article>}
                 @else if(isCandidate(d)){@if(d.recovery;as r){<article class="job-card"><div class="badges"><span class="status-badge neutral">Khôi phục để đánh giá</span><span class="status-badge">{{label(d.humanReview?.status ?? 'UNREVIEWED')}}</span></div>
-                  <h2><a [routerLink]="['/admin/job-hunting/discovery',d.id]">Bài viết chờ Human Review</a></h2><p>Không có kết quả phân loại gốc</p>
+                  <h2><a [routerLink]="['/admin/job-hunting/discovery',d.id]">{{d.observation ? observationTitle(d.observation) : 'Bài viết chờ Human Review'}}</a></h2><p>Không có kết quả phân loại gốc</p>
+                  @if(d.observation;as o){
+                    <p class="company">{{observationFact(o,'companyName') || 'Chưa xác định công ty'}}</p>
+                    <p>{{observationFact(o,'location') || 'Chưa xác định địa điểm'}}</p>
+                    @if(observationTechnologies(o);as tech){<p>{{tech}}</p>}
+                    @if(observationFact(o,'experienceRequirements');as requirements){<p>{{requirements}}</p>}
+                    <p class="muted">Gemini: {{semanticLabel(o.semanticState)}}</p>
+                    @if(observationOrigins(o);as origins){<p class="muted">Nguồn bằng chứng: {{origins}} · Theo bài đăng, chưa xác minh bên ngoài</p>}
+                    <p class="muted">Chưa rõ: {{observationMissing(o).slice(0,3).join(' · ') || 'Không ghi nhận'}}</p>
+                  }
                   @if(r.sourceWarnings.includes('POST_ID_URL_MISMATCH')){<p>Nguồn chưa xác minh</p>}
                   <footer><span>{{r.publishedAt ? ('Ngày đăng: ' + (r.publishedAt | date:'shortDate')) : 'Chưa xác định ngày đăng'}}</span><a [routerLink]="['/admin/job-hunting/discovery',d.id]">Xem chi tiết →</a></footer>
                 </article>}@else if(d.item){<article class="job-card">
@@ -191,7 +202,10 @@ import { DiscoveryExecutionComponent } from './discovery-execution.component';
                   <p class="company">{{(d.observation ? observationFact(d.observation,'companyName') : '') || text(d.item.extracted['company']) || 'Chưa xác định công ty'}}</p>
                   <p class="muted">{{(d.observation ? observationFact(d.observation,'location') : '') || text(d.item.extracted['location']) || 'Chưa xác định địa điểm'}}</p>
                   <div class="job-tags">@if((d.observation ? observationTechnologies(d.observation) : '') || text(d.item.extracted['technologies']);as tech){<span>{{tech}}</span>}@if(seniority(d);as level){<span>{{level}}</span>}</div>
-                  @if(d.observation;as o){<p class="muted">Gemini: {{semanticLabel(o.semanticState)}}</p><a [routerLink]="observationLink(o)">Xem kết quả xử lý đã lưu</a>}
+                  @if(d.observation;as o){<p class="muted">Gemini: {{semanticLabel(o.semanticState)}}</p>
+                    @if(observationFact(o,'experienceRequirements');as requirements){<p>{{requirements}}</p>}
+                    @if(observationOrigins(o);as origins){<p class="muted">Nguồn bằng chứng: {{origins}} · Theo bài đăng, chưa xác minh bên ngoài</p>}
+                    <a [routerLink]="observationLink(o)">Xem kết quả xử lý đã lưu</a>}
                   <footer><span>{{d.item.publishedAt ? ('Ngày đăng: ' + (d.item.publishedAt | date:'shortDate')) : 'Chưa xác định ngày đăng'}}</span><a [routerLink]="['/admin/job-hunting/discovery',d.id]" [attr.aria-label]="'Xem chi tiết: ' + title(d.item.extracted)">Xem chi tiết →</a></footer>
                 </article>}}}
               </section>
@@ -222,6 +236,7 @@ export class DiscoveryReviewPageComponent {
   observationTitle=observationTitle;observationFact=observationFact;observationTechnologies=observationTechnologies;
   observationLink=observationLink;observationWarnings=observationWarnings;observationPublishedAt=observationPublishedAt;
   observationEnriched=observationEnriched;observationMissing=observationMissing;
+  observationOrigins=observationOrigins;
   factEntries(fields:import('./discovery-execution.models').DiscoveryExecutionVacancy['fields']){
     return Object.entries(fields??{}).filter(([key])=>key!=='description').map(([key,f])=>({key,label:jdFieldLabels[key]??key,...f,
       origin:f.origin==='GEMINI'?'Gemini':f.origin==='DETERMINISTIC'?'Deterministic':'Nguồn đã lưu (chưa phân loại)',evidence:f.evidence??[]}));

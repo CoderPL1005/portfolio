@@ -15,6 +15,7 @@ public sealed class DiscoveryExecutionOptions
     public bool FreePlanConfirmed { get; init; }
     public bool NoCashConfirmed { get; init; }
     public bool SemanticEnabled { get; init; }
+    public string EvidencePolicy { get; init; } = "STRICT";
     public bool GeminiFreeTierConfirmed { get; init; }
     public int MaximumSemanticAttempts { get; init; } = 3;
     public string[] Seniorities { get; init; } = ["Intern", "Fresher"];
@@ -34,7 +35,8 @@ public sealed record DiscoveryUsageEvidence(bool BodyCostPresent, JsonElement Bo
     string? DeductedHeader = null,string? AlternateHeader = null);
 public sealed record DiscoverySemanticRequest(int ItemIndex, string RawContent, string ContentHash);
 public sealed record DiscoveryProcessingRequest(int ItemIndex, string? ContentHash, DiscoveryReviewItem? Review,
-    JsonElement[] Vacancies, string? ExtractionError = null, int? ExpectedVersion = null, string? ExpectedWorkflowRunId = null);
+    JsonElement[] Vacancies, string? ExtractionError = null, int? ExpectedVersion = null, string? ExpectedWorkflowRunId = null,
+    string EvidencePolicy = "STRICT");
 public sealed record DiscoveryPersistedSemanticRequest(int ItemIndex, string RawContent, string ContentHash,
     int ExpectedVersion, string ExpectedWorkflowRunId, bool ConfirmGeminiFreeTier = false);
 public sealed record DiscoveryTextGeneration(string ModelIdentity, string CacheVersion, string Output, int? InputTokens, int? OutputTokens);

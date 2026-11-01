@@ -65,6 +65,7 @@ public sealed partial class DiscoveryExecutionService(IApplicationDbContext db, 
 
     private async Task<string> BuildConfigurationAsync(CancellationToken ct, bool confirmGeminiFreeTier)
     {
+        if(Settings.EvidencePolicy is not("STRICT" or "V2"))throw Invalid("evidencePolicy");
         var technologies = await db.Technologies.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Id)
             .Select(x => new { x.Id, x.Name, x.Category, x.IsActive }).ToArrayAsync(ct);
         var skills = await db.Skills.AsNoTracking().Where(x => x.IsPublished && x.TechnologyId != null).OrderBy(x => x.Id)
@@ -85,6 +86,7 @@ public sealed partial class DiscoveryExecutionService(IApplicationDbContext db, 
             maxRequests = 1, maxCredits = 1, timeoutMs = 20000, freePlanConfirmed = true, noCashConfirmed = true,
             semanticEnabled = confirmGeminiFreeTier && Settings.SemanticEnabled && Settings.GeminiFreeTierConfirmed && semantic.IsConfigured,
             semanticModel = semantic.ModelIdentity,
+            evidencePolicy = Settings.EvidencePolicy,
             preferenceVersion = preferences.Version,
             portfolioSnapshot = new { schemaVersion = 1, source = "PORTFOLIO_PUBLIC_API_EXPORT", technologies, skills,
                 experiences = experiences.Select(x => new { x.Id, x.IsPublished, technologies = experienceLinks.Where(l => l.ExperienceId == x.Id).Select(l => new { id = l.TechnologyId }) }),

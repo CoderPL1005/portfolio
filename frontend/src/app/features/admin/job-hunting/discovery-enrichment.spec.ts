@@ -4,7 +4,7 @@ import { of } from 'rxjs';
 import { vi } from 'vitest';
 import { DiscoveryReviewPageComponent } from './discovery-review-page.component';
 import { JobHuntingService } from './job-hunting.service';
-import { observationEnriched, observationFact } from './discovery-observation-view';
+import { observationEnriched, observationFact, observationTechnologies, observationOrigins } from './discovery-observation-view';
 import { DiscoveryObservationDetail } from './discovery-review.models';
 
 // Synthetic only. Not a production result or a measured model prediction.
@@ -39,5 +39,14 @@ describe('Validated Gemini fields in unified Discovery',()=>{
   it('rejects a real value backed by an unrelated source quote',()=>{
     const o=row();o.vacancies[0].fields!['companyName']={...field('TAX NET'),evidence:field('.NET').evidence};
     expect(observationFact(o,'companyName')).toBe('');
+  });
+  it('only displays persisted valid stack evidence and never labels corrections as external verification',()=>{
+    const o=row();o.vacancies[0].fields!['technologyStack']={value:['.NET'],status:'NEEDS_REVIEW',origin:'GEMINI',evidence:field('.NET').evidence};
+    expect(observationTechnologies(o)).toBe('');
+    o.vacancies[0].fields!['technologyStack'].status='EXTRACTED';
+    o.vacancies[0].fields!['technologyStack'].evidence=field('TAX NET').evidence;
+    expect(observationTechnologies(o)).toBe('');
+    expect(observationOrigins(o)).toContain('Gemini');
+    expect(mount().nativeElement.querySelector('.job-card').textContent).toContain('chưa xác minh bên ngoài');
   });
 });

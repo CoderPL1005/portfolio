@@ -111,6 +111,8 @@ export async function runDiscoveryExecution({executionId,workflowRunId,runAttemp
 }
 
 async function processObservations({executionId,observations,config,policy,providerOperation,backend}){
+  const evidencePolicy=config.evidencePolicy??'STRICT';
+  if(!['STRICT','V2'].includes(evidencePolicy))throw new Stop('DISCOVERY_EVIDENCE_POLICY_INVALID');
   const classificationFailures=new Set();
   const reviewItems=buildReviewItemsFromObservations(observations,{profile:policy?.profile,targetJobPreferences:policy?.targetJobPreferences,
     onItemError:index=>classificationFailures.add(index)});
@@ -126,6 +128,7 @@ async function processObservations({executionId,observations,config,policy,provi
     try { if(providerOperation==='SUCCEEDED'&&!processingError)extracted=deterministic(observation); }
     catch { processingError='DETERMINISTIC_EXTRACTION_FAILED'; }
     const saved=config.savedProcessing?.[observation.itemIndex];
+    if(saved?.processing&&(saved.processing.evidencePolicy??'STRICT')!==evidencePolicy)throw new Stop('DISCOVERY_EVIDENCE_POLICY_CONFLICT');
     if(saved?.semanticState==='COMPLETED'&&saved.processing?.vacancies?.length&&!processingError&&
       saved.processing.vacancies.every(v=>v?.fields&&fields.every(key=>v.fields[key]&&Object.hasOwn(v.fields[key],'value'))))
       extracted={vacancies:structuredClone(saved.processing.vacancies)};
@@ -136,17 +139,17 @@ async function processObservations({executionId,observations,config,policy,provi
       (v.fields.salaryMinimum.value===null&&v.fields.salaryMaximum.value===null)||
       !v.fields.salaryCurrency.value||!v.fields.salaryPeriod.value||
       (!v.fields.applicationEmail.value&&!v.fields.applicationUrl.value));
-    if(incomplete&&review?.contentValidity.status==='VALID_RECRUITMENT'&&config.semanticEnabled&&providerOperation==='SUCCEEDED'&&observation.rawContent&&observation.rawContent.length<=24000&&observation.providerPostId&&observation.outcome==='READY_FOR_EXTRACTION'){
+    if(incomplete&&!['UNKNOWN','CLAIMED'].includes(saved?.semanticState)&&review?.contentValidity.status==='VALID_RECRUITMENT'&&config.semanticEnabled&&providerOperation==='SUCCEEDED'&&observation.rawContent&&observation.rawContent.length<=24000&&observation.providerPostId&&observation.outcome==='READY_FOR_EXTRACTION'){
       try{
         // Make classification durable even if generation or this process dies.
         if(backend.saveProcessing&&saved?.semanticState!=='COMPLETED')await backend.saveProcessing(executionId,{itemIndex:observation.itemIndex,contentHash:observation.contentHash,review,
-          vacancies:extracted.vacancies.map(v=>({...Object.fromEntries(fields.map(key=>[key,v.fields[key].value])),fields:v.fields})),extractionError:processingError});
+          vacancies:extracted.vacancies.map(v=>({...Object.fromEntries(fields.map(key=>[key,v.fields[key].value])),fields:v.fields})),extractionError:processingError,evidencePolicy});
         // The backend owns current consent, model and the durable attempt/cache.
         // Never invent a model name when an older configuration omits it.
         const generation=await backend.extract(executionId,{itemIndex:observation.itemIndex,rawContent:observation.rawContent,contentHash:observation.contentHash});
         if(!generation?.modelIdentity||config.semanticModel&&generation.modelIdentity!==config.semanticModel)throw Error('MODEL_UNVERIFIED');
         const ai=await extractRecruitmentPost({sourcePostId:observation.providerPostId,sourceUrl:observation.sourceUrl,rawContent:observation.rawContent,
-          contentHash:observation.contentHash,publishedAt:observation.publishedAt},{provider:{modelIdentity:generation.modelIdentity,extract:async()=>generation.output}});
+          contentHash:observation.contentHash,publishedAt:observation.publishedAt},{evidencePolicy,provider:{modelIdentity:generation.modelIdentity,extract:async()=>generation.output}});
         const supplemented={vacancies:ai.vacancies.map(v=>{
           const supported=ai.vacancies.length===1?supportedPostingFacts(observation.rawContent):{};
           const values={companyName:ai.employer.value,positionTitle:v.title.value,location:v.location.value??ai.sharedLocation.value,description:observation.rawContent,
@@ -205,13 +208,13 @@ async function processObservations({executionId,observations,config,policy,provi
     const status='NEEDS_REVIEW'; // Extraction is staging, never automatic JobPosting promotion.
     const outcome=providerOperation!=='SUCCEEDED'||observation.outcome!=='READY_FOR_EXTRACTION'?observation.outcome:review?.contentValidity.status==='INVALID_RECRUITMENT'?'INVALID_RECRUITMENT':observation.outcome;
     results.push({itemIndex:observation.itemIndex,status,missingFields,vacancies});
-    const processed={...observation,outcome,vacancies,extractionError:semanticError?'SEMANTIC_UNAVAILABLE':processingError};
+    const processed={...observation,outcome,vacancies,evidencePolicy,extractionError:semanticError?'SEMANTIC_UNAVAILABLE':processingError};
     completed.push(processed);
     // Durable per-item layer before the final result; old injectable transports
     // remain compatible. The production transport always implements this port.
     if(backend.saveProcessing){
       try{await backend.saveProcessing(executionId,{itemIndex:observation.itemIndex,contentHash:observation.contentHash,
-        review,vacancies,extractionError:processed.extractionError});}
+        review,vacancies,evidencePolicy,extractionError:processed.extractionError});}
       catch{persistenceErrors.push(observation.itemIndex);config.semanticEnabled=false;}
     }
   }

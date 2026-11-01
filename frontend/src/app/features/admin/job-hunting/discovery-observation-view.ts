@@ -8,6 +8,7 @@ export function observationFact(row:DiscoveryObservationDetail,key:string):strin
     if(field?.status==='EXTRACTED'&&typeof value==='string'&&value.trim()&&raw.toLowerCase().includes(value.toLowerCase())&&
       field.evidence?.some(e=>Number.isInteger(e.start)&&Number.isInteger(e.end)&&e.start>=0&&e.end>e.start&&raw.slice(e.start,e.end)===e.quote&&e.quote.toLowerCase().includes(value.toLowerCase())))return value;
   }
+  if(row.vacancies.some(v=>v.fields?.[key]))return '';
   const names:Record<string,string>={positionTitle:'role',companyName:'company',location:'location'};
   const value=row.review?.extracted?.[names[key]];
   return typeof value==='string'&&value.trim()&&raw.toLowerCase().includes(value.toLowerCase())?value:'';
@@ -19,9 +20,18 @@ export function observationTitle(row:DiscoveryObservationDetail):string {
 }
 export function observationTechnologies(row:DiscoveryObservationDetail):string {
   const raw=(row.source.rawContent??'').toLowerCase();
-  const fields=row.vacancies.flatMap(v=>v.fields?.['technologyStack']?.status==='EXTRACTED'&&Array.isArray(v.fields['technologyStack'].value)?v.fields['technologyStack'].value:[]);
-  const extracted=row.review?.extracted?.['technologies'];
+  const fields=row.vacancies.flatMap(v=>{
+    const field=v.fields?.['technologyStack'];
+    return field?.status==='EXTRACTED'&&Array.isArray(field.value)?field.value.filter(t=>typeof t==='string'&&field.evidence?.some(e=>
+      Number.isInteger(e.start)&&Number.isInteger(e.end)&&e.start>=0&&e.end>e.start&&row.source.rawContent?.slice(e.start,e.end)===e.quote&&e.quote.toLowerCase().includes(t.toLowerCase()))):[];
+  });
+  const extracted=row.vacancies.some(v=>v.fields?.['technologyStack'])?null:row.review?.extracted?.['technologies'];
   return [...new Set([...fields,...(Array.isArray(extracted)?extracted:[])].filter((t):t is string=>typeof t==='string'&&!!t.trim()&&raw.includes(t.toLowerCase())))].slice(0,8).join(' · ');
+}
+export function observationOrigins(row:DiscoveryObservationDetail):string {
+  return [...new Set(row.vacancies.flatMap(v=>Object.values(v.fields??{})).filter(f=>f.status==='EXTRACTED'&&f.value!==null&&
+    f.evidence?.some(e=>Number.isInteger(e.start)&&Number.isInteger(e.end)&&e.start>=0&&e.end>e.start&&row.source.rawContent?.slice(e.start,e.end)===e.quote))
+    .map(f=>f.origin==='GEMINI'?'Gemini':f.origin==='DETERMINISTIC'?'Deterministic':'').filter(Boolean))].join(' · ');
 }
 export function observationLink(row:DiscoveryObservationDetail):string[] {
   return ['/admin/job-hunting/discovery/executions',row.executionId,'observations',String(row.itemIndex)];

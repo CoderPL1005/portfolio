@@ -133,7 +133,8 @@ function supportedValue(name, value, quotes, sourceContext = quotes.join('\n')) 
   return quotes.some(q => literal(q, value));
 }
 
-// Explicit opt-in for the smoke validator. Existing worker callers remain strict.
+// Explicit opt-in. Production workers receive authorization from the backend's
+// frozen execution configuration; other callers remain strict by default.
 export const EVIDENCE_POLICY_V2 = Object.freeze({ realignUniqueQuotes: true, inlineRecruitmentTitles: true });
 const utf16Boundary = (raw, index) => index >= 0 && index <= raw.length && !(index > 0 && index < raw.length &&
   raw.charCodeAt(index - 1) >= 0xd800 && raw.charCodeAt(index - 1) <= 0xdbff && raw.charCodeAt(index) >= 0xdc00 && raw.charCodeAt(index) <= 0xdfff);

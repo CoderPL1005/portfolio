@@ -28,6 +28,10 @@ public sealed partial class DiscoveryExecutionService
         var row=await db.DiscoveryExecutionObservations.SingleOrDefaultAsync(x=>x.ExecutionId==id&&x.ItemIndex==request.ItemIndex,ct);
         if(row is null)throw Conflict("DISCOVERY_OBSERVATION_CONFLICT");
         using var document=JsonDocument.Parse(row.PayloadJson);var source=document.RootElement;
+        var evidencePolicy=ExecutionEvidencePolicy(execution.ConfigurationJson);
+        if(request.EvidencePolicy!=evidencePolicy)throw Conflict("DISCOVERY_EVIDENCE_POLICY_CONFLICT");
+        if(source.TryGetProperty("processing",out var previous)&& (Text(previous,"evidencePolicy")??"STRICT")!=evidencePolicy)
+            throw Conflict("DISCOVERY_EVIDENCE_POLICY_CONFLICT");
         var raw=Text(source,"rawContent");var originalHash=Text(source,"contentHash");
         var identity=Hash(new{itemIndex=row.ItemIndex,providerPostId=Text(source,"providerPostId"),sourceUrl=Text(source,"sourceUrl"),rawContent=raw,contentHash=originalHash,publishedAt=Text(source,"publishedAt")});
         if(row.PayloadHash!=identity||row.ContentHash!=originalHash||request.ContentHash!=originalHash||
@@ -51,7 +55,8 @@ public sealed partial class DiscoveryExecutionService
             review.SourceUrl!=Text(source,"sourceUrl")||review.RawContent!=raw||review.ContentHash!=originalHash||
             review.ProviderPostId!=reviewableId||!validDate||review.PublishedAt!=publishedAt||
             Text(source,"outcome")=="POST_ID_URL_MISMATCH"&&(!review.SourceWarnings.Contains("POST_ID_URL_MISMATCH")||review.SourceUrl is not null))throw Invalid("processing");
-        var fingerprint=Hash(new{review=review is null?null:review with {EvaluatedAt=default},request.Vacancies,request.ExtractionError});
+        var fingerprint=Hash(new{review=review is null?null:review with {EvaluatedAt=default},request.Vacancies,request.ExtractionError,
+            evidencePolicy,validationVersion="evidence-provenance-v2",generationHash=row.SemanticOutputJson is null?null:DiscoveryReviewRules.Hash(row.SemanticOutputJson)});
         if(source.TryGetProperty("processing",out var prior)&&Text(prior,"fingerprint")==fingerprint)return new{version=execution.Version,stored=true};
         if(workerRunId is null&&request.ExpectedVersion!=execution.Version)throw Conflict("DISCOVERY_EXECUTION_CONFLICT");
         var vacancies=request.Vacancies;var text=raw??"";
@@ -59,11 +64,13 @@ public sealed partial class DiscoveryExecutionService
         var mapped=vacancies.Select((v,i)=>{
             var start=vacancies.Length==1?0:starts.Any(x=>x<0)||starts.Distinct().Count()!=starts.Length?-1:starts[i];
             var end=vacancies.Length==1?text.Length:starts.Where(x=>x>start).DefaultIfEmpty(text.Length).Min();
-            var m=MapVacancy(v,text,vacancies.Length==1,start,end,row.SemanticState=="COMPLETED"?row.SemanticOutputJson:null);
+            var m=MapVacancy(v,text,vacancies.Length==1,start,end,row.SemanticState=="COMPLETED"?row.SemanticOutputJson:null,evidencePolicy);
             return new{fields=m.Fields,missingFields=m.Missing,status="NEEDS_REVIEW"};
         }).ToArray();
         var payload=JsonNode.Parse(row.PayloadJson)!;
         payload["processing"]=JsonSerializer.SerializeToNode(new{origin=workerRunId is null?"PERSISTED_REPROCESSING":"WORKER_INCREMENTAL",fingerprint,
+            evidencePolicy,validationVersion="evidence-provenance-v2",
+            generationHash=row.SemanticOutputJson is null?null:DiscoveryReviewRules.Hash(row.SemanticOutputJson),
             review,vacancies=mapped,request.ExtractionError,processedAt=clock.GetUtcNow()},Json);
         row.PayloadJson=payload.ToJsonString();execution.Version++;execution.UpdatedAt=clock.GetUtcNow();
         // One save/transaction, guarded by the execution concurrency token. No

@@ -126,6 +126,8 @@ public sealed partial class DiscoveryExecutionService
         foreach(var observation in observations)
         {
             var item=result.Observations[observation.ItemIndex];var raw=Text(item,"rawContent")??"";
+            var evidencePolicy=ExecutionEvidencePolicy(execution.ConfigurationJson);
+            if((Text(item,"evidencePolicy")??"STRICT")!=evidencePolicy)throw Conflict("DISCOVERY_EVIDENCE_POLICY_CONFLICT");
             // Keep latest validated extraction as a separate layer, never rewrite raw.
             var merged=System.Text.Json.Nodes.JsonNode.Parse(item.GetRawText())!;
             var saved=System.Text.Json.Nodes.JsonNode.Parse(observation.PayloadJson)!;
@@ -140,8 +142,9 @@ public sealed partial class DiscoveryExecutionService
                 var scopeEnd=vacancies.Length==1?raw.Length:starts.Where(x=>x>scopeStart).DefaultIfEmpty(raw.Length).Min();
                 // Ambiguous/missing/duplicate headings cannot attribute arrays.
                 if(vacancies.Length>1&&(starts.Any(x=>x<0)||starts.Distinct().Count()!=starts.Length))scopeStart=-1;
-                var vacancy=vacancies[i];var mapped=MapVacancy(vacancy,raw,vacancies.Length==1,scopeStart,scopeEnd,observation.SemanticState=="COMPLETED"?observation.SemanticOutputJson:null);var fields=mapped.Fields;
-                var fingerprint=Hash(new{contentHash=observation.ContentHash,fields});
+                var vacancy=vacancies[i];var mapped=MapVacancy(vacancy,raw,vacancies.Length==1,scopeStart,scopeEnd,observation.SemanticState=="COMPLETED"?observation.SemanticOutputJson:null,evidencePolicy);var fields=mapped.Fields;
+                var fingerprint=evidencePolicy=="STRICT"?Hash(new{contentHash=observation.ContentHash,fields}):
+                    Hash(new{contentHash=observation.ContentHash,fields,evidencePolicy,validationVersion="evidence-provenance-v2"});
                 var row=new DiscoveryExecutionVacancy{Id=Guid.NewGuid(),ObservationId=observation.Id,VacancyIndex=i,
                     RawJobPostingId=observation.RawJobPostingId,Fingerprint=fingerprint,FieldsJson=JsonSerializer.Serialize(fields,Json),
                     MissingFieldsJson=JsonSerializer.Serialize(mapped.Missing,Json)};
@@ -212,7 +215,7 @@ public sealed partial class DiscoveryExecutionService
         }catch(Exception e) when(e is JsonException or InvalidOperationException){return false;}
         return false;
     }
-    private static MappedVacancy MapVacancy(JsonElement value,string raw,bool unambiguousRole,int scopeStart,int scopeEnd,string? semanticOutput=null)
+    private static MappedVacancy MapVacancy(JsonElement value,string raw,bool unambiguousRole,int scopeStart,int scopeEnd,string? semanticOutput=null,string evidencePolicy="STRICT")
     {
         var exact=unambiguousRole?DiscoveryPostingFacts.Extract(raw):new Dictionary<string,DiscoveryPostingFacts.Fact>();
         var fields=new Dictionary<string,object>();var values=new Dictionary<string,JsonElement>();var missing=new List<string>();
@@ -237,7 +240,8 @@ public sealed partial class DiscoveryExecutionService
                 quote=supported?fact!.Quote:null;
             }
             else if(element.ValueKind==JsonValueKind.Number)supported=false;
-            if(origin=="GEMINI")supported=supported&&GeneratedFact(semanticOutput,key,field)&&spans.Length is >0 and <=40&&spans.All(ExactSpan)&&
+            if(origin=="GEMINI")supported=supported&&field.TryGetProperty("value",out var claimed)&&Canonical(claimed)==Canonical(element)&&
+                (evidencePolicy=="V2"?GeneratedFactV2(semanticOutput,key,field,raw,Text(value,"positionTitle")):GeneratedFact(semanticOutput,key,field))&&spans.Length is >0 and <=40&&spans.All(ExactSpan)&&
                 (quote is null||spans.Any(s=>Text(s,"quote")!.Contains(quote,StringComparison.OrdinalIgnoreCase)));
             if(!supported)element=JsonSerializer.SerializeToElement<object?>(null);
             values[key]=element;
@@ -254,7 +258,7 @@ public sealed partial class DiscoveryExecutionService
             if(value.ValueKind!=JsonValueKind.Object||!value.TryGetProperty("fields",out var extras)||extras.ValueKind!=JsonValueKind.Object||!extras.TryGetProperty(key,out var fact)||fact.ValueKind!=JsonValueKind.Object)continue;
             var spans=Array(fact,"evidence");var present=fact.TryGetProperty("value",out var v)&&v.ValueKind!=JsonValueKind.Null;
             bool Literal(string s)=>!string.IsNullOrWhiteSpace(s)&&s.Length<=4000&&spans.Any(e=>Text(e,"quote")?.Contains(s,StringComparison.OrdinalIgnoreCase)==true);
-            var valid=GeneratedFact(semanticOutput,key,fact)&&Text(fact,"origin")=="GEMINI"&&Text(fact,"status")=="EXTRACTED"&&spans.Length is >0 and <=8&&spans.All(span=>
+            var valid=(evidencePolicy=="V2"?GeneratedFactV2(semanticOutput,key,fact,raw,Text(value,"positionTitle")):GeneratedFact(semanticOutput,key,fact))&&Text(fact,"origin")=="GEMINI"&&Text(fact,"status")=="EXTRACTED"&&spans.Length is >0 and <=8&&spans.All(span=>
                 span.ValueKind==JsonValueKind.Object&&span.TryGetProperty("start",out var a)&&a.TryGetInt32(out var start)&&span.TryGetProperty("end",out var b)&&b.TryGetInt32(out var end)&&
                 start>=0&&end>start&&end<=raw.Length&&Text(span,"quote") is {} q&&raw[start..end]==q)&&
                 (v.ValueKind==JsonValueKind.String&&Literal(v.GetString()!)||v.ValueKind==JsonValueKind.Array&&v.GetArrayLength() is >0 and <=40&&v.EnumerateArray().All(x=>x.ValueKind==JsonValueKind.String&&Literal(x.GetString()!)));
