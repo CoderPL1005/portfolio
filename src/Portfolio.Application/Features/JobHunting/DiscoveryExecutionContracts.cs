@@ -7,6 +7,8 @@ namespace Portfolio.Application.Features.JobHunting;
 public sealed class DiscoveryExecutionOptions
 {
     public bool Enabled { get; init; }
+    // Explicit operator opt-in. Scheduling remains disabled by default.
+    public bool DailyEnabled { get; init; }
     public bool WorkerEnabled { get; init; }
     public string WorkerKey { get; init; } = "";
     public string GitHubToken { get; init; } = "";
@@ -54,6 +56,7 @@ public interface IDiscoveryGitHubClient
 public interface IDiscoveryExecutionService
 {
     Task<object> StartAsync(Guid clientRequestId, string triggerSource, CancellationToken ct = default, bool confirmGeminiFreeTier = false);
+    Task<object> StartScheduledAsync(string scheduleExpression, CancellationToken ct = default);
     Task<object> GetAsync(Guid id, CancellationToken ct = default);
     Task<object> HistoryAsync(int page, int pageSize, CancellationToken ct = default);
     Task<object> ConfigurationAsync(Guid id, string runId, CancellationToken ct);

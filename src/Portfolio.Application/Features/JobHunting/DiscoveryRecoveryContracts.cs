@@ -7,6 +7,9 @@ namespace Portfolio.Application.Features.JobHunting;
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record DiscoveryRecoveryFinalize(Guid? OperationId, int? ExpectedVersion, string? ExpectedWorkflowRunId,
     string? PreviewFingerprint, string? Confirmation, string? Reason);
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record DiscoveryStaleCloseRequest(int ExpectedVersion, string ExpectedWorkflowRunId,
+    string Confirmation, string Reason, bool RunConfirmedFinished);
 public sealed class DiscoveryRecoveryOptions
 {
     // Release prerequisites; never enabled by running unit tests or by a request.
@@ -29,6 +32,7 @@ public interface IDiscoveryExecutionRecovery
 {
     Task<DiscoveryRecoveryPreview> PreviewAsync(Guid id, CancellationToken ct);
     Task<JsonElement> FinalizeAsync(Guid id, DiscoveryRecoveryFinalize request, CancellationToken ct);
+    Task<object> CloseStaleAsync(Guid id, DiscoveryStaleCloseRequest request, CancellationToken ct);
 }
 public interface IDiscoveryRecoveryTransactions
 {

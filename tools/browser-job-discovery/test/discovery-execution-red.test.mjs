@@ -22,7 +22,13 @@ function harness(t,{rows,providerStatus=200,credits='1',timeout=false,semanticFa
   t.after(()=>{if(previous===undefined)delete process.env.SOCIALAPIS_API_KEY;else process.env.SOCIALAPIS_API_KEY=previous;});
   const backend={
     getConfiguration:async id=>{assert.equal(id,executionId);events.push('config');return {executionId,triggerSource,maxRequests:1,maxCredits:1,query:'Backend Fresher Hanoi',
-      freePlanConfirmed:true,noCashConfirmed:true,timeoutMs:1000,semanticEnabled:true,profile:{technologies:['C#','ASP.NET Core']}};},
+      freePlanConfirmed:true,noCashConfirmed:true,timeoutMs:1000,semanticEnabled:true,profile:{technologies:['C#','ASP.NET Core']},
+      ...(triggerSource==='DAILY_SCHEDULED'?{dailySearch:{
+        slot:1,
+        startTime:'2026-11-01',
+        endTime:'2026-11-01',
+        timeZone:'Asia/Ho_Chi_Minh'
+      }}:{})};},
     claim:async()=>{events.push('claim');if(claimDenied||claimed||runAttempt!==1)return {claimed:false};claimed=true;return {claimed:true};},
     saveObservations:async(_id,observations)=>{assert.equal(claimed,true);events.push('save-raw');saved.push(...structuredClone(observations));},
     extract:async()=>{events.push('semantic');if(semanticFailure)throw Error(`SYNTHETIC_GEMINI_${semanticFailure}`);return null;},

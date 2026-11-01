@@ -1,5 +1,6 @@
 import {createHash} from 'node:crypto';
 import {SocialApisLiveDiscoveryAdapter} from './socialapis-adapter.mjs';
+import {validateDateFilters} from './discovery-contract.mjs';
 import {normalizeSocialApisItem,parseSocialApisSearchResponse} from './socialapis-live-smoke.mjs';
 import {JobPostExtractor,ActivityBudget,Stop} from './core.mjs';
 import {resolveOneRequestPolicy} from './candidate-technology-profile.mjs';
@@ -7,6 +8,28 @@ import {extractRecruitmentPost} from './ai-job-extraction.mjs';
 import {buildReviewItemsFromObservations,reviewExport} from './discovery-review.mjs';
 import {supportedPostingFacts} from './discovery-posting-facts.mjs';
 
+// Search window is frozen by the backend for the authorized Vietnam daily slot.
+// Nondated/ambiguous posts remain visible for human review as UNKNOWN date,
+// while posts with a trustworthy timestamp outside the window are excluded.
+export function dailyObservationWindowFilter(observations, config) {
+  const scope = config.dailySearch;
+  if (config.triggerSource !== 'DAILY_SCHEDULED') {
+    if (scope != null) throw new Stop('DISCOVERY_DAILY_FILTER_INVALID');
+    return observations;
+  }
+  if (!scope || ![1, 2, 3, 4, 5].includes(scope.slot) || scope.timeZone !== 'Asia/Ho_Chi_Minh' ||
+      typeof scope.startTime !== 'string' || typeof scope.endTime !== 'string')
+    throw new Stop('DISCOVERY_DAILY_FILTER_INVALID');
+  try { validateDateFilters({ startTime: scope.startTime, endTime: scope.endTime }); }
+  catch { throw new Stop('DISCOVERY_DAILY_FILTER_INVALID'); }
+  return observations.filter(row => {
+    if (!row.publishedAt) return true;
+    const timestamp = Date.parse(row.publishedAt);
+    if (!Number.isFinite(timestamp)) return true;
+    const vietnamDay = new Date(timestamp + 7 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    return vietnamDay >= scope.startTime && vietnamDay <= scope.endTime;
+  }).map((row, index) => ({ ...row, itemIndex: index }));
+}
 const sha=value=>createHash('sha256').update(value,'utf8').digest('hex');
 const fields=['companyName','positionTitle','location','employmentType','workplaceType','salaryMinimum','salaryMaximum','salaryCurrency','salaryPeriod',
   'experienceRequirements','description','technologyStack','applicationEmail','applicationUrl','expiresAt','notes'];
@@ -67,6 +90,8 @@ export async function runDiscoveryExecution({executionId,workflowRunId,runAttemp
   if(Number(runAttempt)!==1)return {state:'BLOCKED',reason:'DISCOVERY_RERUN_FORBIDDEN',providerRequests:0};
   const config=await backend.getConfiguration(executionId);
   if(config.maxRequests!==1||config.maxCredits!==1||config.freePlanConfirmed!==true||config.noCashConfirmed!==true)throw new Stop('DISCOVERY_EXECUTION_LIMITS_INVALID');
+  // Validate the frozen backend window BEFORE claiming a provider request.
+  dailyObservationWindowFilter([],config);
   const policy=config.portfolioSnapshot?resolveOneRequestPolicy({portfolioSnapshot:config.portfolioSnapshot},config.preferences):null;
   const query=policy?.query??config.query;
   const accountingHeaders={};
@@ -80,7 +105,9 @@ export async function runDiscoveryExecution({executionId,workflowRunId,runAttemp
   };
   // Validate transport/key/config BEFORE durable claim; no request has started.
   const adapter=new SocialApisLiveDiscoveryAdapter({enabled:true,freePlanConfirmed:true,noCashConfirmed:true,maxRequests:1,maxCredits:1,
-    timeoutMs:Math.min(config.timeoutMs??20000,20000),query,retainAudit:true},transport);
+    timeoutMs:Math.min(config.timeoutMs??20000,20000),query,retainAudit:true,
+    startTime:config.dailySearch?.startTime??undefined,
+    endTime:config.dailySearch?.endTime??undefined},transport);
   if(!process.env.SOCIALAPIS_API_KEY||process.env.SOCIALAPIS_API_KEY.length<16)throw new Stop('SOCIALAPIS_API_KEY_REQUIRED');
   const claim=await backend.claim(executionId);
   if(!claim.claimed)return {state:'BLOCKED',reason:'DISCOVERY_ALREADY_CLAIMED',providerRequests:0};
@@ -100,7 +127,7 @@ export async function runDiscoveryExecution({executionId,workflowRunId,runAttemp
   const usage={actualRequests:1,creditsDeducted:stats.creditsDeducted,creditsUsedAlternateHeader:stats.creditsUsedAlternateHeader??null,httpStatus:stats.httpStatus??null,
     providerOperation,errorCode,usageEvidence};
   const parsed=adapter.responseAudit?parseSocialApisSearchResponse(adapter.responseAudit.payload):null;
-  const observations=observationsFrom(parsed?.rows??[]);
+  const observations=dailyObservationWindowFilter(observationsFrom(parsed?.rows??[]),config);
   // Raw goes durable before semantic generation. Failure leaves a visible claimed
   // execution; never retry provider, release claim, or use a public artifact.
   await backend.saveObservations(executionId,observations,usage);

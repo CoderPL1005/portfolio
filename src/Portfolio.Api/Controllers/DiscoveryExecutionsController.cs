@@ -21,4 +21,7 @@ public sealed class DiscoveryExecutionsController(IDiscoveryExecutionService ser
     public async Task<IActionResult> RecoveryPreview(Guid id,CancellationToken ct)=>Ok(ApiResponse<object>.Ok(await recovery.PreviewAsync(id,ct)));
     [HttpPost("{id:guid}/recovery/finalize"),RequestSizeLimit(8192)]
     public async Task<IActionResult> RecoveryFinalize(Guid id,DiscoveryRecoveryFinalize request,CancellationToken ct)=>Ok(ApiResponse<object>.Ok(await recovery.FinalizeAsync(id,request,ct)));
+    [HttpPost("{id:guid}/stale-close"),RequestSizeLimit(4096)]
+    public async Task<IActionResult> CloseStale(Guid id,DiscoveryStaleCloseRequest request,CancellationToken ct)=>
+        Ok(ApiResponse<object>.Ok(await recovery.CloseStaleAsync(id,request,ct)));
 }

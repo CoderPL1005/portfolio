@@ -70,7 +70,7 @@ public sealed class Phase5ApiHardeningTests(AuthApiFactory factory) : IClassFixt
         var adminEndpoints = apiEndpoints.Where(x => x.Route.StartsWith("api/v1/admin/", StringComparison.OrdinalIgnoreCase)).ToList();
 
         Assert.Empty(duplicates);
-        Assert.Equal(135, adminEndpoints.Count); // Also Admin-only persisted processing/extraction; authorization assertions remain unchanged.
+        Assert.Equal(136, adminEndpoints.Count); // Also Admin-only persisted processing/extraction; authorization assertions remain unchanged.
         Assert.All(adminEndpoints, endpoint =>
             Assert.NotNull(endpoint.Endpoint.Metadata.GetMetadata<IAuthorizeData>()));
     }

@@ -1,0 +1,42 @@
+name: Job Discovery Daily V1
+on:
+  schedule:
+    # UTC schedule: 07:00, 10:00, 13:00, 16:00, 19:00, 22:00 in Vietnam (UTC+7)
+    - cron: '0 0 * * *'
+    - cron: '0 3 * * *'
+    - cron: '0 6 * * *'
+    - cron: '0 9 * * *'
+    - cron: '0 12 * * *'
+    - cron: '0 15 * * *'
+permissions:
+  contents: read
+concurrency:
+  group: discovery-daily-scheduler
+  cancel-in-progress: false
+jobs:
+  schedule:
+    if: github.ref == 'refs/heads/main' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Start one authorized daily slot (no retry)
+        env:
+          DISCOVERY_WORKER_KEY: ${{ secrets.DISCOVERY_WORKER_KEY }}
+          DAILY_SLOT: ${{ github.event.schedule }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$DISCOVERY_WORKER_KEY"
+          test -n "$DAILY_SLOT"
+          # Do not print sensitive headers or the response body in public runner logs.
+          status=$(curl --silent --show-error --retry 0 --max-time 110 \
+            --output "$RUNNER_TEMP/discovery-daily-response.json" --write-out '%{http_code}' \
+            --request POST 'https://portfolio-api-forn.onrender.com/api/v1/discovery-daily/start' \
+            --header "X-Discovery-Worker-Key: $DISCOVERY_WORKER_KEY" \
+            --header "X-GitHub-Run-Id: $GITHUB_RUN_ID" \
+            --header "X-GitHub-Run-Attempt: $GITHUB_RUN_ATTEMPT" \
+            --header "X-Discovery-Daily-Slot: $DAILY_SLOT")
+          echo "Daily scheduler HTTP status: $status"
+          test "$status" = 202

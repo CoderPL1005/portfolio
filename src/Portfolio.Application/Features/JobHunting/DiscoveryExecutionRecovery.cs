@@ -9,7 +9,7 @@ using Portfolio.Domain.Entities;
 namespace Portfolio.Application.Features.JobHunting;
 
 // Deliberately has no provider, semantic, GitHub or dispatch dependencies.
-public sealed class DiscoveryExecutionRecovery(IApplicationDbContext db, IDiscoveryRecoveryTransactions transactions,
+public sealed partial class DiscoveryExecutionRecovery(IApplicationDbContext db, IDiscoveryRecoveryTransactions transactions,
     IDiscoveryRecoveryReadiness readiness, ICurrentUser user, TimeProvider clock) : IDiscoveryExecutionRecovery
 {
     private static readonly JsonSerializerOptions Json = DiscoveryReviewRules.Json;

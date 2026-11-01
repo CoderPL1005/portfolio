@@ -34,7 +34,21 @@ public sealed partial class DiscoveryExecutionService(IApplicationDbContext db, 
             var prior = await db.DiscoveryExecutions.AsNoTracking().SingleOrDefaultAsync(x => x.ClientRequestId == clientRequestId, ct);
             if (prior is not null) return await ViewAsync(prior, ct);
             if (await db.DiscoveryExecutions.AnyAsync(x => x.ActiveKey != null, ct)) throw Conflict("DISCOVERY_EXECUTION_ACTIVE");
-            var configuration = await BuildConfigurationAsync(ct, confirmGeminiFreeTier && triggerSource == "ADMIN_MANUAL");
+            if (triggerSource == "DAILY_SCHEDULED")
+            {
+                if (!Settings.DailyEnabled) throw Conflict("DISCOVERY_DAILY_DISABLED");
+                var date = clock.GetUtcNow().ToUniversalTime();
+                var from = new DateTimeOffset(date.Year, date.Month, date.Day, 0, 0, 0, TimeSpan.Zero);
+                var count = await db.DiscoveryExecutions.CountAsync(x => x.TriggerSource == "DAILY_SCHEDULED" &&
+                    x.CreatedAt >= from && x.CreatedAt < from.AddDays(1), ct);
+                if (count >= 6) throw Conflict("DISCOVERY_DAILY_LIMIT_REACHED");
+            }
+            // Only the server may resolve a scheduled window from the immutable slot request ID.
+            var dailyWindow = triggerSource == "DAILY_SCHEDULED"
+                ? DiscoveryDailySlots.ForScheduledRequest(clientRequestId, clock.GetUtcNow())
+                : null;
+            var configuration = await BuildConfigurationAsync(ct,
+                confirmGeminiFreeTier && triggerSource == "ADMIN_MANUAL", dailyWindow);
             execution = new() { Id = Guid.NewGuid(), ClientRequestId = clientRequestId, CreatedByAdminId = user.AdminUserId,
                 TriggerSource = triggerSource, ConfigurationJson = configuration, CreatedAt = clock.GetUtcNow(), UpdatedAt = clock.GetUtcNow() };
             db.DiscoveryExecutions.Add(execution); Transition(execution, "DISPATCHING");
@@ -63,7 +77,7 @@ public sealed partial class DiscoveryExecutionService(IApplicationDbContext db, 
         return await ViewAsync(execution, CancellationToken.None);
     }
 
-    private async Task<string> BuildConfigurationAsync(CancellationToken ct, bool confirmGeminiFreeTier)
+    private async Task<string> BuildConfigurationAsync(CancellationToken ct, bool confirmGeminiFreeTier, DiscoveryDailySearchWindow? dailyWindow)
     {
         if(Settings.EvidencePolicy is not("STRICT" or "V2"))throw Invalid("evidencePolicy");
         var technologies = await db.Technologies.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Id)
@@ -87,6 +101,7 @@ public sealed partial class DiscoveryExecutionService(IApplicationDbContext db, 
             semanticEnabled = confirmGeminiFreeTier && Settings.SemanticEnabled && Settings.GeminiFreeTierConfirmed && semantic.IsConfigured,
             semanticModel = semantic.ModelIdentity,
             evidencePolicy = Settings.EvidencePolicy,
+            dailySearch = dailyWindow,
             preferenceVersion = preferences.Version,
             portfolioSnapshot = new { schemaVersion = 1, source = "PORTFOLIO_PUBLIC_API_EXPORT", technologies, skills,
                 experiences = experiences.Select(x => new { x.Id, x.IsPublished, technologies = experienceLinks.Where(l => l.ExperienceId == x.Id).Select(l => new { id = l.TechnologyId }) }),
