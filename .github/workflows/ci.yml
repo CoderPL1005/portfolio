@@ -19,7 +19,7 @@ jobs:
       CHAT_QUOTA_TEST_CONNECTION: Host=127.0.0.1;Port=5432;Database=portfolio_quota_tests;Username=postgres;Password=postgres
     services:
       postgres:
-        image: postgres:16
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_DB: portfolio_quota_tests
           POSTGRES_USER: postgres
@@ -47,8 +47,43 @@ jobs:
       - name: Build backend
         run: dotnet build Portfolio.sln --configuration Release --no-restore
 
+      - name: Prepare extensions in ephemeral CI PostgreSQL only
+        env:
+          PGPASSWORD: postgres
+        run: |
+          set -euo pipefail
+          psql -h 127.0.0.1 -p 5432 -U postgres -d portfolio_quota_tests -v ON_ERROR_STOP=1 -c 'CREATE EXTENSION IF NOT EXISTS vector;'
+          psql -h 127.0.0.1 -p 5432 -U postgres -d portfolio_quota_tests -v ON_ERROR_STOP=1 -c 'CREATE EXTENSION IF NOT EXISTS pgcrypto;'
+
       - name: Test backend
         run: dotnet test Portfolio.sln --configuration Release --no-build --no-restore
+
+      - name: Real PostgreSQL stale-close safety gate (must run 5 tests, no skip)
+        env:
+          DISCOVERY_RECOVERY_POSTGRES_OPT_IN: '1'
+          DISCOVERY_RECOVERY_TEST_CONNECTION: Host=127.0.0.1;Port=5432;Database=portfolio_quota_tests;Username=postgres;Password=postgres
+        run: |
+          set -euo pipefail
+          dotnet test tests/Portfolio.IntegrationTests --configuration Release --no-build --no-restore \
+            --filter 'FullyQualifiedName~DiscoveryStaleClosePostgresTests' \
+            --logger 'trx;LogFileName=stale-close-postgres.trx'
+          python3 - <<'PYCI'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          paths = list(Path('tests/Portfolio.IntegrationTests/TestResults').rglob('stale-close-postgres.trx'))
+          if len(paths) != 1:
+              raise SystemExit(f'STALE_CLOSE_TRX_NOT_FOUND_OR_AMBIGUOUS: {len(paths)}')
+          root = ET.parse(paths[0]).getroot()
+          counters = root.find('.//{*}Counters')
+          if counters is None:
+              raise SystemExit('STALE_CLOSE_TEST_COUNTERS_MISSING')
+          expected = {'total': 5, 'passed': 5, 'failed': 0, 'notExecuted': 0}
+          actual = {name: int(counters.attrib.get(name, -1)) for name in expected}
+          print('PostgreSQL stale-close evidence:', actual)
+          if actual != expected:
+              raise SystemExit(f'STALE_CLOSE_POSTGRES_NOT_VERIFIED: {actual}')
+          print('STALE_CLOSE_POSTGRES_5_OF_5_PASS_NO_SKIP')
+          PYCI
 
   frontend:
     name: frontend
