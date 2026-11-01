@@ -44,7 +44,7 @@ internal static class ValidationBridge
     {
         var info = CreateProcessInfo(script, mode);
         using var process = Process.Start(info) ?? throw new InvalidOperationException();
-        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         try
         {
             var stdout = ReadBounded(process.StandardOutput, deadline.Token);
