@@ -10,24 +10,25 @@ namespace Portfolio.Application.Features.JobHunting;
 /// currently performs NO discovery and consumes NO provider credits.</summary>
 public static class DiscoveryDailySlots
 {
-    private static readonly IReadOnlyDictionary<string, int> UtcHours = new Dictionary<string, int>(StringComparer.Ordinal)
-    {
-        ["0 0 * * *"] = 0, ["0 3 * * *"] = 3, ["0 6 * * *"] = 6,
-        ["0 9 * * *"] = 9, ["0 12 * * *"] = 12, ["0 15 * * *"] = 15,
-        // Safeguard: a backup trigger uses EXACTLY the primary slot identity.
-        ["30 0 * * *"] = 0, ["30 3 * * *"] = 3, ["30 6 * * *"] = 6,
-        ["30 9 * * *"] = 9, ["30 12 * * *"] = 12
-    };
+    private static readonly IReadOnlyDictionary<string, (int Hour, int Minute)> Schedules =
+        new Dictionary<string, (int Hour, int Minute)>(StringComparer.Ordinal)
+        {
+            ["11 0 * * *"] = (0, 11), ["11 3 * * *"] = (3, 11), ["11 6 * * *"] = (6, 11),
+            ["11 9 * * *"] = (9, 11), ["11 12 * * *"] = (12, 11), ["11 15 * * *"] = (15, 11),
+            // Safeguard: a backup trigger uses EXACTLY the primary slot identity.
+            ["41 0 * * *"] = (0, 41), ["41 3 * * *"] = (3, 41), ["41 6 * * *"] = (6, 41),
+            ["41 9 * * *"] = (9, 41), ["41 12 * * *"] = (12, 41)
+        };
 
-    public static bool IsKnownExpression(string? expression) => expression is not null && UtcHours.ContainsKey(expression);
+    public static bool IsKnownExpression(string? expression) => expression is not null && Schedules.ContainsKey(expression);
 
     public static bool TryResolve(string? expression, DateTimeOffset now, out DateTimeOffset plannedUtc)
     {
         plannedUtc = default;
-        if (expression is null || !UtcHours.TryGetValue(expression, out var hour)) return false;
+        if (expression is null || !Schedules.TryGetValue(expression, out var schedule)) return false;
         var utc = now.ToUniversalTime();
-        plannedUtc = new DateTimeOffset(utc.Year, utc.Month, utc.Day, hour, 0, 0, TimeSpan.Zero);
-        return utc >= plannedUtc && utc <= plannedUtc.AddMinutes(90);
+        plannedUtc = new DateTimeOffset(utc.Year, utc.Month, utc.Day, schedule.Hour, 0, 0, TimeSpan.Zero);
+        return utc >= plannedUtc.AddMinutes(schedule.Minute) && utc <= plannedUtc.AddMinutes(90);
     }
 
     public static Guid RequestId(DateTimeOffset plannedUtc)
@@ -41,7 +42,7 @@ public static class DiscoveryDailySlots
     public static int SlotNumber(DateTimeOffset plannedUtc)
     {
         if (plannedUtc.Offset != TimeSpan.Zero || plannedUtc.Minute != 0 || plannedUtc.Second != 0 ||
-            plannedUtc.Millisecond != 0 || !UtcHours.Values.Contains(plannedUtc.Hour))
+            plannedUtc.Millisecond != 0 || plannedUtc.Hour is < 0 or > 15 || plannedUtc.Hour % 3 != 0)
             throw new ArgumentException("Unrecognized UTC daily slot.", nameof(plannedUtc));
         return plannedUtc.Hour / 3 + 1;
     }
@@ -63,7 +64,7 @@ public static class DiscoveryDailySlots
 
     public static DiscoveryDailySearchWindow ForScheduledRequest(Guid requestId, DateTimeOffset now)
     {
-        foreach (var expression in UtcHours.Keys)
+        foreach (var expression in Schedules.Keys)
         {
             if (TryResolve(expression, now, out var planned) && RequestId(planned) == requestId)
                 return Window(planned); // rejects reserved slot 6
@@ -76,6 +77,8 @@ public sealed record DiscoveryDailySearchWindow(int Slot, string StartTime, stri
 
 public sealed partial class DiscoveryExecutionService
 {
+    private static readonly SemaphoreSlim DailyContention = new(1, 1);
+
     public async Task<object> StartScheduledAsync(string scheduleExpression, CancellationToken ct = default)
     {
         if (!Settings.DailyEnabled) return new { state = "DISABLED" };
@@ -96,22 +99,27 @@ public sealed partial class DiscoveryExecutionService
                 threshold = 5, observedCount = (int?)null, providerRequests = 0 };
 
         var key = DiscoveryDailySlots.RequestId(planned);
-        var previous = await db.DiscoveryExecutions.AsNoTracking()
-            .Where(x => x.ClientRequestId == key).Select(x => new { x.Id, x.State }).FirstOrDefaultAsync(ct);
-        if (previous is not null) return new { state = "ALREADY_CREATED", executionId = (Guid?)previous.Id, plannedUtc = planned };
+        await DailyContention.WaitAsync(ct);
+        try
+        {
+            var previous = await db.DiscoveryExecutions.AsNoTracking()
+                .Where(x => x.ClientRequestId == key).Select(x => new { x.Id, x.State }).FirstOrDefaultAsync(ct);
+            if (previous is not null) return new { state = "ALREADY_CREATED", executionId = (Guid?)previous.Id, plannedUtc = planned };
 
-        if (await db.DiscoveryExecutions.AnyAsync(x => x.ActiveKey != null, ct))
-            return new { state = "SKIPPED_ACTIVE", executionId = (Guid?)null, plannedUtc = planned };
+            if (await db.DiscoveryExecutions.AnyAsync(x => x.ActiveKey != null, ct))
+                return new { state = "SKIPPED_ACTIVE", executionId = (Guid?)null, plannedUtc = planned };
 
-        var day = new DateTimeOffset(planned.Year, planned.Month, planned.Day, 0, 0, 0, TimeSpan.Zero);
-        if (await db.DiscoveryExecutions.CountAsync(x => x.TriggerSource == "DAILY_SCHEDULED" &&
-            x.CreatedAt >= day && x.CreatedAt < day.AddDays(1), ct) >= 6)
-            return new { state = "SKIPPED_DAILY_LIMIT", executionId = (Guid?)null, plannedUtc = planned };
+            var day = new DateTimeOffset(planned.Year, planned.Month, planned.Day, 0, 0, 0, TimeSpan.Zero);
+            if (await db.DiscoveryExecutions.CountAsync(x => x.TriggerSource == "DAILY_SCHEDULED" &&
+                x.CreatedAt >= day && x.CreatedAt < day.AddDays(1), ct) >= 6)
+                return new { state = "SKIPPED_DAILY_LIMIT", executionId = (Guid?)null, plannedUtc = planned };
 
-        // BuildConfigurationAsync freezes the authorized day window. Scheduled Gemini is OFF.
-        await StartAsync(key, "DAILY_SCHEDULED", ct, confirmGeminiFreeTier: false);
-        var created = await db.DiscoveryExecutions.AsNoTracking().Where(x => x.ClientRequestId == key)
-            .Select(x => new { x.Id, x.State }).SingleAsync(ct);
-        return new { state = created.State, executionId = (Guid?)created.Id, plannedUtc = planned };
+            // BuildConfigurationAsync freezes the authorized day window. Scheduled Gemini is OFF.
+            await StartAsync(key, "DAILY_SCHEDULED", ct, confirmGeminiFreeTier: false);
+            var created = await db.DiscoveryExecutions.AsNoTracking().Where(x => x.ClientRequestId == key)
+                .Select(x => new { x.Id, x.State }).SingleAsync(ct);
+            return new { state = created.State, executionId = (Guid?)created.Id, plannedUtc = planned };
+        }
+        finally { DailyContention.Release(); }
     }
 }
