@@ -6,8 +6,9 @@ import { DiscoveryReviewPageComponent } from './discovery-review-page.component'
 import { DiscoveryReviewDetail, DiscoveryReviewList, HumanReview, DiscoveryQualityReport, ReviewHistory, DimensionQuality } from './discovery-review.models';
 import { JobHuntingService } from './job-hunting.service';
 
+const todayBounds = { collectedFrom: '2026-11-01T17:00:00.000Z', collectedBefore: '2026-11-02T17:00:00.000Z' };
 const detail = (): DiscoveryReviewDetail => ({id:'synthetic-1',runId:'synthetic-run',query:'Backend Hanoi',pageNumber:1,
-  ingestedAt:'2026-10-26T03:00:00Z',duplicateCount:2,item:{itemIndex:0,providerPostId:'123',sourceUrl:'https://www.facebook.com/fixture/posts/pfbidExample',
+  ingestedAt:'2026-11-02T12:00:00Z',duplicateCount:2,item:{itemIndex:0,providerPostId:'123',sourceUrl:'https://www.facebook.com/fixture/posts/pfbidExample',
     rawContent:'<script>alert(1)</script><img src=x onerror=alert(2)> Hiring Senior Java',publishedAt:null,
     contentValidity:{status:'VALID_RECRUITMENT',reasonCodes:['EMPLOYER_HIRING'],explanation:'Có nội dung tuyển dụng.',evidenceSnippets:['Hiring Senior Java']},
     targetMatching:{status:'NOT_MATCHED',reasonCodes:['SENIORITY_MISMATCH'],explanation:'Không phù hợp mục tiêu.',evidenceSnippets:[]},
@@ -15,18 +16,20 @@ const detail = (): DiscoveryReviewDetail => ({id:'synthetic-1',runId:'synthetic-
     sourceWarnings:['POST_ID_URL_MISMATCH'],classifierVersion:'content-first-v1',evaluatedAt:'2026-10-26T03:00:00Z'}});
 const listing = ():DiscoveryReviewList=>({results:{items:[detail()],page:1,pageSize:20,total:1,totalPages:1},
   counts:{total:1,valid:1,invalid:0,needsReview:0,targetMatch:0,identityWarnings:1,duplicateItems:1}});
-function mount(id?:string,runId?:string) {
+function mount(id?:string,runId?:string,routeParams?:Record<string,string>) {
   const api={discovery:vi.fn(()=>of(listing())),discoveryItem:vi.fn(()=>of(detail())),importDiscovery:vi.fn(()=>of({inserted:1,unchanged:0})),
     saveDiscoveryReview:vi.fn(()=>of({status:'CONFIRMED',version:1,contentStatus:'VALID_RECRUITMENT',targetStatus:'NOT_MATCHED',notes:'reason',reviewedAt:'2026-10-26T03:00:00Z',reviewedByAdminId:'synthetic-admin'} as HumanReview)),
     discoveryHistory:vi.fn(()=>of({items:[],page:1,pageSize:20,total:0,totalPages:0,current:{status:'UNREVIEWED',version:0,contentStatus:null,targetStatus:null,notes:null,reviewedAt:null,reviewedByAdminId:null}} as ReviewHistory)),
     discoveryMetrics:vi.fn(()=>of({} as DiscoveryQualityReport))};
-  const map=convertToParamMap(id?{id}:{});
+  const map=convertToParamMap(routeParams ?? (id?{id}:{}));
   const query=new BehaviorSubject(convertToParamMap(runId?{runId}:{}));
   TestBed.configureTestingModule({imports:[DiscoveryReviewPageComponent],providers:[provideRouter([]),
     {provide:JobHuntingService,useValue:api},{provide:ActivatedRoute,useValue:{paramMap:of(map),queryParamMap:query,snapshot:{paramMap:map,queryParamMap:query.value}}}]});
   const fixture=TestBed.createComponent(DiscoveryReviewPageComponent);fixture.detectChanges();return {fixture,api,query,c:fixture.componentInstance};
 }
 describe('Discovery Review',()=>{
+  beforeEach(()=>{vi.useFakeTimers({shouldAdvanceTime:true});vi.setSystemTime(new Date('2026-11-01T18:30:00.000Z'));});
+  afterEach(()=>{vi.useRealTimers();TestBed.resetTestingModule();});
   it('keeps all detail sections and submits confirmation from the rendered review controls',async()=>{
     const {fixture,api}=mount('synthetic-1');const el:HTMLElement=fixture.nativeElement;
     for(const heading of ['Thông tin tuyển dụng','Nội dung bài đăng gốc','Đánh giá AI / bộ phân loại','Human Review','Thông tin kỹ thuật'])expect(el.textContent).toContain(heading);
@@ -52,13 +55,15 @@ describe('Discovery Review',()=>{
     c.loadMetrics();expect(api.discoveryMetrics).toHaveBeenLastCalledWith('fresh-session-b');
     newMetrics.next({notice:'NEW'} as DiscoveryQualityReport);expect(c.metrics()?.notice).toBe('NEW');
     api.discoveryMetrics.mockReturnValue(of({} as DiscoveryQualityReport));query.next(convertToParamMap({}));
-    expect(c.runId).toBe('');expect(api.discovery).toHaveBeenLastCalledWith({page:1,pageSize:20});
+    expect(c.runId).toBe('');expect(c.collectedDate).toBe('2026-11-02');
+    expect(api.discovery).toHaveBeenLastCalledWith({page:1,pageSize:20,...todayBounds});
     expect(api.discoveryMetrics).toHaveBeenCalledTimes(2);expect(c.metrics()).toBeNull();
     c.loadMetrics();expect(api.discoveryMetrics).toHaveBeenLastCalledWith(undefined);
   });
   it('opens the fresh session using server-side run filter without clearing historical observations',()=>{
     const {api,c}=mount(undefined,'fresh-offline-demo-01');
     expect(c.runId).toBe('fresh-offline-demo-01');
+    expect(c.collectedDate).toBe('');
     expect(api.discovery).toHaveBeenCalledExactlyOnceWith({page:1,pageSize:20,runId:'fresh-offline-demo-01'});
     expect(api.importDiscovery).not.toHaveBeenCalled();
   });
@@ -70,7 +75,6 @@ describe('Discovery Review',()=>{
     expect(fixture.nativeElement.textContent).toContain('UNVERIFIED_PROVIDER_TIMESTAMP');
     expect(fixture.nativeElement.textContent).not.toContain('verified_recent');
   });
-  afterEach(()=>TestBed.resetTestingModule());
   it('does not auto-review and sends original confirm with authoritative version and mandatory reason',()=>{
     const {c,api}=mount('synthetic-1');expect(api.saveDiscoveryReview).not.toHaveBeenCalled();
     c.saveReview('CONFIRMED');expect(api.saveDiscoveryReview).not.toHaveBeenCalled();
@@ -102,7 +106,7 @@ describe('Discovery Review',()=>{
     c.reviewState='CORRECTED';expect(c.history()?.total).toBe(1);
   });
   it('forwards review-state to list API alongside existing filters',()=>{
-    const {c,api}=mount();c.reviewState='UNREVIEWED';c.filter();expect(api.discovery).toHaveBeenLastCalledWith({page:1,pageSize:20,reviewState:'UNREVIEWED'});
+    const {c,api}=mount();c.reviewState='UNREVIEWED';c.filter();expect(api.discovery).toHaveBeenLastCalledWith({page:1,pageSize:20,reviewState:'UNREVIEWED',...todayBounds});
   });
   it('renders server metrics with cohorts/support and undefined rates, never computes quality in UI',()=>{
     const {c,api,fixture}=mount();const dimension:DimensionQuality={eligibleSamples:0,abstentions:2,unreviewed:3,uncertain:1,humanConflicts:1,predictionConflicts:0,matrix:[],classes:[{label:'TARGET_MATCH',tp:0,fp:0,fn:0,support:0,precisionDenominator:0,recallDenominator:0,precision:null,recall:null}]};
@@ -125,7 +129,7 @@ describe('Discovery Review',()=>{
   });
   it('forwards filters and resets pagination, without implementing classification rules in UI',()=>{
     const {c,api}=mount();c.page=3;c.contentStatus='NEEDS_REVIEW';c.targetStatus='INSUFFICIENT_DATA';c.identityOnly=true;c.duplicatesOnly=true;c.runId='run-2';c.filter();
-    expect(api.discovery).toHaveBeenLastCalledWith({page:1,pageSize:20,contentStatus:'NEEDS_REVIEW',targetStatus:'INSUFFICIENT_DATA',runId:'run-2',identityWarning:true,duplicatesOnly:true});
+    expect(api.discovery).toHaveBeenLastCalledWith({page:1,pageSize:20,contentStatus:'NEEDS_REVIEW',targetStatus:'INSUFFICIENT_DATA',runId:'run-2',identityWarning:true,duplicatesOnly:true,...todayBounds});
   });
   it('renders raw content as inert text and source only as an unverified safe link',()=>{
     const {fixture,c}=mount('synthetic-1');expect(fixture.nativeElement.querySelector('[data-testid=raw-content]').textContent).toContain('<script>');
@@ -141,7 +145,7 @@ describe('Discovery Review',()=>{
     expect('importFile' in c).toBe(false);expect('cleanupOpen' in c).toBe(false);expect(api.importDiscovery).not.toHaveBeenCalled();
   });
   it('shows a deliberate empty state without zero summaries, pagination or unsupported discovery action',()=>{
-    const {fixture,c}=mount();c.list.set({...listing(),results:{items:[],page:1,pageSize:20,total:0,totalPages:0},counts:{...listing().counts,total:0}});fixture.detectChanges();
+    const {fixture,c}=mount();c.collectedDate='';c.list.set({...listing(),results:{items:[],page:1,pageSize:20,total:0,totalPages:0},counts:{...listing().counts,total:0}});fixture.detectChanges();
     const el:HTMLElement=fixture.nativeElement;expect(el.querySelector('.empty-state')?.textContent).toContain('Discovery chưa có kết quả');
     expect(el.querySelector('.summary')).toBeNull();expect(el.querySelector('[aria-label="Phân trang"]')).toBeNull();
     expect(el.querySelector('.job-card')).toBeNull();expect(el.textContent).not.toContain('Chạy Discovery');expect(el.textContent).not.toContain('1 / 0');
@@ -152,18 +156,20 @@ describe('Discovery Review',()=>{
   it('routes compact tabs to existing server filters and resets pagination',()=>{
     const {fixture,c,api}=mount();const tabs=fixture.nativeElement.querySelectorAll('.filter-tabs button') as NodeListOf<HTMLButtonElement>;
     const expected=[{}, {targetStatus:'TARGET_MATCH'}, {contentStatus:'NEEDS_REVIEW'}, {reviewState:'REVIEWED'}];
-    tabs.forEach((button,i)=>{c.page=4;button.click();fixture.detectChanges();expect(api.discovery).toHaveBeenLastCalledWith({page:1,pageSize:20,...expected[i]});expect(button.getAttribute('aria-pressed')).toBe('true');});
-    c.selectTab('all');expect(api.discovery).toHaveBeenLastCalledWith({page:1,pageSize:20});
+    tabs.forEach((button,i)=>{c.page=4;button.click();fixture.detectChanges();expect(api.discovery).toHaveBeenLastCalledWith({page:1,pageSize:20,...todayBounds,...expected[i]});expect(button.getAttribute('aria-pressed')).toBe('true');});
+    c.selectTab('all');expect(api.discovery).toHaveBeenLastCalledWith({page:1,pageSize:20,...todayBounds});
     expect(fixture.nativeElement.querySelector('.advanced-filters').open).toBe(false);
   });
-  it('renders filtered empty state and clears all filters through existing list API',()=>{
+  it('renders filtered empty state and clears all filters back to default Vietnam today mode',()=>{
     const {fixture,c,api}=mount(undefined,'session');c.reviewState='CORRECTED';c.identityOnly=true;c.collectedDate='2026-10-26';
     api.discovery.mockReturnValue(of({...listing(),results:{items:[],page:1,pageSize:20,total:0,totalPages:0}}));c.filter();fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('.empty-state').textContent).toContain('Không có cơ hội khớp bộ lọc');
     expect(fixture.nativeElement.querySelector('.filter-tabs')).not.toBeNull();
     expect(fixture.nativeElement.querySelector('.advanced-filters')).not.toBeNull();
     expect(fixture.nativeElement.querySelector('.quality-section')).toBeNull();
-    fixture.nativeElement.querySelector('.empty-state button').click();expect(api.discovery).toHaveBeenLastCalledWith({page:1,pageSize:20});
+    fixture.nativeElement.querySelector('.empty-state button').click();
+    expect(c.collectedDate).toBe('2026-11-02');
+    expect(api.discovery).toHaveBeenLastCalledWith({page:1,pageSize:20,...todayBounds});
     expect(c.hasFilters()).toBe(false);
   });
   it('uses server totals rather than the current page for summary, with functional pagination',()=>{
@@ -172,7 +178,7 @@ describe('Discovery Review',()=>{
     expect(values).toEqual(['41','12','7']);
     const nav=fixture.nativeElement.querySelector('[aria-label="Phân trang"]');expect(nav.querySelector('button').disabled).toBe(true);
     api.discovery.mockReturnValue(of({...data,results:{...data.results,page:2}}));nav.querySelectorAll('button')[1].click();fixture.detectChanges();
-    expect(api.discovery).toHaveBeenLastCalledWith({page:2,pageSize:20});expect(fixture.nativeElement.querySelector('[aria-label="Phân trang"]').textContent).toContain('Trang 2 / 3');
+    expect(api.discovery).toHaveBeenLastCalledWith({page:2,pageSize:20,...todayBounds});expect(fixture.nativeElement.querySelector('[aria-label="Phân trang"]').textContent).toContain('Trang 2 / 3');
   });
   it('shows only source-backed title/company/location/technologies and never invents seniority',()=>{
     const {fixture,c}=mount();const data=listing();data.results.items[0].item.extracted={role:'Backend Developer',company:'Example',location:'Hà Nội',technologies:['C#','ASP.NET Core']};c.list.set(data);fixture.detectChanges();
@@ -215,11 +221,55 @@ describe('Discovery Review',()=>{
     expect(c.detail()?.humanReview?.version).toBe(1);expect(api.discoveryItem).toHaveBeenCalledTimes(1);
     expect(fixture.nativeElement.textContent).toContain('Đã xác nhận');
   });
-  it('sends an explicit local calendar-day window to the server and shows all review states in list',()=>{
-    const {c,api,fixture}=mount();c.collectedDate='2026-10-26';c.filter();
-    const params=(api.discovery.mock.calls as unknown as [Record<string,string>][]).at(-1)![0];
-    expect(new Date(params['collectedFrom']).getDate()).toBe(26);
-    expect(new Date(params['collectedBefore']).getDate()).toBe(27);
+  it('defaults to Vietnam today filter on initial load even when UTC is still previous calendar day',()=>{
+    const {c,api,fixture}=mount();
+    expect(c.collectedDate).toBe('2026-11-02');
+    expect(api.discovery).toHaveBeenCalledExactlyOnceWith({page:1,pageSize:20,collectedFrom:'2026-11-01T17:00:00.000Z',collectedBefore:'2026-11-02T17:00:00.000Z'});
+    const scope=fixture.nativeElement.querySelector('.date-scope') as HTMLElement;
+    expect(scope?.textContent).toContain('Hôm nay · 02/11/2026');
+    expect(scope?.textContent).toContain('Tất cả ngày');
+  });
+  it('sends an explicit Vietnam calendar-day window when selecting any date and removes bounds when clicking Tất cả ngày',()=>{
+    const {c,api,fixture}=mount();c.collectedDate='2026-10-26';c.filter();fixture.detectChanges();
+    expect(api.discovery).toHaveBeenLastCalledWith({page:1,pageSize:20,collectedFrom:'2026-10-25T17:00:00.000Z',collectedBefore:'2026-10-26T17:00:00.000Z'});
+    expect(fixture.nativeElement.querySelector('.date-scope')?.textContent).toContain('Ngày thu thập · 26/10/2026');
     expect(fixture.nativeElement.querySelector('.job-card')?.textContent).toContain('Chưa đánh giá');
+    const allDatesBtn=Array.from((fixture.nativeElement as HTMLElement).querySelectorAll<HTMLButtonElement>('.date-scope button')).find(b=>b.textContent?.includes('Tất cả ngày'))!;
+    allDatesBtn.click();fixture.detectChanges();
+    expect(c.collectedDate).toBe('');
+    expect(api.discovery).toHaveBeenLastCalledWith({page:1,pageSize:20});
+    expect(fixture.nativeElement.querySelector('.date-scope')?.textContent).toContain('Tất cả ngày');
+  });
+  it('shows today-specific empty state and Xem tất cả ngày action when today has no collected posts',()=>{
+    const {fixture,c,api}=mount();
+    c.list.set({...listing(),results:{items:[],page:1,pageSize:20,total:0,totalPages:0},counts:{...listing().counts,total:0}});
+    fixture.detectChanges();
+    const empty=fixture.nativeElement.querySelector('.empty-state') as HTMLElement;
+    expect(empty.textContent).toContain('Hôm nay chưa có bài viết được thu thập');
+    const viewAllBtn=empty.querySelector<HTMLButtonElement>('button')!;
+    expect(viewAllBtn.textContent).toContain('Xem tất cả ngày');
+    viewAllBtn.click();fixture.detectChanges();
+    expect(c.collectedDate).toBe('');
+    expect(api.discovery).toHaveBeenLastCalledWith({page:1,pageSize:20});
+  });
+  it('does not send collectedFrom or collectedBefore when opening candidate or observation detail routes',()=>{
+    const candidateDetail=mount('synthetic-1');
+    expect(candidateDetail.api.discoveryItem).toHaveBeenCalledExactlyOnceWith('synthetic-1');
+    expect(candidateDetail.api.discovery).not.toHaveBeenCalled();
+    TestBed.resetTestingModule();
+    const executionId='d20d3b13-ae44-492f-b4aa-590af73dd78a';
+    const obsDetail=mount(undefined,undefined,{executionId,itemIndex:'0'});
+    expect(obsDetail.api.discovery).toHaveBeenCalledExactlyOnceWith({page:1,pageSize:1,executionId,itemIndex:0});
+  });
+  it('displays collection timestamp in Vietnam time on job cards distinct from Facebook publication date',()=>{
+    const {fixture,c}=mount();
+    const card=fixture.nativeElement.querySelector('.job-card') as HTMLElement;
+    expect(card.textContent).toContain('Thu thập: 19:00 · 02/11/2026');
+    expect(card.textContent).toContain('Chưa xác định ngày đăng');
+    const withPub=listing();
+    withPub.results.items[0].item.publishedAt='2026-10-30T03:00:00Z';
+    c.list.set(withPub);fixture.detectChanges();
+    expect(card.textContent).toContain('Thu thập: 19:00 · 02/11/2026');
+    expect(card.textContent).toContain('Ngày đăng:');
   });
 });

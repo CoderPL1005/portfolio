@@ -61,7 +61,7 @@ describe('Unified persisted Discovery cards',()=>{
     const fresh={results:{items:[observation(0),{...observation(1),executionId:'22222222-2222-4222-8222-222222222222'}],page:1,pageSize:20,total:2,totalPages:1},
       counts:{total:2,valid:2,invalid:0,needsReview:0,targetMatch:2,identityWarnings:2,duplicateItems:0,reviewed:0,unknown:0}};
     api.discovery.mockReturnValue(of(fresh as unknown as DiscoveryReviewList));c.refreshObservations();fixture.detectChanges();
-    expect(api.discovery).toHaveBeenLastCalledWith({page:1,pageSize:20,targetStatus:'TARGET_MATCH'});
+    expect(api.discovery).toHaveBeenLastCalledWith(expect.objectContaining({page:1,pageSize:20,targetStatus:'TARGET_MATCH',collectedFrom:expect.any(String),collectedBefore:expect.any(String)}));
     expect(fixture.nativeElement.querySelectorAll('.job-card').length).toBe(2);
     expect(fixture.nativeElement.querySelectorAll('.summary strong')[0].textContent).toBe('2');
   });

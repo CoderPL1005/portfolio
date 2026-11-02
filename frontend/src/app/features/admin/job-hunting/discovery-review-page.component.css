@@ -11,6 +11,8 @@
 .summary small { font-size: .7rem; color: var(--color-text-dim); }
 .summary strong { font: 600 1.9rem var(--font-heading); }
 .summary span { color: var(--color-text-muted); font-size: .85rem; }
+.date-scope { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .75rem; padding: .75rem 1rem; background: var(--color-surface); border-radius: var(--radius-lg); }
+.date-scope-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
 .filter-tabs { margin: 0; padding: .3rem; background: var(--color-surface); border-radius: var(--radius-lg); width: fit-content; max-width: 100%; }
 .filter-tabs .admin-button { border-color: transparent; background: transparent; color: var(--color-text-muted); }
 .filter-tabs .admin-button.primary { background: var(--color-surface-highest); color: var(--color-primary); }
@@ -33,7 +35,8 @@ summary { cursor: pointer; font-weight: 600; padding: .25rem 0; }
 .company { font-weight: 600; }
 .job-tags { margin: .85rem 0 1.25rem; }
 .job-tags span { background: var(--color-surface-low); border-radius: var(--radius-sm); padding: .25rem .5rem; color: var(--color-text-muted); font-size: .75rem; }
-.job-card footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .7rem; margin-top: auto; padding-top: 1rem; border-top: 1px solid var(--color-border); font-size: .8rem; color: var(--color-text-dim); }
+.job-card footer { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: .7rem; margin-top: auto; padding-top: 1rem; border-top: 1px solid var(--color-border); font-size: .8rem; color: var(--color-text-dim); }
+.card-timestamps { display: flex; flex-direction: column; gap: .2rem; }
 .job-card footer a, .source-link, .back-link { color: var(--color-primary); text-underline-offset: .25rem; }
 .pagination { display: flex; justify-content: center; align-items: center; gap: 1rem; font-size: .85rem; }
 .empty-state { padding: clamp(2rem, 5vw, 3.5rem) 1.5rem; text-align: center; background: var(--color-surface); border-radius: var(--radius-xl); }

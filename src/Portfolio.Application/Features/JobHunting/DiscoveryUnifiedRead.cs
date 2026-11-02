@@ -98,8 +98,9 @@ public sealed class GetDiscoveryOpportunitiesHandler(IApplicationDbContext db):I
                 continue; // Display one observation; retain every real review/ID in storage and read provenance.
             }
             if(observation is not null)used.Add((observation.ExecutionId,observation.ItemIndex));
+            var collectedAt=observation?.CollectedAt??c.IngestedAt;
             detail=detail with {Observation=observation};
-            rows.Add(new(detail,c.RunId,c.IngestedAt,detail.Item?.ContentValidity.Status,detail.Item?.TargetMatching.Status,
+            rows.Add(new(detail,c.RunId,collectedAt,detail.Item?.ContentValidity.Status,detail.Item?.TargetMatching.Status,
                 Group(detail.Item?.RawContent??detail.Recovery?.RawContent),c.IdentityWarning||observation?.SourceWarnings.Contains("POST_ID_URL_MISMATCH")==true,detail.HumanReview,observation));
         }
         foreach(var o in projected.Where(o=>!used.Contains((o.ExecutionId,o.ItemIndex))))rows.Add(new(o,o.ExecutionId.ToString(),o.CollectedAt,
@@ -122,9 +123,13 @@ public sealed class GetDiscoveryOpportunitiesHandler(IApplicationDbContext db):I
         var counts=new DiscoveryOpportunityCounts(selected.Length,selected.Count(x=>x.Content=="VALID_RECRUITMENT"),selected.Count(x=>x.Content=="INVALID_RECRUITMENT"),
             selected.Count(x=>x.Content is null or "NEEDS_REVIEW"),selected.Count(x=>x.Target=="TARGET_MATCH"),
             selected.Count(x=>x.Identity),selected.Count(x=>x.Group is not null&&groups[x.Group]>1),selected.Count(Reviewed),selected.Count(x=>x.Content is null));
-        var page=selected.OrderByDescending(x=>x.Target=="TARGET_MATCH"&&!Reviewed(x)).ThenByDescending(x=>x.At).ThenBy(x=>x.RunId,StringComparer.Ordinal)
-            .ThenBy(x=>(x.Value as DiscoveryReviewDetail)?.PageNumber??0)
+        static string SessionKey(Row x)=>x.Observation?.ExecutionId.ToString()??x.RunId;
+        var sessionAt=selected.GroupBy(SessionKey,StringComparer.Ordinal).ToDictionary(g=>g.Key,g=>g.Max(r=>r.At),StringComparer.Ordinal);
+        var page=selected.OrderByDescending(x=>sessionAt[SessionKey(x)]).ThenBy(SessionKey,StringComparer.Ordinal)
+            .ThenByDescending(x=>x.At)
+            .ThenBy(x=>x.Observation is not null?1:(x.Value as DiscoveryReviewDetail)?.PageNumber??1)
             .ThenBy(x=>x.Observation?.ItemIndex??(x.Value as DiscoveryReviewDetail)?.Item?.ItemIndex??(x.Value as DiscoveryReviewDetail)?.Recovery?.ItemIndex??0)
+            .ThenByDescending(x=>x.Target=="TARGET_MATCH"&&!Reviewed(x))
             .ThenBy(x=>(x.Value as DiscoveryReviewDetail)?.Id??x.Observation!.ExecutionId)
             .Skip((f.Page-1)*f.PageSize).Take(f.PageSize).Select(x=>x.Value is DiscoveryReviewDetail c?c with {DuplicateCount=x.Group is null?0:groups[x.Group]}:x.Value).ToArray();
         return new(new(page,f.Page,f.PageSize,selected.Length),counts);

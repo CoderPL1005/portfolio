@@ -150,6 +150,15 @@ import { DiscoveryExecutionComponent } from './discovery-execution.component';
             <div><span>Phù hợp</span><strong>{{data.counts.targetMatch}}</strong></div>
             <div><span>Cần đánh giá</span><strong>{{data.counts.needsReview}}</strong><small>Nội dung cần xem xét</small></div>
           </section><p class="scope-note">Số liệu theo bộ lọc hiện tại, sau khi gộp cùng observation. Có nội dung tuyển dụng: {{data.counts.valid}} · Đã đánh giá: {{data.counts.reviewed ?? 'Chưa có thống kê'}} · Chưa phân loại: {{data.counts.unknown ?? 'Chưa có thống kê'}}. Mỗi bài có thể chứa nhiều vị trí.</p>
+        }
+        @if(!loading() && !error() && (data.results.total > 0 || hasFilters() || isTodaySelected())){
+          <section class="date-scope" aria-label="Phạm vi ngày thu thập">
+            <span class="status-badge" [class.match]="isTodaySelected()">{{dateScopeLabel()}}</span>
+            <div class="date-scope-actions">
+              @if(!isTodaySelected()){<button type="button" class="admin-button" (click)="selectToday()">Hôm nay · {{formatVietnamDateLabel(todayVietnamDate())}}</button>}
+              @if(collectedDate){<button type="button" class="admin-button" (click)="showAllDates()">Tất cả ngày</button>}
+            </div>
+          </section>
         }}
         @if(listControlsVisible()){
         <nav class="admin-tabs filter-tabs" aria-label="Lọc cơ hội">
@@ -161,7 +170,7 @@ import { DiscoveryExecutionComponent } from './discovery-execution.component';
           <label>Nội dung <select [(ngModel)]="contentStatus" (ngModelChange)="filter()"><option value="">Tất cả</option>@for(s of contentStatuses;track s){<option [value]="s">{{label(s)}}</option>}</select></label>
           <label>Mức độ phù hợp <select [(ngModel)]="targetStatus" (ngModelChange)="filter()"><option value="">Tất cả</option>@for(s of targetStatuses;track s){<option [value]="s">{{label(s)}}</option>}</select></label>
           <label>Phiên thu thập <input [(ngModel)]="runId" maxlength="100" /></label>
-          <label>Ngày đồng bộ (giờ local) <input type="date" [(ngModel)]="collectedDate" (ngModelChange)="filter()" /></label>
+          <label>Ngày thu thập (giờ Việt Nam) <input type="date" [(ngModel)]="collectedDate" (ngModelChange)="filter()" /></label>
           <div class="checks"><label><input type="checkbox" [(ngModel)]="identityOnly" (ngModelChange)="filter()" /> Có cảnh báo nguồn</label>
           <label><input type="checkbox" [(ngModel)]="duplicatesOnly" (ngModelChange)="filter()" /> Có nội dung trùng</label></div>
           <div class="admin-actions"><button type="button" (click)="filter()" class="admin-button">Áp dụng</button><button type="button" (click)="clearFilters()" class="admin-button">Xóa bộ lọc</button></div>
@@ -181,7 +190,7 @@ import { DiscoveryExecutionComponent } from './discovery-execution.component';
                   @if(observationOrigins(d);as origins){<p class="muted">Nguồn bằng chứng: {{origins}} · Theo bài đăng, chưa xác minh bên ngoài</p>}
                   @if(observationEnriched(d)){<p class="muted">Đã bổ sung có bằng chứng</p>}
                   <p class="muted">Chưa rõ: {{observationMissing(d).slice(0,3).join(' · ') || 'Không ghi nhận'}}</p>
-                  <footer><span>{{observationPublishedAt(d) ? ('Ngày đăng: ' + (observationPublishedAt(d) | date:'shortDate')) : 'Chưa xác định ngày đăng'}}</span><a [routerLink]="observationLink(d)">Xem chi tiết →</a></footer>
+                  <footer><div class="card-timestamps"><span>{{collectedAtLabel(d)}}</span><span>{{observationPublishedAt(d) ? ('Ngày đăng: ' + (observationPublishedAt(d) | date:'shortDate')) : 'Chưa xác định ngày đăng'}}</span></div><a [routerLink]="observationLink(d)">Xem chi tiết →</a></footer>
                 </article>}
                 @else if(isCandidate(d)){@if(d.recovery;as r){<article class="job-card"><div class="badges"><span class="status-badge neutral">Khôi phục để đánh giá</span><span class="status-badge">{{label(d.humanReview?.status ?? 'UNREVIEWED')}}</span></div>
                   <h2><a [routerLink]="['/admin/job-hunting/discovery',d.id]">{{d.observation ? observationTitle(d.observation) : 'Bài viết chờ Human Review'}}</a></h2><p>Không có kết quả phân loại gốc</p>
@@ -195,7 +204,7 @@ import { DiscoveryExecutionComponent } from './discovery-execution.component';
                     <p class="muted">Chưa rõ: {{observationMissing(o).slice(0,3).join(' · ') || 'Không ghi nhận'}}</p>
                   }
                   @if(r.sourceWarnings.includes('POST_ID_URL_MISMATCH')){<p>Nguồn chưa xác minh</p>}
-                  <footer><span>{{r.publishedAt ? ('Ngày đăng: ' + (r.publishedAt | date:'shortDate')) : 'Chưa xác định ngày đăng'}}</span><a [routerLink]="['/admin/job-hunting/discovery',d.id]">Xem chi tiết →</a></footer>
+                  <footer><div class="card-timestamps"><span>{{collectedAtLabel(d)}}</span><span>{{r.publishedAt ? ('Ngày đăng: ' + (r.publishedAt | date:'shortDate')) : 'Chưa xác định ngày đăng'}}</span></div><a [routerLink]="['/admin/job-hunting/discovery',d.id]">Xem chi tiết →</a></footer>
                 </article>}@else if(d.item){<article class="job-card">
                   <div class="badges"><span class="status-badge">{{label(d.item.contentValidity.status)}}</span><span class="status-badge" [class.match]="d.item.targetMatching.status==='TARGET_MATCH'">{{label(d.item.targetMatching.status)}}</span><span class="status-badge neutral">{{label(d.humanReview?.status ?? 'UNREVIEWED')}}</span></div>
                   <h2><a [routerLink]="['/admin/job-hunting/discovery',d.id]">{{cardTitle(d)}}</a></h2>
@@ -206,15 +215,21 @@ import { DiscoveryExecutionComponent } from './discovery-execution.component';
                     @if(observationFact(o,'experienceRequirements');as requirements){<p>{{requirements}}</p>}
                     @if(observationOrigins(o);as origins){<p class="muted">Nguồn bằng chứng: {{origins}} · Theo bài đăng, chưa xác minh bên ngoài</p>}
                     <a [routerLink]="observationLink(o)">Xem kết quả xử lý đã lưu</a>}
-                  <footer><span>{{d.item.publishedAt ? ('Ngày đăng: ' + (d.item.publishedAt | date:'shortDate')) : 'Chưa xác định ngày đăng'}}</span><a [routerLink]="['/admin/job-hunting/discovery',d.id]" [attr.aria-label]="'Xem chi tiết: ' + title(d.item.extracted)">Xem chi tiết →</a></footer>
+                  <footer><div class="card-timestamps"><span>{{collectedAtLabel(d)}}</span><span>{{d.item.publishedAt ? ('Ngày đăng: ' + (d.item.publishedAt | date:'shortDate')) : 'Chưa xác định ngày đăng'}}</span></div><a [routerLink]="['/admin/job-hunting/discovery',d.id]" [attr.aria-label]="'Xem chi tiết: ' + title(d.item.extracted)">Xem chi tiết →</a></footer>
                 </article>}}}
               </section>
               @if(data.results.totalPages>1){<nav aria-label="Phân trang" class="pagination"><button class="admin-button" type="button" [disabled]="page <= 1 || loading()" (click)="changePage(-1)">Trước</button><span>Trang {{page}} / {{data.results.totalPages}}</span><button class="admin-button" type="button" [disabled]="page >= data.results.totalPages || loading()" (click)="changePage(1)">Sau</button></nav>}
             }@else{
               <section class="empty-state" role="status">
                 <span class="empty-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 7h16v13H4zM8 7V4h8v3M4 12h16M10 12v3h4v-3" /></svg></span>
-                <h2>{{hasFilters() ? 'Không có cơ hội khớp bộ lọc' : 'Chưa có cơ hội việc làm'}}</h2><p>{{hasFilters() ? 'Thử thay đổi bộ lọc để xem các bài tuyển dụng khác.' : 'Discovery chưa có kết quả. Bài tuyển dụng mới sẽ xuất hiện tại đây để bạn xem và đánh giá.'}}</p>
-                @if(hasFilters()){<button type="button" class="admin-button" (click)="clearFilters()">Xóa bộ lọc</button>}
+                @if(isEmptyTodayWithoutOtherFilters()){
+                  <h2>Hôm nay chưa có bài viết được thu thập</h2>
+                  <p>Chưa có bài tuyển dụng nào được thu thập trong ngày {{formatVietnamDateLabel(collectedDate)}} theo giờ Việt Nam.</p>
+                  <button type="button" class="admin-button" (click)="showAllDates()">Xem tất cả ngày</button>
+                }@else{
+                  <h2>{{hasFilters() ? 'Không có cơ hội khớp bộ lọc' : 'Chưa có cơ hội việc làm'}}</h2><p>{{hasFilters() ? 'Thử thay đổi bộ lọc để xem các bài tuyển dụng khác.' : 'Discovery chưa có kết quả. Bài tuyển dụng mới sẽ xuất hiện tại đây để bạn xem và đánh giá.'}}</p>
+                  @if(hasFilters()){<button type="button" class="admin-button" (click)="clearFilters()">Xóa bộ lọc</button>}
+                }
               </section>
             }
           }
@@ -254,12 +269,54 @@ export class DiscoveryReviewPageComponent {
   refreshObservations(){if(!this.detailMode())this.load();}
   // Preserve the normal-item editing seam without pretending a recovery Item
   // exists. The rendering boundary remains a discriminated union.
+  private static readonly VIETNAM_OFFSET_MS = 7 * 3600_000;
+  todayVietnamDate(now: Date = new Date()): string {
+    const vn = new Date(now.getTime() + DiscoveryReviewPageComponent.VIETNAM_OFFSET_MS);
+    const y = vn.getUTCFullYear();
+    const m = String(vn.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(vn.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  vietnamDayBoundsUtc(dateStr: string): { collectedFrom: string; collectedBefore: string } | null {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(dateStr.trim());
+    if (!match) return null;
+    const year = Number(match[1]), month = Number(match[2]), day = Number(match[3]);
+    const fromMs = Date.UTC(year, month - 1, day) - DiscoveryReviewPageComponent.VIETNAM_OFFSET_MS;
+    const beforeMs = Date.UTC(year, month - 1, day + 1) - DiscoveryReviewPageComponent.VIETNAM_OFFSET_MS;
+    if (Number.isNaN(fromMs) || Number.isNaN(beforeMs)) return null;
+    return { collectedFrom: new Date(fromMs).toISOString(), collectedBefore: new Date(beforeMs).toISOString() };
+  }
+  formatVietnamDateLabel(dateStr: string): string {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(dateStr.trim());
+    return match ? `${match[3]}/${match[2]}/${match[1]}` : dateStr;
+  }
+  collectedAtLabel(row: DiscoveryOpportunity): string {
+    const raw = row.origin === 'EXECUTION_OBSERVATION' ? row.collectedAt : (row.observation?.collectedAt ?? row.ingestedAt);
+    if (!raw) return 'Thu thập: Chưa rõ';
+    const parsed = Date.parse(raw);
+    if (Number.isNaN(parsed)) return 'Thu thập: Chưa rõ';
+    const vn = new Date(parsed + DiscoveryReviewPageComponent.VIETNAM_OFFSET_MS);
+    const hh = String(vn.getUTCHours()).padStart(2, '0');
+    const mm = String(vn.getUTCMinutes()).padStart(2, '0');
+    const dd = String(vn.getUTCDate()).padStart(2, '0');
+    const mo = String(vn.getUTCMonth() + 1).padStart(2, '0');
+    const yyyy = vn.getUTCFullYear();
+    return `Thu thập: ${hh}:${mm} · ${dd}/${mo}/${yyyy}`;
+  }
+  isTodaySelected(): boolean { return !!this.collectedDate && this.collectedDate === this.todayVietnamDate(); }
+  dateScopeLabel(): string {
+    if (this.isTodaySelected()) return `Hôm nay · ${this.formatVietnamDateLabel(this.collectedDate)}`;
+    if (this.collectedDate) return `Ngày thu thập · ${this.formatVietnamDateLabel(this.collectedDate)}`;
+    return 'Tất cả ngày';
+  }
+  showAllDates() { this.collectedDate = ''; this.filter(); }
+  selectToday() { this.collectedDate = this.todayVietnamDate(); this.filter(); }
   detail = signal<DiscoveryReviewDetail | null>(null);
   private recoveredDetail = signal<DiscoveryRecoveryDetail | null>(null);
   displayedDetail = computed<DiscoveryReviewRecord | null>(() => this.recoveredDetail() ?? this.detail());
   detailMode = signal(false);
   error = signal(''); message = signal(''); loading = signal(false);
-  contentStatus = ''; targetStatus = ''; runId = ''; collectedDate = ''; identityOnly = false; duplicatesOnly = false; page = 1;
+  contentStatus = ''; targetStatus = ''; runId = ''; collectedDate = this.todayVietnamDate(); identityOnly = false; duplicatesOnly = false; page = 1;
   title=discoveryTitle; text=evidenceText;
   seniority(d:DiscoveryReviewRecord){return d.item ? this.title(d.item.extracted).match(/\b(?:intern(?:ship)?|fresher|junior|middle|senior|lead)\b/gi)?.join(' / ') || '' : '';}
   readonly tabs = [{id:'all',label:'Tất cả'},{id:'matched',label:'Phù hợp'},{id:'needs-review',label:'Cần xem xét'},{id:'reviewed',label:'Đã đánh giá'}];
@@ -275,10 +332,13 @@ export class DiscoveryReviewPageComponent {
     return '';
   }
   selectTab(id:string){this.contentStatus=id==='needs-review'?'NEEDS_REVIEW':'';this.targetStatus=id==='matched'?'TARGET_MATCH':'';this.reviewState=id==='reviewed'?'REVIEWED':'';this.filter();}
-  hasAdvancedFilters(){return !!(this.runId.trim() || this.collectedDate || this.identityOnly || this.duplicatesOnly || (this.hasFilters() && !this.activeTab()));}
-  hasFilters(){return !!(this.contentStatus || this.targetStatus || this.reviewState || this.runId.trim() || this.collectedDate || this.identityOnly || this.duplicatesOnly);}
+  hasNonDateFilters(){return !!(this.contentStatus || this.targetStatus || this.reviewState || this.runId.trim() || this.identityOnly || this.duplicatesOnly);}
+  hasCustomDateFilter(){return !!(this.collectedDate && !this.isTodaySelected());}
+  isEmptyTodayWithoutOtherFilters(){return this.isTodaySelected() && !this.hasNonDateFilters();}
+  hasAdvancedFilters(){return !!(this.runId.trim() || this.hasCustomDateFilter() || this.identityOnly || this.duplicatesOnly || (this.hasNonDateFilters() && !this.activeTab()));}
+  hasFilters(){return this.hasNonDateFilters() || this.hasCustomDateFilter();}
   listControlsVisible(){return !!this.list() && !this.loading() && !this.error() && (!!this.list()?.results.total || this.hasFilters());}
-  clearFilters(){this.contentStatus=this.targetStatus=this.reviewState=this.runId=this.collectedDate='';this.identityOnly=this.duplicatesOnly=false;this.filter();}
+  clearFilters(){this.contentStatus=this.targetStatus=this.reviewState=this.runId='';this.collectedDate=this.todayVietnamDate();this.identityOnly=this.duplicatesOnly=false;this.filter();}
   targetStatuses = ['TARGET_MATCH','FALLBACK_MATCH','POTENTIAL_MATCH','NOT_MATCHED','INSUFFICIENT_DATA'];
   contentStatuses = ['VALID_RECRUITMENT','INVALID_RECRUITMENT','NEEDS_REVIEW'];
   reviewStates = ['REVIEWED','UNREVIEWED','CONFIRMED','CORRECTED','UNCERTAIN','REVIEWED_RECOVERY']; reviewState='';
@@ -311,7 +371,9 @@ export class DiscoveryReviewPageComponent {
     this.api.discoveryMetrics(this.runId.trim()||undefined).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({next:m=>{if(request===this.metricsRequest){this.metrics.set(m);this.metricsLoading.set(false);}},error:e=>{if(request===this.metricsRequest){this.error.set(safeAdminError(e));this.metricsLoading.set(false);}}});}
   private requestNumber = 0;
   constructor() { combineLatest([this.route.paramMap,this.route.queryParamMap]).pipe(takeUntilDestroyed(this.destroyRef)).subscribe(([,query]) => {
-    this.runId = query.get('runId') ?? ''; this.page=1;
+    this.runId = query.get('runId') ?? '';
+    this.collectedDate = this.runId.trim() ? '' : this.todayVietnamDate();
+    this.page=1;
     this.list.set(null);
     this.metricsRequest++;this.metrics.set(null);this.metricsLoading.set(false);
     this.load();
@@ -330,7 +392,13 @@ export class DiscoveryReviewPageComponent {
     if (this.identityOnly) params['identityWarning'] = true;
     if (this.duplicatesOnly) params['duplicatesOnly'] = true;
     if (this.reviewState) params['reviewState'] = this.reviewState;
-    if(this.collectedDate){const from=new Date(`${this.collectedDate}T00:00:00`),before=new Date(from);before.setDate(before.getDate()+1);params['collectedFrom']=from.toISOString();params['collectedBefore']=before.toISOString();}
+    if (this.collectedDate) {
+      const bounds = this.vietnamDayBoundsUtc(this.collectedDate);
+      if (bounds) {
+        params['collectedFrom'] = bounds.collectedFrom;
+        params['collectedBefore'] = bounds.collectedBefore;
+      }
+    }
     const failed = (e: unknown) => { if(request === this.requestNumber){this.error.set(safeAdminError(e)); this.loading.set(false);} };
     if(executionId){
       if(!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/iu.test(executionId)||! /^(?:0|[1-9]\d*)$/u.test(index??'')||Number(index)>=200){this.error.set('Đường dẫn observation không hợp lệ.');this.loading.set(false);return;}
