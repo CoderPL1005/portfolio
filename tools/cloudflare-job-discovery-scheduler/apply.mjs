@@ -1,3 +1,5 @@
+// Historical one-time migration script (GitHub schedule -> Cloudflare external_scheduled).
+// Synchronized with the exact-hour (:00 primary / :30 fallback) schedule; do not rerun on already-migrated baselines.
 // Applies only a guarded workflow patch; no calls to GitHub/Render/Neon/provider.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -9,9 +11,9 @@ const workflow = path.join(root, '.github', 'workflows', 'job-discovery-daily.ym
 const file = fs.readFileSync(workflow, 'utf8');
 const normalized = file.replace(/\r\n/g, '\n');
 if (!normalized.startsWith('name: Job Discovery Daily V1\non:\n  schedule:\n') ||
-    !normalized.includes("- cron: '11 0 * * *'") ||
-    !normalized.includes("- cron: '41 12 * * *'")) {
-  throw new Error('BASELINE_MISMATCH: expected V1.2 schedule (commit f187d66); inspect git diff before patching');
+    !normalized.includes("- cron: '0 0 * * *'") ||
+    !normalized.includes("- cron: '30 12 * * *'")) {
+  throw new Error('BASELINE_MISMATCH: one-time migration already applied or baseline incompatible; do not rerun apply.mjs');
 }
 const head = fs.readFileSync(path.join(here,'workflow-header.yml.fragment'),'utf8');
 const classify = fs.readFileSync(path.join(here,'classify-step.yml.fragment'),'utf8');
@@ -30,20 +32,20 @@ const end = output.indexOf('      - name: Reserved 22:00 slot (future CV-submiss
 if (start < 0 || end < 0) throw new Error('CLASSIFICATION_STEP_ANCHORS_MISSING');
 output = output.slice(0,start) + classify + output.slice(end);
 output = replaceExact(output,
-  "if: github.event_name == 'schedule' && github.event.schedule == '11 15 * * *'",
-  "if: github.event_name == 'workflow_dispatch' && inputs.mode == 'external_scheduled' && inputs.slot == '11 15 * * *' && steps.classify.outputs.authorized == 'true'",
+  "if: github.event_name == 'schedule' && github.event.schedule == '0 15 * * *'",
+  "if: github.event_name == 'workflow_dispatch' && inputs.mode == 'external_scheduled' && inputs.slot == '0 15 * * *' && steps.classify.outputs.authorized == 'true'",
   'reserved-condition');
 output = replaceExact(output,
-  "if: github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.event.schedule != '11 15 * * *')",
-  "if: github.event_name == 'workflow_dispatch' && (inputs.mode == 'diagnostic_only' || (inputs.mode == 'external_scheduled' && inputs.slot != '11 15 * * *' && steps.classify.outputs.authorized == 'true'))",
+  "if: github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.event.schedule != '0 15 * * *')",
+  "if: github.event_name == 'workflow_dispatch' && (inputs.mode == 'diagnostic_only' || (inputs.mode == 'external_scheduled' && inputs.slot != '0 15 * * *' && steps.classify.outputs.authorized == 'true'))",
   'preflight-condition');
 output = replaceExact(output,
   "if: github.event_name == 'workflow_dispatch'\n        env:\n          DISPATCH_MODE:",
   "if: github.event_name == 'workflow_dispatch' && inputs.mode == 'diagnostic_only'\n        env:\n          DISPATCH_MODE:",
   'diagnostic-condition');
 output = replaceExact(output,
-  "if: github.event_name == 'schedule' && github.event.schedule != '11 15 * * *'",
-  "if: github.event_name == 'workflow_dispatch' && inputs.mode == 'external_scheduled' && inputs.slot != '11 15 * * *' && steps.classify.outputs.authorized == 'true'",
+  "if: github.event_name == 'schedule' && github.event.schedule != '0 15 * * *'",
+  "if: github.event_name == 'workflow_dispatch' && inputs.mode == 'external_scheduled' && inputs.slot != '0 15 * * *' && steps.classify.outputs.authorized == 'true'",
   'POST-condition');
 output = replaceExact(output,
   'DAILY_SLOT: ${{ github.event.schedule }}',

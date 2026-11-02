@@ -13,11 +13,11 @@ public static class DiscoveryDailySlots
     private static readonly IReadOnlyDictionary<string, (int Hour, int Minute)> Schedules =
         new Dictionary<string, (int Hour, int Minute)>(StringComparer.Ordinal)
         {
-            ["11 0 * * *"] = (0, 11), ["11 3 * * *"] = (3, 11), ["11 6 * * *"] = (6, 11),
-            ["11 9 * * *"] = (9, 11), ["11 12 * * *"] = (12, 11), ["11 15 * * *"] = (15, 11),
+            ["0 0 * * *"] = (0, 0), ["0 3 * * *"] = (3, 0), ["0 6 * * *"] = (6, 0),
+            ["0 9 * * *"] = (9, 0), ["0 12 * * *"] = (12, 0), ["0 15 * * *"] = (15, 0),
             // Safeguard: a backup trigger uses EXACTLY the primary slot identity.
-            ["41 0 * * *"] = (0, 41), ["41 3 * * *"] = (3, 41), ["41 6 * * *"] = (6, 41),
-            ["41 9 * * *"] = (9, 41), ["41 12 * * *"] = (12, 41)
+            ["30 0 * * *"] = (0, 30), ["30 3 * * *"] = (3, 30), ["30 6 * * *"] = (6, 30),
+            ["30 9 * * *"] = (9, 30), ["30 12 * * *"] = (12, 30)
         };
 
     public static bool IsKnownExpression(string? expression) => expression is not null && Schedules.ContainsKey(expression);

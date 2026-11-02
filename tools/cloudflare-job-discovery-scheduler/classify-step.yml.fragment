@@ -12,9 +12,9 @@
           import datetime as dt, os, re
 
           expressions = {
-              **{f'{m} {h} * * *': (h,m, 'primary' if m==11 else 'fallback', h//3+1)
-                 for h in (0,3,6,9,12) for m in (11,41)},
-              '11 15 * * *': (15,11,'reserved',6),
+              **{f'{m} {h} * * *': (h,m, 'primary' if m==0 else 'fallback', h//3+1)
+                 for h in (0,3,6,9,12) for m in (0,30)},
+              '0 15 * * *': (15,0,'reserved',6),
           }
           def allowed(value):
               with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as f:

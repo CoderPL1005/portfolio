@@ -1,18 +1,18 @@
 // Cloudflare Worker: scheduled-only GitHub Actions dispatcher.
 // This Worker NEVER calls Render, Neon, SocialAPIs or Gemini directly.
-export const PRIMARY_CRON = '11 0,3,6,9,12,15 * * *';
-export const FALLBACK_CRON = '41 0,3,6,9,12 * * *';
+export const PRIMARY_CRON = '0 0,3,6,9,12,15 * * *';
+export const FALLBACK_CRON = '30 0,3,6,9,12 * * *';
 const ALLOWED_HOURS = new Set([0, 3, 6, 9, 12, 15]);
 const MAX_CLOUDFLARE_DELAY_MS = 20 * 60_000;
 
 /** Maps Cloudflare's grouped cron to the already-authorized backend slot expression. */
 export function resolveScheduledSlot(cron, scheduledTime, nowMs = Date.now()) {
-  const minute = cron === PRIMARY_CRON ? 11 : cron === FALLBACK_CRON ? 41 : null;
+  const minute = cron === PRIMARY_CRON ? 0 : cron === FALLBACK_CRON ? 30 : null;
   if (minute === null) return { state: 'UNRECOGNIZED_CRON' };
   const scheduled = new Date(scheduledTime);
   if (!Number.isFinite(scheduled.getTime())) return { state: 'INVALID_SCHEDULED_TIME' };
   const hour = scheduled.getUTCHours();
-  if (!ALLOWED_HOURS.has(hour) || (minute === 41 && hour === 15) ||
+  if (!ALLOWED_HOURS.has(hour) || (minute === 30 && hour === 15) ||
       scheduled.getUTCMinutes() !== minute || scheduled.getUTCSeconds() !== 0 ||
       scheduled.getUTCMilliseconds() !== 0) {
     return { state: 'CRON_TIME_MISMATCH' };
@@ -25,7 +25,7 @@ export function resolveScheduledSlot(cron, scheduledTime, nowMs = Date.now()) {
     state: 'READY',
     slot: `${minute} ${hour} * * *`,
     scheduledUtc: scheduled.toISOString().replace('.000Z', 'Z'),
-    kind: hour === 15 ? 'RESERVED' : minute === 11 ? 'PRIMARY' : 'FALLBACK',
+    kind: hour === 15 ? 'RESERVED' : minute === 0 ? 'PRIMARY' : 'FALLBACK',
   };
 }
 

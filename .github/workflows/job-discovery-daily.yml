@@ -16,7 +16,7 @@ on:
         default: ''
         type: string
       scheduled_utc:
-        description: 'Cloudflare controller.scheduledTime UTC, e.g. 2026-11-03T00:11:00Z'
+        description: 'Cloudflare controller.scheduledTime UTC, e.g. 2026-11-03T00:00:00Z'
         required: false
         default: ''
         type: string
@@ -45,9 +45,9 @@ jobs:
           import datetime as dt, os, re
 
           expressions = {
-              **{f'{m} {h} * * *': (h,m, 'primary' if m==11 else 'fallback', h//3+1)
-                 for h in (0,3,6,9,12) for m in (11,41)},
-              '11 15 * * *': (15,11,'reserved',6),
+              **{f'{m} {h} * * *': (h,m, 'primary' if m==0 else 'fallback', h//3+1)
+                 for h in (0,3,6,9,12) for m in (0,30)},
+              '0 15 * * *': (15,0,'reserved',6),
           }
           def allowed(value):
               with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as f:
@@ -97,7 +97,7 @@ jobs:
               raise SystemExit('UNSUPPORTED_DISPATCH_MODE')
           PY
       - name: Reserved 22:00 slot (future CV-submission threshold)
-        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'external_scheduled' && inputs.slot == '11 15 * * *' && steps.classify.outputs.authorized == 'true'
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'external_scheduled' && inputs.slot == '0 15 * * *' && steps.classify.outputs.authorized == 'true'
         run: |
           echo 'RESERVED_SLOT_6: no API or provider request; threshold 5 submitted CVs not implemented.'
           echo 'DAILY_RESULT_STATE: RESERVED_FUTURE_CV_APPLICATION_THRESHOLD'
@@ -106,7 +106,7 @@ jobs:
           echo 'SKIP_REASON: Slot 6 (22:00 ICT) is reserved until actual submitted CV counting (<5 across first 4 slots) is implemented; no API or provider request sent.'
 
       - name: Render preflight (safe GET; never requests provider)
-        if: github.event_name == 'workflow_dispatch' && (inputs.mode == 'diagnostic_only' || (inputs.mode == 'external_scheduled' && inputs.slot != '11 15 * * *' && steps.classify.outputs.authorized == 'true'))
+        if: github.event_name == 'workflow_dispatch' && (inputs.mode == 'diagnostic_only' || (inputs.mode == 'external_scheduled' && inputs.slot != '0 15 * * *' && steps.classify.outputs.authorized == 'true'))
         shell: bash
         run: |
           set -euo pipefail
@@ -174,7 +174,7 @@ jobs:
           echo 'DIAGNOSTIC_LIMITATION_NOTE: Passing /health preflight in diagnostic_only mode does NOT prove authenticated POST /api/v1/discovery-daily/start or end-to-end scheduled execution.'
 
       - name: Start authorized daily slot once (no POST retry)
-        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'external_scheduled' && inputs.slot != '11 15 * * *' && steps.classify.outputs.authorized == 'true'
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'external_scheduled' && inputs.slot != '0 15 * * *' && steps.classify.outputs.authorized == 'true'
         env:
           GITHUB_EVENT_NAME: ${{ github.event_name }}
           DISCOVERY_WORKER_KEY: ${{ secrets.DISCOVERY_WORKER_KEY }}
@@ -185,7 +185,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$GITHUB_EVENT_NAME" = "workflow_dispatch"
-          test "$DAILY_SLOT" != "11 15 * * *"
+          test "$DAILY_SLOT" != "0 15 * * *"
           test -n "$DISCOVERY_WORKER_KEY"
           test -n "$DAILY_SLOT"
           start_ms=$(python3 -c 'import time; print(int(time.time() * 1000))')

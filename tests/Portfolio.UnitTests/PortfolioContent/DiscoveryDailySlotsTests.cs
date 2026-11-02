@@ -11,18 +11,18 @@ namespace Portfolio.UnitTests.PortfolioContent;
 public sealed class DiscoveryDailySlotsTests
 {
     [Theory]
-    [InlineData("11 0 * * *", 0, 11, 1)]
-    [InlineData("41 0 * * *", 0, 41, 1)]
-    [InlineData("11 3 * * *", 3, 11, 2)]
-    [InlineData("41 3 * * *", 3, 41, 2)]
-    [InlineData("11 6 * * *", 6, 11, 3)]
-    [InlineData("41 6 * * *", 6, 41, 3)]
-    [InlineData("11 9 * * *", 9, 11, 4)]
-    [InlineData("41 9 * * *", 9, 41, 4)]
-    [InlineData("11 12 * * *", 12, 11, 5)]
-    [InlineData("41 12 * * *", 12, 41, 5)]
-    [InlineData("11 15 * * *", 15, 11, 6)]
-    public void All_eleven_v12_expressions_resolve_to_planned_business_slots(string expression, int hour, int triggerMinute, int expectedSlot)
+    [InlineData("0 0 * * *", 0, 0, 1)]
+    [InlineData("30 0 * * *", 0, 30, 1)]
+    [InlineData("0 3 * * *", 3, 0, 2)]
+    [InlineData("30 3 * * *", 3, 30, 2)]
+    [InlineData("0 6 * * *", 6, 0, 3)]
+    [InlineData("30 6 * * *", 6, 30, 3)]
+    [InlineData("0 9 * * *", 9, 0, 4)]
+    [InlineData("30 9 * * *", 9, 30, 4)]
+    [InlineData("0 12 * * *", 12, 0, 5)]
+    [InlineData("30 12 * * *", 12, 30, 5)]
+    [InlineData("0 15 * * *", 15, 0, 6)]
+    public void All_eleven_exact_hour_and_fallback_expressions_resolve_to_planned_business_slots(string expression, int hour, int triggerMinute, int expectedSlot)
     {
         Assert.True(DiscoveryDailySlots.IsKnownExpression(expression));
         var now = new DateTimeOffset(2026, 11, 2, hour, triggerMinute, 0, TimeSpan.Zero);
@@ -48,8 +48,8 @@ public sealed class DiscoveryDailySlotsTests
         Assert.Equal(start, window.StartTime);
         Assert.Equal(end, window.EndTime);
         Assert.Equal("Asia/Ho_Chi_Minh", window.TimeZone);
-        Assert.Equal(window, DiscoveryDailySlots.ForScheduledRequest(DiscoveryDailySlots.RequestId(when), when.AddMinutes(11)));
-        Assert.Equal(window, DiscoveryDailySlots.ForScheduledRequest(DiscoveryDailySlots.RequestId(when), when.AddMinutes(41)));
+        Assert.Equal(window, DiscoveryDailySlots.ForScheduledRequest(DiscoveryDailySlots.RequestId(when), when));
+        Assert.Equal(window, DiscoveryDailySlots.ForScheduledRequest(DiscoveryDailySlots.RequestId(when), when.AddMinutes(30)));
     }
 
     [Fact]
@@ -62,39 +62,44 @@ public sealed class DiscoveryDailySlotsTests
     }
 
     [Theory]
-    [InlineData("11 0 * * *", 0, 10)]
-    [InlineData("41 0 * * *", 0, 11)]
-    [InlineData("41 0 * * *", 0, 40)]
-    [InlineData("11 3 * * *", 3, 0)]
-    [InlineData("41 9 * * *", 9, 30)]
-    [InlineData("11 15 * * *", 15, 10)]
+    [InlineData("30 0 * * *", 0, 0)]
+    [InlineData("30 0 * * *", 0, 29)]
+    [InlineData("30 3 * * *", 3, 15)]
+    [InlineData("30 9 * * *", 9, 29)]
+    [InlineData("0 3 * * *", 2, 59)]
+    [InlineData("0 15 * * *", 14, 59)]
     public void Rejects_early_late_and_unlisted_schedule(string expression, int hour, int earlyMinute)
     {
         var earlyInSlot = new DateTimeOffset(2026, 11, 2, hour, earlyMinute, 59, TimeSpan.Zero);
         Assert.False(DiscoveryDailySlots.TryResolve(expression, earlyInSlot, out _));
 
         var dayBefore = new DateTimeOffset(2026, 11, 1, 23, 59, 0, TimeSpan.Zero);
-        Assert.False(DiscoveryDailySlots.TryResolve("11 0 * * *", dayBefore, out _));
-        Assert.False(DiscoveryDailySlots.TryResolve("11 0 * * *", dayBefore.AddMinutes(92), out _));
+        Assert.False(DiscoveryDailySlots.TryResolve("0 0 * * *", dayBefore, out _));
+        Assert.False(DiscoveryDailySlots.TryResolve("0 0 * * *", dayBefore.AddMinutes(92), out _));
 
-        foreach (var invalid in new[] { "0 0 * * *", "30 0 * * *", "0 15 * * *", "30 15 * * *", "41 15 * * *", "11 1 * * *", "11 0 * * *; touch pwn", "" })
+        foreach (var invalid in new[]
+        {
+            "11 0 * * *", "41 0 * * *", "11 3 * * *", "41 3 * * *", "11 6 * * *", "41 6 * * *",
+            "11 9 * * *", "41 9 * * *", "11 12 * * *", "41 12 * * *", "11 15 * * *", "41 15 * * *",
+            "30 15 * * *", "0 1 * * *", "0 0 * * *; touch pwn", ""
+        })
         {
             Assert.False(DiscoveryDailySlots.IsKnownExpression(invalid));
-            Assert.False(DiscoveryDailySlots.TryResolve(invalid, new DateTimeOffset(2026, 11, 2, 0, 15, 0, TimeSpan.Zero), out _));
+            Assert.False(DiscoveryDailySlots.TryResolve(invalid, new DateTimeOffset(2026, 11, 2, 0, 35, 0, TimeSpan.Zero), out _));
         }
         Assert.False(DiscoveryDailySlots.IsKnownExpression(null));
     }
 
     [Theory]
-    [InlineData("11 0 * * *", "41 0 * * *", 0)]
-    [InlineData("11 3 * * *", "41 3 * * *", 3)]
-    [InlineData("11 6 * * *", "41 6 * * *", 6)]
-    [InlineData("11 9 * * *", "41 9 * * *", 9)]
-    [InlineData("11 12 * * *", "41 12 * * *", 12)]
+    [InlineData("0 0 * * *", "30 0 * * *", 0)]
+    [InlineData("0 3 * * *", "30 3 * * *", 3)]
+    [InlineData("0 6 * * *", "30 6 * * *", 6)]
+    [InlineData("0 9 * * *", "30 9 * * *", 9)]
+    [InlineData("0 12 * * *", "30 12 * * *", 12)]
     public void Backup_and_primary_share_the_same_request_id_and_window(string primary, string backup, int hour)
     {
-        var primaryTime = new DateTimeOffset(2026, 11, 2, hour, 11, 0, TimeSpan.Zero);
-        var backupTime = new DateTimeOffset(2026, 11, 2, hour, 41, 0, TimeSpan.Zero);
+        var primaryTime = new DateTimeOffset(2026, 11, 2, hour, 0, 0, TimeSpan.Zero);
+        var backupTime = new DateTimeOffset(2026, 11, 2, hour, 30, 0, TimeSpan.Zero);
         Assert.True(DiscoveryDailySlots.IsKnownExpression(primary));
         Assert.True(DiscoveryDailySlots.IsKnownExpression(backup));
         Assert.True(DiscoveryDailySlots.TryResolve(primary, primaryTime, out var plannedPrimary));
@@ -111,13 +116,13 @@ public sealed class DiscoveryDailySlotsTests
     [Fact]
     public void Delayed_cron_is_known_but_cannot_create_an_execution_or_roll_into_next_slot()
     {
-        var nextSlotTime = new DateTimeOffset(2026, 11, 2, 3, 11, 0, TimeSpan.Zero);
-        Assert.True(DiscoveryDailySlots.IsKnownExpression("11 0 * * *"));
-        Assert.True(DiscoveryDailySlots.IsKnownExpression("41 0 * * *"));
-        Assert.False(DiscoveryDailySlots.TryResolve("11 0 * * *", nextSlotTime, out var expiredPlanned));
+        var nextSlotTime = new DateTimeOffset(2026, 11, 2, 3, 0, 0, TimeSpan.Zero);
+        Assert.True(DiscoveryDailySlots.IsKnownExpression("0 0 * * *"));
+        Assert.True(DiscoveryDailySlots.IsKnownExpression("30 0 * * *"));
+        Assert.False(DiscoveryDailySlots.TryResolve("0 0 * * *", nextSlotTime, out var expiredPlanned));
         Assert.Equal(0, expiredPlanned.Hour); // Remains slot 1 (00:00 UTC), never rolls into slot 2 (03:00 UTC)
-        Assert.False(DiscoveryDailySlots.TryResolve("41 0 * * *", nextSlotTime, out _));
-        Assert.False(DiscoveryDailySlots.IsKnownExpression("41 15 * * *")); // no backup for the zero-cost reserved slot
+        Assert.False(DiscoveryDailySlots.TryResolve("30 0 * * *", nextSlotTime, out _));
+        Assert.False(DiscoveryDailySlots.IsKnownExpression("30 15 * * *")); // no backup for the zero-cost reserved slot
     }
 
     [Fact]
@@ -138,7 +143,7 @@ public sealed class DiscoveryDailySlotsTests
         var rawPostId = Guid.NewGuid();
         await SeedPortfolioAndHistoryAsync(seedDb, priorExecId, rawPostId);
 
-        var clock = new FixedClock(new DateTimeOffset(2026, 11, 2, 0, 41, 0, TimeSpan.Zero));
+        var clock = new FixedClock(new DateTimeOffset(2026, 11, 2, 0, 30, 0, TimeSpan.Zero));
         var github = new CountingGitHubClient();
         await using var dbPrimary = CreateDatabase(dbName);
         await using var dbFallback = CreateDatabase(dbName);
@@ -146,8 +151,8 @@ public sealed class DiscoveryDailySlotsTests
         var fallbackService = CreateService(dbFallback, github, clock);
 
         var results = await Task.WhenAll(
-            primaryService.StartScheduledAsync("11 0 * * *"),
-            fallbackService.StartScheduledAsync("41 0 * * *"));
+            primaryService.StartScheduledAsync("0 0 * * *"),
+            fallbackService.StartScheduledAsync("30 0 * * *"));
 
         var states = results.Select(GetState).OrderBy(x => x).ToArray();
         Assert.Equal(["ALREADY_CREATED", "QUEUED"], states);
@@ -157,16 +162,17 @@ public sealed class DiscoveryDailySlotsTests
         Assert.Equal(1, github.DispatchCount);
 
         // Reserved slot 6, expired trigger, and unlisted expression checks:
-        clock.Now = new DateTimeOffset(2026, 11, 2, 15, 11, 0, TimeSpan.Zero);
-        var reserved = await primaryService.StartScheduledAsync("11 15 * * *");
+        clock.Now = new DateTimeOffset(2026, 11, 2, 15, 0, 0, TimeSpan.Zero);
+        var reserved = await primaryService.StartScheduledAsync("0 15 * * *");
         Assert.Equal("RESERVED_FUTURE_CV_APPLICATION_THRESHOLD", GetState(reserved));
         Assert.Equal(1, github.DispatchCount);
 
-        var expired = await primaryService.StartScheduledAsync("11 0 * * *");
+        var expired = await primaryService.StartScheduledAsync("0 0 * * *");
         Assert.Equal("SKIPPED_EXPIRED", GetState(expired));
         Assert.Equal(1, github.DispatchCount);
 
-        await Assert.ThrowsAsync<ValidationException>(() => primaryService.StartScheduledAsync("0 0 * * *"));
+        await Assert.ThrowsAsync<ValidationException>(() => primaryService.StartScheduledAsync("11 0 * * *"));
+        await Assert.ThrowsAsync<ValidationException>(() => primaryService.StartScheduledAsync("41 0 * * *"));
         Assert.Equal(1, github.DispatchCount);
 
         // Verify credit and ingestion history remained intact:
@@ -197,9 +203,14 @@ public sealed class DiscoveryDailySlotsTests
         Assert.Contains("default: 'diagnostic_only'", workflow, StringComparison.Ordinal);
         Assert.Contains("SCHEDULER_RESULT_STATE: SKIPPED_EXPIRED", workflow, StringComparison.Ordinal);
         Assert.Contains("steps.classify.outputs.authorized == 'true'", workflow, StringComparison.Ordinal);
+        Assert.Contains("inputs.slot == '0 15 * * *'", workflow, StringComparison.Ordinal);
+        Assert.Contains("inputs.slot != '0 15 * * *'", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("11 15 * * *", workflow, StringComparison.Ordinal);
         Assert.Contains("test \"$GITHUB_EVENT_NAME\" = \"workflow_dispatch\"", workflow, StringComparison.Ordinal);
-        Assert.Contains("11 0,3,6,9,12,15 * * *", cloudflare, StringComparison.Ordinal);
-        Assert.Contains("41 0,3,6,9,12 * * *", cloudflare, StringComparison.Ordinal);
+        Assert.Contains("0 0,3,6,9,12,15 * * *", cloudflare, StringComparison.Ordinal);
+        Assert.Contains("30 0,3,6,9,12 * * *", cloudflare, StringComparison.Ordinal);
+        Assert.DoesNotContain("11 0,3,6,9,12,15 * * *", cloudflare, StringComparison.Ordinal);
+        Assert.DoesNotContain("41 0,3,6,9,12 * * *", cloudflare, StringComparison.Ordinal);
         Assert.Contains("\"DISPATCH_ENABLED\": \"false\"", cloudflare, StringComparison.Ordinal);
     }
 

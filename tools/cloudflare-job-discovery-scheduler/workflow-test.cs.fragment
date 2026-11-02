@@ -16,8 +16,8 @@
         Assert.Contains("SCHEDULER_RESULT_STATE: SKIPPED_EXPIRED", workflow, StringComparison.Ordinal);
         Assert.Contains("steps.classify.outputs.authorized == 'true'", workflow, StringComparison.Ordinal);
         Assert.Contains("test \"$GITHUB_EVENT_NAME\" = \"workflow_dispatch\"", workflow, StringComparison.Ordinal);
-        Assert.Contains("11 0,3,6,9,12,15 * * *", cloudflare, StringComparison.Ordinal);
-        Assert.Contains("41 0,3,6,9,12 * * *", cloudflare, StringComparison.Ordinal);
+        Assert.Contains("0 0,3,6,9,12,15 * * *", cloudflare, StringComparison.Ordinal);
+        Assert.Contains("30 0,3,6,9,12 * * *", cloudflare, StringComparison.Ordinal);
         Assert.Contains("\"DISPATCH_ENABLED\": \"false\"", cloudflare, StringComparison.Ordinal);
     }
 
