@@ -181,28 +181,26 @@ public sealed class DiscoveryDailySlotsTests
     }
 
     [Fact]
-    public void Workflow_yaml_defines_eleven_v12_crons_and_gates_daily_post_away_from_diagnostic_mode()
+    public void External_scheduler_has_two_grouped_cloudflare_crons_and_no_github_schedule_trigger()
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
-        var workflowPath = Path.Combine(root, ".github", "workflows", "job-discovery-daily.yml");
-        var yaml = File.ReadAllText(workflowPath);
+        var workflow = File.ReadAllText(Path.Combine(root, ".github", "workflows", "job-discovery-daily.yml"));
+        var cloudflare = File.ReadAllText(Path.Combine(root, "tools", "cloudflare-job-discovery-scheduler", "wrangler.jsonc"));
 
-        foreach (var cron in new[]
-        {
-            "11 0 * * *", "41 0 * * *", "11 3 * * *", "41 3 * * *", "11 6 * * *",
-            "41 6 * * *", "11 9 * * *", "41 9 * * *", "11 12 * * *", "41 12 * * *", "11 15 * * *"
-        })
-        {
-            Assert.Contains($"- cron: '{cron}'", yaml, StringComparison.Ordinal);
-        }
-
-        Assert.DoesNotContain("- cron: '0 ", yaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("- cron: '30 ", yaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("- cron: '41 15 * * *'", yaml, StringComparison.Ordinal);
-        Assert.Contains("workflow_dispatch:", yaml, StringComparison.Ordinal);
-        Assert.Contains("default: 'diagnostic_only'", yaml, StringComparison.Ordinal);
-        Assert.Contains("if: github.event_name == 'schedule' && github.event.schedule != '11 15 * * *'", yaml, StringComparison.Ordinal);
-        Assert.Contains("test \"$GITHUB_EVENT_NAME\" = \"schedule\"", yaml, StringComparison.Ordinal);
+        var normalized = workflow.Replace("\r\n", "\n");
+        var onSection = normalized.Substring(normalized.IndexOf("on:\n", StringComparison.Ordinal),
+            normalized.IndexOf("permissions:\n", StringComparison.Ordinal) - normalized.IndexOf("on:\n", StringComparison.Ordinal));
+        Assert.DoesNotContain("  schedule:\n", onSection, StringComparison.Ordinal);
+        Assert.Contains("workflow_dispatch:", workflow, StringComparison.Ordinal);
+        Assert.Contains("          - diagnostic_only", workflow, StringComparison.Ordinal);
+        Assert.Contains("          - external_scheduled", workflow, StringComparison.Ordinal);
+        Assert.Contains("default: 'diagnostic_only'", workflow, StringComparison.Ordinal);
+        Assert.Contains("SCHEDULER_RESULT_STATE: SKIPPED_EXPIRED", workflow, StringComparison.Ordinal);
+        Assert.Contains("steps.classify.outputs.authorized == 'true'", workflow, StringComparison.Ordinal);
+        Assert.Contains("test \"$GITHUB_EVENT_NAME\" = \"workflow_dispatch\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("11 0,3,6,9,12,15 * * *", cloudflare, StringComparison.Ordinal);
+        Assert.Contains("41 0,3,6,9,12 * * *", cloudflare, StringComparison.Ordinal);
+        Assert.Contains("\"DISPATCH_ENABLED\": \"false\"", cloudflare, StringComparison.Ordinal);
     }
 
     private static string GetState(object result) =>

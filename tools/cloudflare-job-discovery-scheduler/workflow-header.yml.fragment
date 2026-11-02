@@ -1,0 +1,21 @@
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'diagnostic_only is read-only; external_scheduled is for Cloudflare Cron only'
+        required: false
+        default: 'diagnostic_only'
+        type: choice
+        options:
+          - diagnostic_only
+          - external_scheduled
+      slot:
+        description: 'Exact authorized individual slot cron (only used by external_scheduled)'
+        required: false
+        default: ''
+        type: string
+      scheduled_utc:
+        description: 'Cloudflare controller.scheduledTime UTC, e.g. 2026-11-03T00:11:00Z'
+        required: false
+        default: ''
+        type: string

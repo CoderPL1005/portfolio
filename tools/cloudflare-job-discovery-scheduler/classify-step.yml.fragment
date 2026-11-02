@@ -1,0 +1,65 @@
+      - name: Validate external schedule and select safe path (no provider / DB)
+        id: classify
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          DAILY_SLOT: ${{ inputs.slot }}
+          DISPATCH_MODE: ${{ inputs.mode || 'diagnostic_only' }}
+          SCHEDULED_UTC: ${{ inputs.scheduled_utc }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import datetime as dt, os, re
+
+          expressions = {
+              **{f'{m} {h} * * *': (h,m, 'primary' if m==11 else 'fallback', h//3+1)
+                 for h in (0,3,6,9,12) for m in (11,41)},
+              '11 15 * * *': (15,11,'reserved',6),
+          }
+          def allowed(value):
+              with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as f:
+                  f.write(f'authorized={str(value).lower()}\n')
+
+          event = os.environ.get('GITHUB_EVENT_NAME', '')
+          mode = os.environ.get('DISPATCH_MODE', '')
+          slot = os.environ.get('DAILY_SLOT', '')
+          scheduled = os.environ.get('SCHEDULED_UTC', '')
+          now = dt.datetime.now(dt.timezone.utc)
+          print('WORKFLOW_EVENT:', event)
+          print('ACTUAL_RUNNER_START_UTC:', now.strftime('%Y-%m-%dT%H:%M:%SZ'))
+          print('CRON_SELF_CHECK:', 'PASS' if len(expressions) == 11 else 'FAIL')
+          if len(expressions) != 11:
+              raise SystemExit('CRON_SELF_CHECK_FAILED')
+          if event != 'workflow_dispatch':
+              raise SystemExit('ONLY_WORKFLOW_DISPATCH_AUTHORIZED')
+          if mode == 'diagnostic_only':
+              if slot or scheduled:
+                  raise SystemExit('DIAGNOSTIC_INPUTS_NOT_ALLOWED')
+              allowed(False)
+              print('TRIGGER_CLASSIFICATION: manual')
+              print('SCHEDULER_RESULT_STATE: DIAGNOSTIC_ONLY')
+          elif mode == 'external_scheduled':
+              if slot not in expressions:
+                  raise SystemExit('UNKNOWN_EXTERNAL_SCHEDULE_SLOT')
+              if not re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00Z', scheduled):
+                  raise SystemExit('INVALID_SCHEDULED_UTC')
+              scheduled_at = dt.datetime.strptime(scheduled, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=dt.timezone.utc)
+              hour, minute, kind, number = expressions[slot]
+              if (scheduled_at.hour, scheduled_at.minute) != (hour,minute):
+                  raise SystemExit('SCHEDULED_CRON_TIME_MISMATCH')
+              planned = scheduled_at.replace(minute=0, second=0, microsecond=0)
+              seconds_from_planned = (now - planned).total_seconds()
+              print('SCHEDULED_CRON_EXPRESSION:', slot)
+              print('PLANNED_BUSINESS_SLOT_ICT:', (planned + dt.timedelta(hours=7)).strftime('%Y-%m-%dT%H:%M'))
+              print('TRIGGER_CLASSIFICATION:', kind)
+              print('SCHEDULED_UTC:', scheduled)
+              if now < scheduled_at - dt.timedelta(seconds=60) or seconds_from_planned > 90*60:
+                  allowed(False)
+                  print('SCHEDULER_RESULT_STATE: SKIPPED_EXPIRED')
+                  print('SKIP_REASON: GitHub delayed this scheduled Cloudflare trigger beyond authorized window; no Daily POST.')
+              else:
+                  allowed(True)
+                  print('SCHEDULER_RESULT_STATE: AUTHORIZED')
+          else:
+              raise SystemExit('UNSUPPORTED_DISPATCH_MODE')
+          PY

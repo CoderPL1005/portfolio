@@ -1,29 +1,25 @@
 name: Job Discovery Daily V1
 on:
-  schedule:
-    # BUSINESS slots: 07:00, 10:00, 13:00, 16:00, 19:00, 22:00 Asia/Ho_Chi_Minh.
-    # GitHub cron is UTC and best-effort; trigger at minutes 11 and 41 to avoid :00/:30 congestion.
-    # Both primary (:11) and fallback (:41) map to the same planned business slot and immutable request ID.
-    - cron: '11 0 * * *'
-    - cron: '41 0 * * *'
-    - cron: '11 3 * * *'
-    - cron: '41 3 * * *'
-    - cron: '11 6 * * *'
-    - cron: '41 6 * * *'
-    - cron: '11 9 * * *'
-    - cron: '41 9 * * *'
-    - cron: '11 12 * * *'
-    - cron: '41 12 * * *'
-    - cron: '11 15 * * *'
   workflow_dispatch:
     inputs:
       mode:
-        description: 'Execution mode (diagnostic_only is read-only and never starts an execution)'
+        description: 'diagnostic_only is read-only; external_scheduled is for Cloudflare Cron only'
         required: false
         default: 'diagnostic_only'
         type: choice
         options:
           - diagnostic_only
+          - external_scheduled
+      slot:
+        description: 'Exact authorized individual slot cron (only used by external_scheduled)'
+        required: false
+        default: ''
+        type: string
+      scheduled_utc:
+        description: 'Cloudflare controller.scheduledTime UTC, e.g. 2026-11-03T00:11:00Z'
+        required: false
+        default: ''
+        type: string
 permissions:
   contents: read
 concurrency:
@@ -35,73 +31,73 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 6
     steps:
-      - name: Classify trigger and verify cron schedule (pure logic; no provider or DB)
+      - name: Validate external schedule and select safe path (no provider / DB)
+        id: classify
         env:
           GITHUB_EVENT_NAME: ${{ github.event_name }}
-          DAILY_SLOT: ${{ github.event.schedule }}
+          DAILY_SLOT: ${{ inputs.slot }}
           DISPATCH_MODE: ${{ inputs.mode || 'diagnostic_only' }}
+          SCHEDULED_UTC: ${{ inputs.scheduled_utc }}
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import datetime, hashlib, os, sys
+          import datetime as dt, os, re
 
-          schedules = {
-              '11 0 * * *': (0, 11, 'primary', 1, '07:00 ICT', 'yesterday'),
-              '41 0 * * *': (0, 41, 'fallback', 1, '07:00 ICT', 'yesterday'),
-              '11 3 * * *': (3, 11, 'primary', 2, '10:00 ICT', 'yesterday+today'),
-              '41 3 * * *': (3, 41, 'fallback', 2, '10:00 ICT', 'yesterday+today'),
-              '11 6 * * *': (6, 11, 'primary', 3, '13:00 ICT', 'yesterday+today'),
-              '41 6 * * *': (6, 41, 'fallback', 3, '13:00 ICT', 'yesterday+today'),
-              '11 9 * * *': (9, 11, 'primary', 4, '16:00 ICT', 'today'),
-              '41 9 * * *': (9, 41, 'fallback', 4, '16:00 ICT', 'today'),
-              '11 12 * * *': (12, 11, 'primary', 5, '19:00 ICT', 'today'),
-              '41 12 * * *': (12, 41, 'fallback', 5, '19:00 ICT', 'today'),
-              '11 15 * * *': (15, 11, 'reserved', 6, '22:00 ICT', 'RESERVED_NONE'),
+          expressions = {
+              **{f'{m} {h} * * *': (h,m, 'primary' if m==11 else 'fallback', h//3+1)
+                 for h in (0,3,6,9,12) for m in (11,41)},
+              '11 15 * * *': (15,11,'reserved',6),
           }
-          if len(schedules) != 11:
-              raise SystemExit('CRON_TABLE_INVALID_COUNT')
+          def allowed(value):
+              with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as f:
+                  f.write(f'authorized={str(value).lower()}\n')
 
-          now_utc = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
-          for hour in (0, 3, 6, 9, 12):
-              p = f'11 {hour} * * *'
-              f = f'41 {hour} * * *'
-              if schedules[p][0] != schedules[f][0] or schedules[p][3] != schedules[f][3]:
-                  raise SystemExit('CRON_PRIMARY_FALLBACK_MISMATCH')
-              planned_iso = now_utc.replace(hour=hour, minute=0, second=0).strftime('%Y-%m-%dT%H:%M:%SZ')
-              digest_p = hashlib.sha256(('discovery-daily-v1|' + planned_iso).encode('utf-8')).hexdigest()[:32]
-              digest_f = hashlib.sha256(('discovery-daily-v1|' + planned_iso).encode('utf-8')).hexdigest()[:32]
-              if digest_p != digest_f:
-                  raise SystemExit('CRON_REQUEST_ID_MISMATCH')
-
-          event_name = os.environ.get('GITHUB_EVENT_NAME', '')
-          cron_expr = os.environ.get('DAILY_SLOT', '')
-          dispatch_mode = os.environ.get('DISPATCH_MODE', 'diagnostic_only')
-
-          print(f'WORKFLOW_EVENT: {event_name}')
-          print(f'ACTUAL_RUNNER_START_UTC: {now_utc.strftime("%Y-%m-%dT%H:%M:%SZ")}')
-
-          if event_name == 'workflow_dispatch':
-              if dispatch_mode != 'diagnostic_only':
-                  raise SystemExit(f'UNSUPPORTED_DISPATCH_MODE: {dispatch_mode}')
-              print('SCHEDULED_CRON_EXPRESSION: NONE')
-              print('PLANNED_BUSINESS_SLOT_ICT: NONE (manual diagnostic_only)')
+          event = os.environ.get('GITHUB_EVENT_NAME', '')
+          mode = os.environ.get('DISPATCH_MODE', '')
+          slot = os.environ.get('DAILY_SLOT', '')
+          scheduled = os.environ.get('SCHEDULED_UTC', '')
+          now = dt.datetime.now(dt.timezone.utc)
+          print('WORKFLOW_EVENT:', event)
+          print('ACTUAL_RUNNER_START_UTC:', now.strftime('%Y-%m-%dT%H:%M:%SZ'))
+          print('CRON_SELF_CHECK:', 'PASS' if len(expressions) == 11 else 'FAIL')
+          if len(expressions) != 11:
+              raise SystemExit('CRON_SELF_CHECK_FAILED')
+          if event != 'workflow_dispatch':
+              raise SystemExit('ONLY_WORKFLOW_DISPATCH_AUTHORIZED')
+          if mode == 'diagnostic_only':
+              if slot or scheduled:
+                  raise SystemExit('DIAGNOSTIC_INPUTS_NOT_ALLOWED')
+              allowed(False)
               print('TRIGGER_CLASSIFICATION: manual')
-              print('CRON_SELF_CHECK: PASS (11 expressions verified; primary/fallback share slot identity)')
-          elif event_name == 'schedule':
-              if cron_expr not in schedules:
-                  raise SystemExit(f'UNRECOGNIZED_SCHEDULE_EXPRESSION: {cron_expr}')
-              hour, minute, kind, slot_num, ict_label, scope = schedules[cron_expr]
-              planned_utc = now_utc.replace(hour=hour, minute=0, second=0)
-              print(f'SCHEDULED_CRON_EXPRESSION: {cron_expr}')
-              print(f'PLANNED_BUSINESS_SLOT_ICT: {ict_label} (slot={slot_num}, planned_utc={planned_utc.strftime("%Y-%m-%dT%H:%M:%SZ")}, scope={scope})')
-              print(f'TRIGGER_CLASSIFICATION: {kind}')
+              print('SCHEDULER_RESULT_STATE: DIAGNOSTIC_ONLY')
+          elif mode == 'external_scheduled':
+              if slot not in expressions:
+                  raise SystemExit('UNKNOWN_EXTERNAL_SCHEDULE_SLOT')
+              if not re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00Z', scheduled):
+                  raise SystemExit('INVALID_SCHEDULED_UTC')
+              scheduled_at = dt.datetime.strptime(scheduled, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=dt.timezone.utc)
+              hour, minute, kind, number = expressions[slot]
+              if (scheduled_at.hour, scheduled_at.minute) != (hour,minute):
+                  raise SystemExit('SCHEDULED_CRON_TIME_MISMATCH')
+              planned = scheduled_at.replace(minute=0, second=0, microsecond=0)
+              seconds_from_planned = (now - planned).total_seconds()
+              print('SCHEDULED_CRON_EXPRESSION:', slot)
+              print('PLANNED_BUSINESS_SLOT_ICT:', (planned + dt.timedelta(hours=7)).strftime('%Y-%m-%dT%H:%M'))
+              print('TRIGGER_CLASSIFICATION:', kind)
+              print('SCHEDULED_UTC:', scheduled)
+              if now < scheduled_at - dt.timedelta(seconds=60) or seconds_from_planned > 90*60:
+                  allowed(False)
+                  print('SCHEDULER_RESULT_STATE: SKIPPED_EXPIRED')
+                  print('SKIP_REASON: GitHub delayed this scheduled Cloudflare trigger beyond authorized window; no Daily POST.')
+              else:
+                  allowed(True)
+                  print('SCHEDULER_RESULT_STATE: AUTHORIZED')
           else:
-              raise SystemExit(f'UNSUPPORTED_WORKFLOW_EVENT: {event_name}')
+              raise SystemExit('UNSUPPORTED_DISPATCH_MODE')
           PY
-
       - name: Reserved 22:00 slot (future CV-submission threshold)
-        if: github.event_name == 'schedule' && github.event.schedule == '11 15 * * *'
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'external_scheduled' && inputs.slot == '11 15 * * *' && steps.classify.outputs.authorized == 'true'
         run: |
           echo 'RESERVED_SLOT_6: no API or provider request; threshold 5 submitted CVs not implemented.'
           echo 'DAILY_RESULT_STATE: RESERVED_FUTURE_CV_APPLICATION_THRESHOLD'
@@ -110,7 +106,7 @@ jobs:
           echo 'SKIP_REASON: Slot 6 (22:00 ICT) is reserved until actual submitted CV counting (<5 across first 4 slots) is implemented; no API or provider request sent.'
 
       - name: Render preflight (safe GET; never requests provider)
-        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.event.schedule != '11 15 * * *')
+        if: github.event_name == 'workflow_dispatch' && (inputs.mode == 'diagnostic_only' || (inputs.mode == 'external_scheduled' && inputs.slot != '11 15 * * *' && steps.classify.outputs.authorized == 'true'))
         shell: bash
         run: |
           set -euo pipefail
@@ -162,7 +158,7 @@ jobs:
           PY
 
       - name: Complete diagnostic_only run (read-only; never calls Daily POST or provider)
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'diagnostic_only'
         env:
           DISPATCH_MODE: ${{ inputs.mode || 'diagnostic_only' }}
         shell: bash
@@ -178,17 +174,17 @@ jobs:
           echo 'DIAGNOSTIC_LIMITATION_NOTE: Passing /health preflight in diagnostic_only mode does NOT prove authenticated POST /api/v1/discovery-daily/start or end-to-end scheduled execution.'
 
       - name: Start authorized daily slot once (no POST retry)
-        if: github.event_name == 'schedule' && github.event.schedule != '11 15 * * *'
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'external_scheduled' && inputs.slot != '11 15 * * *' && steps.classify.outputs.authorized == 'true'
         env:
           GITHUB_EVENT_NAME: ${{ github.event_name }}
           DISCOVERY_WORKER_KEY: ${{ secrets.DISCOVERY_WORKER_KEY }}
-          DAILY_SLOT: ${{ github.event.schedule }}
+          DAILY_SLOT: ${{ inputs.slot }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
         shell: bash
         run: |
           set -euo pipefail
-          test "$GITHUB_EVENT_NAME" = "schedule"
+          test "$GITHUB_EVENT_NAME" = "workflow_dispatch"
           test "$DAILY_SLOT" != "11 15 * * *"
           test -n "$DISCOVERY_WORKER_KEY"
           test -n "$DAILY_SLOT"

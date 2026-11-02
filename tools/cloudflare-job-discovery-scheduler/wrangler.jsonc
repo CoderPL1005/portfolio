@@ -1,0 +1,15 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "portfolio-job-discovery-cron",
+  "main": "./src/index.mjs",
+  "compatibility_date": "2026-11-02",
+  "workers_dev": false,
+  "observability": { "enabled": true },
+  "vars": { "DISPATCH_ENABLED": "false" },
+  "triggers": {
+    "crons": [
+      "11 0,3,6,9,12,15 * * *",
+      "41 0,3,6,9,12 * * *"
+    ]
+  }
+}

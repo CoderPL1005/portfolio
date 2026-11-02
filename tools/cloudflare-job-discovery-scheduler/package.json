@@ -1,0 +1,10 @@
+{
+  "name": "portfolio-job-discovery-cron",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "dev": "wrangler dev --test-scheduled",
+    "deploy": "wrangler deploy"
+  }
+}
