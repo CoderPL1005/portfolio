@@ -23,6 +23,7 @@ export function discoveryTitle(extracted: Record<string, unknown>): string {
   template: `
     <dl class="facts">
       @for(field of fields;track field.key){<div><dt>{{field.label}}</dt><dd>{{text(data()[field.key]) || 'Chưa có bằng chứng'}}</dd></div>}
+      @for(field of presentExtraFields();track field.key){<div><dt>{{field.label}}</dt><dd>{{text(data()[field.key])}}</dd></div>}
     </dl>
     @for(v of vacancies();track $index){
       <article><h4>{{text(v['title']) || 'Vị trí chưa xác định'}}</h4>
@@ -41,5 +42,10 @@ export class DiscoveryJobInformationComponent {
     {key:'location',label:'Địa chỉ'},{key:'experience',label:'Kinh nghiệm'},
     {key:'salary',label:'Mức lương'},{key:'technologies',label:'Công nghệ'},
     {key:'requirements',label:'Yêu cầu chung'},{key:'contact',label:'Liên hệ'}];
+  extraFields = [{key:'seniority',label:'Cấp độ'},{key:'workplaceType',label:'Nơi làm việc'},
+    {key:'employmentType',label:'Hình thức làm việc'},{key:'mandatorySkills',label:'Kỹ năng bắt buộc'},
+    {key:'optionalSkills',label:'Kỹ năng ưu tiên'},{key:'benefits',label:'Quyền lợi'},
+    {key:'recruitmentStatus',label:'Tình trạng tuyển dụng (chưa xác minh)'},{key:'mentionedPublishedAt',label:'Ngày đăng được đề cập'}];
+  presentExtraFields() { return this.extraFields.filter(f => !!this.text(this.data()[f.key])); }
   vacancies() { const rows=this.data()['vacancies']; return Array.isArray(rows) ? rows.map(object) : []; }
 }

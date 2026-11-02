@@ -13,11 +13,20 @@ public static class DiscoveryPostingFacts
         var lines=raw.Split('\n').Select(x=>x.TrimEnd('\r')).ToArray();
         var options=RegexOptions.IgnoreCase|RegexOptions.CultureInvariant;
         foreach(var (key,pattern) in new[]{
-            ("employmentType",@"^employment type:\s*(FULL_TIME|PART_TIME|INTERNSHIP|CONTRACT)\s*$"),
-            ("workplaceType",@"^workplace type:\s*(ONSITE|REMOTE|HYBRID)\s*$"),
+            ("employmentType",@"^(?:employment type|hình thức làm việc)\s*:\s*(FULL[_ -]?TIME|PART[_ -]?TIME|INTERNSHIP|CONTRACT|TOÀN THỜI GIAN|BÁN THỜI GIAN|THỰC TẬP)\s*$"),
+            ("workplaceType",@"^(?:workplace type|nơi làm việc|chế độ làm việc)\s*:\s*(ON[_ -]?SITE|REMOTE|HYBRID|TẠI VĂN PHÒNG|TỪ XA)\s*$"),
             ("notes",@"^(?:application instructions|hướng dẫn ứng tuyển):\s*(\S[^\r\n]{0,3999})\s*$")}){
             var found=lines.Select(line=>(line,m:Regex.Match(line.Trim(),pattern,options))).Where(x=>x.m.Success).ToArray();
-            if(found.Length==1)facts[key]=new(key=="notes"?found[0].m.Groups[1].Value.Trim():found[0].m.Groups[1].Value.ToUpperInvariant(),found[0].line);
+            if(found.Length==1){
+                var rawValue=found[0].m.Groups[1].Value.Trim();
+                var normalized=key switch{
+                    "employmentType"=>Regex.Replace(rawValue.ToUpperInvariant(),@"[\s\-]+","_") switch{
+                        "TOÀN_THỜI_GIAN"=>"FULL_TIME","BÁN_THỜI_GIAN"=>"PART_TIME","THỰC_TẬP"=>"INTERNSHIP",var v=>v},
+                    "workplaceType"=>Regex.Replace(rawValue.ToUpperInvariant(),@"[\s\-]+","_") switch{
+                        "ON_SITE" or "TẠI_VĂN_PHÒNG"=>"ONSITE","TỪ_XA"=>"REMOTE",var v=>v},
+                    _=>rawValue};
+                facts[key]=new(normalized,found[0].line);
+            }
         }
         var labelled=lines.Where(x=>Regex.IsMatch(x.Trim(),@"^(?:salary|lương)\s*:",options)).ToArray();
         if(labelled.Length==1)

@@ -49,4 +49,27 @@ describe('Validated Gemini fields in unified Discovery',()=>{
     expect(observationOrigins(o)).toContain('Gemini');
     expect(mount().nativeElement.querySelector('.job-card').textContent).toContain('chưa xác minh bên ngoài');
   });
+  it('renders conflict indicator, extraction error, provenance codes and extended structured JD fields',()=>{
+    const fullRaw='TAX NET tuyển dụng Intern Backend Developer\nThanh Xuân, Hà Nội\nC# / .NET\nKinh nghiệm: 1 năm\nQuyền lợi: Bảo hiểm đầy đủ\nKỹ năng bắt buộc: C#\nKỹ năng ưu tiên: Docker';
+    const span=(q:string)=>{const start=fullRaw.indexOf(q);return {value:q,status:'EXTRACTED',origin:'GEMINI',evidence:[{start,end:start+q.length,quote:q}]};};
+    const o:DiscoveryObservationDetail={...row(),extractionError:'SEMANTIC_UNAVAILABLE',
+      source:{...row().source,rawContent:fullRaw},
+      vacancies:[{fields:{
+        companyName:{...span('TAX NET'),origin:'DETERMINISTIC',conflict:true},
+        positionTitle:span('Intern Backend Developer'),
+        location:span('Thanh Xuân, Hà Nội'),
+        experience:span('1 năm'),
+        benefits:span('Bảo hiểm đầy đủ'),
+        mandatorySkills:{value:['C#'],status:'EXTRACTED',origin:'GEMINI',evidence:span('C#').evidence},
+        optionalSkills:{value:['Docker'],status:'EXTRACTED',origin:'GEMINI',evidence:span('Docker').evidence},
+        salaryMinimum:{value:null,status:'NOT_PROVIDED',origin:'UNSPECIFIED',evidence:[]}
+      }}]};
+    const map=convertToParamMap({executionId:o.executionId,itemIndex:'0'});
+    const api={discovery:vi.fn(()=>of({results:{items:[o],page:1,pageSize:20,total:1,totalPages:1},counts:{total:1,valid:0,needsReview:1,reviewed:0}})),discoveryExecutions:vi.fn(()=>of({items:[]}))};
+    TestBed.configureTestingModule({imports:[DiscoveryReviewPageComponent],providers:[provideRouter([]),{provide:JobHuntingService,useValue:api},{provide:ActivatedRoute,useValue:{paramMap:of(map),queryParamMap:of(convertToParamMap({})),snapshot:{paramMap:map}}}]});
+    const detailFixture=TestBed.createComponent(DiscoveryReviewPageComponent);detailFixture.detectChanges();
+    const detailText=detailFixture.nativeElement.textContent;
+    for(const expected of ['DETERMINISTIC','GEMINI','UNSPECIFIED','1 năm','Bảo hiểm đầy đủ','Docker','Có giá trị khác từ Gemini; giữ nguyên thông tin deterministic đã có bằng chứng.','SEMANTIC_UNAVAILABLE'])
+      expect(detailText).toContain(expected);
+  });
 });

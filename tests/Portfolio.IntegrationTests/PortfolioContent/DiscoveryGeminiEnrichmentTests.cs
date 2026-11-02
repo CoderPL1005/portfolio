@@ -96,4 +96,68 @@ public sealed class DiscoveryGeminiEnrichmentTests(AuthApiFactory root):IClassFi
             Assert.Empty(await db.JobPostings.ToArrayAsync());
         });s.AssertOffline();
     }
+    [Fact]
+    public async Task Claimed_semantic_state_is_never_retried_and_Daily_scheduled_executions_keep_Gemini_disabled()
+    {
+        using var s=await RecoveryScenario.Create(root,1);var item=(await s.NormalResult()).ReviewBundle!.Items[0];
+        await s.Read(async db=>{
+            var llm=new Generator();var service=Service(db,llm);var e=await db.DiscoveryExecutions.SingleAsync();
+            var review=item with {ContentValidity=item.ContentValidity with {Status="VALID_RECRUITMENT"}};
+            await service.ProcessAsync(s.Id,new(0,item.ContentHash,review,[],ExpectedVersion:e.Version,ExpectedWorkflowRunId:"10001"),null,default);
+            var obs=await db.DiscoveryExecutionObservations.SingleAsync();
+            obs.SemanticState="CLAIMED";await db.SaveChangesAsync();
+            await Assert.ThrowsAsync<ConflictException>(()=>service.ExtractPersistedAsync(s.Id,new(0,item.RawContent!,item.ContentHash!,e.Version,"10001",true),default));
+            Assert.Equal(0,llm.Calls);Assert.Equal(0,e.SemanticAttempts);
+
+            // Release active key and seed portfolio snapshot to verify DAILY_SCHEDULED start snapshot keeps semanticEnabled=false even when Gemini options + confirmGeminiFreeTier=true are supplied
+            e.ActiveKey=null;
+            var techId=Guid.NewGuid();
+            db.Technologies.Add(new Portfolio.Domain.Entities.Technology{Id=techId,Name="C#",Category="Backend",IsActive=true});
+            db.Skills.Add(new Portfolio.Domain.Entities.Skill{Id=Guid.NewGuid(),Name="ASP.NET Core",Category="Backend",TechnologyId=techId,ExperienceLevel="Fresher",IsPublished=true});
+            db.CandidateJobPreferences.Add(new Portfolio.Domain.Entities.CandidateJobPreferences{
+                Id=Guid.NewGuid(),SingletonKey="CURRENT",TargetRoles=System.Text.Json.JsonDocument.Parse("[\"Backend Developer\"]"),
+                PreferredTechnologies=System.Text.Json.JsonDocument.Parse("[\"C#\"]"),AcceptableLocations=System.Text.Json.JsonDocument.Parse("[\"Hanoi\"]"),
+                WorkplaceTypes=System.Text.Json.JsonDocument.Parse("[\"Onsite\"]"),EmploymentTypes=System.Text.Json.JsonDocument.Parse("[\"FullTime\"]"),Version=1});
+            await db.SaveChangesAsync();
+            var dailyService=new DiscoveryExecutionService(db,new AcceptedGitHub(),llm,Options.Create(new DiscoveryExecutionOptions{
+                Enabled=true,DailyEnabled=true,FreePlanConfirmed=true,NoCashConfirmed=true,SemanticEnabled=true,GeminiFreeTierConfirmed=true}),new Actor(),
+                new FixedClock(DateTimeOffset.Parse("2026-11-02T00:05:00Z")));
+            var slotRequestId=DiscoveryDailySlots.RequestId(DateTimeOffset.Parse("2026-11-02T00:00:00Z"));
+            await dailyService.StartAsync(slotRequestId,"DAILY_SCHEDULED",default,confirmGeminiFreeTier:true);
+            var daily=await db.DiscoveryExecutions.SingleAsync(x=>x.ClientRequestId==slotRequestId);
+            using var config=System.Text.Json.JsonDocument.Parse(daily.ConfigurationJson);
+            Assert.False(config.RootElement.GetProperty("semanticEnabled").GetBoolean());
+        });s.AssertOffline();
+    }
+    [Theory]
+    [InlineData(0,1)]
+    [InlineData(2,2)]
+    [InlineData(10,5)]
+    public async Task MaximumSemanticAttempts_is_configuration_driven_and_clamped_between_1_and_5(int configured,int expectedLimit)
+    {
+        using var s=await RecoveryScenario.Create(root);var template=(await s.NormalResult()).ReviewBundle!.Items[0];
+        await s.Read(async db=>{
+            var llm=new Generator();
+            var service=new DiscoveryExecutionService(db,new NoGitHub(),llm,Options.Create(new DiscoveryExecutionOptions{
+                SemanticEnabled=true,GeminiFreeTierConfirmed=true,MaximumSemanticAttempts=configured}),new Actor(),TimeProvider.System);
+            var e=await db.DiscoveryExecutions.SingleAsync();
+            foreach(var o in await db.DiscoveryExecutionObservations.OrderBy(x=>x.ItemIndex).ToArrayAsync()){
+                using var doc=System.Text.Json.JsonDocument.Parse(o.PayloadJson);var source=doc.RootElement;
+                var raw=source.GetProperty("rawContent").GetString()!;
+                var review=template with {ItemIndex=o.ItemIndex,ProviderPostId=source.GetProperty("providerPostId").GetString(),SourceUrl=source.GetProperty("sourceUrl").GetString(),RawContent=raw,ContentHash=o.ContentHash,
+                    ContentGroupHash=DiscoveryReviewRules.Hash(raw),ContentValidity=template.ContentValidity with {Status="VALID_RECRUITMENT"}};
+                await service.ProcessAsync(s.Id,new(o.ItemIndex,o.ContentHash,review,[],ExpectedVersion:e.Version,ExpectedWorkflowRunId:"10001"),null,default);
+                var request=new DiscoveryPersistedSemanticRequest(o.ItemIndex,raw,o.ContentHash!,e.Version,"10001",true);
+                if(o.ItemIndex<expectedLimit)await service.ExtractPersistedAsync(s.Id,request,default);
+                else await Assert.ThrowsAsync<ConflictException>(()=>service.ExtractPersistedAsync(s.Id,request,default));
+            }
+            Assert.Equal(expectedLimit,llm.Calls);Assert.Equal(expectedLimit,e.SemanticAttempts);
+        });s.AssertOffline();
+    }
+    private sealed class AcceptedGitHub:IDiscoveryGitHubClient
+    {
+        public Task<string> DispatchAsync(Guid id,CancellationToken ct)=>Task.FromResult("ACCEPTED");
+        public Task<bool> VerifyRunAsync(Guid id,string run,CancellationToken ct)=>Task.FromResult(true);
+    }
+    private sealed class FixedClock(DateTimeOffset now):TimeProvider{public override DateTimeOffset GetUtcNow()=>now;}
 }

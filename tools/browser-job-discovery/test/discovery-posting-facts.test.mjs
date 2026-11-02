@@ -14,3 +14,13 @@ test('deadline is distinct from publication and requires explicit timezone',()=>
   assert.equal(extract('Deadline: 2026-11-30T17:00:00+07:00').expiresAt.value,'2026-11-30T17:00:00+07:00');
   for(const raw of ['Published: 2026-11-30T17:00:00Z','Deadline: 2026-11-30','Deadline: 2026-02-30T17:00:00Z','Deadline: 2026-11-30T17:00:00Z\nDeadline: 2026-12-01T17:00:00Z'])assert.deepEqual(extract(raw),{});
 });
+test('explicit Vietnamese and hyphenated employmentType and workplaceType normalize with exact line quote',()=>{
+  const facts=extract('Hình thức làm việc: Toàn thời gian\nNơi làm việc: Hybrid\nHướng dẫn ứng tuyển: Gửi CV qua email hr@example.com');
+  assert.equal(facts.employmentType.value,'FULL_TIME');
+  assert.equal(facts.employmentType.quote,'Hình thức làm việc: Toàn thời gian');
+  assert.equal(facts.workplaceType.value,'HYBRID');
+  assert.equal(facts.workplaceType.quote,'Nơi làm việc: Hybrid');
+  assert.equal(facts.notes.value,'Gửi CV qua email hr@example.com');
+  assert.equal(extract('Employment type: Full-time\nWorkplace type: On-site').employmentType.value,'FULL_TIME');
+  assert.equal(extract('Employment type: Full-time\nWorkplace type: On-site').workplaceType.value,'ONSITE');
+});

@@ -23,4 +23,16 @@ public sealed class DiscoveryPostingFactsTests
     public void Ambiguous_or_unsupported_values_abstain(string raw)=>Assert.Empty(DiscoveryPostingFacts.Extract(raw));
     [Fact]public void Deadline_keeps_explicit_offset_not_collection_time()
     {Assert.Equal("2026-11-30T17:00:00+07:00",DiscoveryPostingFacts.Extract("Deadline: 2026-11-30T17:00:00+07:00")["expiresAt"].Value);}
+    [Fact]public void Explicit_Vietnamese_and_hyphenated_employment_and_workplace_types_are_evidenced()
+    {
+        var facts=DiscoveryPostingFacts.Extract("Hình thức làm việc: Toàn thời gian\nNơi làm việc: Hybrid\nHướng dẫn ứng tuyển: Gửi CV qua email hr@example.com");
+        Assert.Equal("FULL_TIME",facts["employmentType"].Value);
+        Assert.Equal("Hình thức làm việc: Toàn thời gian",facts["employmentType"].Quote);
+        Assert.Equal("HYBRID",facts["workplaceType"].Value);
+        Assert.Equal("Nơi làm việc: Hybrid",facts["workplaceType"].Quote);
+        Assert.Equal("Gửi CV qua email hr@example.com",facts["notes"].Value);
+        var en=DiscoveryPostingFacts.Extract("Employment type: Full-time\nWorkplace type: On-site");
+        Assert.Equal("FULL_TIME",en["employmentType"].Value);
+        Assert.Equal("ONSITE",en["workplaceType"].Value);
+    }
 }

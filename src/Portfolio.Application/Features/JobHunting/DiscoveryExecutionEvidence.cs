@@ -84,6 +84,64 @@ public sealed partial class DiscoveryExecutionService
             !Regex.IsMatch(prefix.Value,@"(?:^|\s)(?:nếu|bạn|ví|dụ|example|candidate)(?:\s|$)",RegexOptions.IgnoreCase);
     }
 
+    private static bool SchemaQuoteSupported(string name,JsonElement original,string? quote)
+    {
+        if(string.IsNullOrWhiteSpace(quote))return false;
+        var clean=Regex.Replace(quote,@"https?://\S+|[\p{L}\p{N}._+%\-]+@[\p{L}\p{N}.\-]+\.[a-z]{2,}","",RegexOptions.IgnoreCase).Trim();
+        var negated=Regex.IsMatch(clean,@"\b(?:not|never|no|without|\w+n['’]t)\b|không|chưa|chẳng",RegexOptions.IgnoreCase);
+        if(name=="recruitmentStatus"&&original.ValueKind==JsonValueKind.String){
+            var closed=Regex.IsMatch(clean,@"đóng tuyển|ngừng tuyển|tạm dừng tuyển|\b(?:closed|paused|no longer (?:accepting|hiring|recruiting)|not hiring|stopped hiring)\b|không\s+(?:còn\s+)?tuyển|chưa\s+tuyển",RegexOptions.IgnoreCase);
+            return original.GetString() switch{
+                "CLOSED"=>closed,
+                "ANNOUNCED_UNVERIFIED"=>!negated&&!closed&&!Regex.IsMatch(clean,@"\b(?:previously|former|candidate|looking for a job)\b|từng|đã từng|tìm việc",RegexOptions.IgnoreCase)&&
+                    Regex.IsMatch(clean,@"\b(?:tuyển dụng|tuyển|hiring|recruiting|vacancy|vacancies)\b",RegexOptions.IgnoreCase),
+                _=>false}; // Never accept VERIFIED_HIRING or ungrounded status codes.
+        }
+        if(name=="seniority"&&original.ValueKind==JsonValueKind.String){
+            if(negated)return false;
+            var matched=new[]{
+                ("INTERN",Regex.IsMatch(clean,@"\bintern(?:ship)?\b|thực tập(?:\s+sinh)?",RegexOptions.IgnoreCase)),
+                ("FRESHER",Regex.IsMatch(clean,@"\bfresher\b",RegexOptions.IgnoreCase)),
+                ("JUNIOR",Regex.IsMatch(clean,@"\bjunior\b",RegexOptions.IgnoreCase)),
+                ("MIDDLE",Regex.IsMatch(clean,@"\b(?:middle|mid[- ]level)\b",RegexOptions.IgnoreCase)),
+                ("SENIOR",Regex.IsMatch(clean,@"\bsenior\b",RegexOptions.IgnoreCase)),
+                ("LEAD",Regex.IsMatch(clean,@"\blead\b",RegexOptions.IgnoreCase))
+            }.Where(x=>x.Item2).Select(x=>x.Item1).ToArray();
+            return matched.Length==1&&matched[0]==original.GetString();
+        }
+        if(name=="experienceYears"&&(original.ValueKind==JsonValueKind.Number||original.ValueKind==JsonValueKind.Object)){
+            if(Regex.IsMatch(clean,@"nice to have|preferred|optional|là lợi thế|ưu tiên",RegexOptions.IgnoreCase))return false;
+            decimal? min=null,max=null;var count=0;
+            if(Regex.IsMatch(clean,@"^(?:experience\s*:\s*|kinh nghiệm\s*:\s*)?(?:no experience required|không yêu cầu kinh nghiệm)\.?$",RegexOptions.IgnoreCase)){min=0m;max=null;count++;}
+            var range=Regex.Matches(clean,@"\b(\d+(?:\.\d+)?)\s*(?:–|—|-|to|đến)\s*(\d+(?:\.\d+)?)\s*(years?|năm|months?|tháng)\b",RegexOptions.IgnoreCase);
+            foreach(Match m in range){
+                var factor=Regex.IsMatch(m.Groups[3].Value,@"month|tháng",RegexOptions.IgnoreCase)?12m:1m;
+                min=decimal.Parse(m.Groups[1].Value,System.Globalization.CultureInfo.InvariantCulture)/factor;
+                max=decimal.Parse(m.Groups[2].Value,System.Globalization.CultureInfo.InvariantCulture)/factor;
+                count++;
+            }
+            if(range.Count==0){
+                var single=Regex.Matches(clean,@"(?:(up to|tối đa|at least|minimum|tối thiểu|từ)\s*)?\b(\d+(?:\.\d+)?)\s*(\+)?\s*(years?|năm|months?|tháng)\b",RegexOptions.IgnoreCase);
+                foreach(Match m in single){
+                    if(negated)return false;
+                    var factor=Regex.IsMatch(m.Groups[4].Value,@"month|tháng",RegexOptions.IgnoreCase)?12m:1m;
+                    var amount=decimal.Parse(m.Groups[2].Value,System.Globalization.CultureInfo.InvariantCulture)/factor;
+                    var upper=Regex.IsMatch(m.Groups[1].Value,@"up to|tối đa",RegexOptions.IgnoreCase);
+                    min=upper?null:amount;max=upper?amount:null;
+                    count++;
+                }
+            }
+            if(count!=1||(min.HasValue&&max.HasValue&&min.Value>max.Value))return false;
+            if(original.ValueKind==JsonValueKind.Number)return original.TryGetDecimal(out var n)&&min.HasValue&&!max.HasValue&&Math.Abs(n-min.Value)<0.0001m;
+            decimal? Bound(string prop)=>original.TryGetProperty(prop,out var b)&&b.ValueKind==JsonValueKind.Number&&b.TryGetDecimal(out var d)?d:b.ValueKind==JsonValueKind.Null?null:decimal.MinValue;
+            var oMin=Bound("minimum");var oMax=Bound("maximum");
+            if(oMin==decimal.MinValue||oMax==decimal.MinValue)return false;
+            return (oMin.HasValue==min.HasValue&&(!oMin.HasValue||Math.Abs(oMin.Value-min!.Value)<0.0001m))&&
+                (oMax.HasValue==max.HasValue&&(!oMax.HasValue||Math.Abs(oMax.Value-max!.Value)<0.0001m));
+        }
+        return false;
+    }
+
     private static bool GeneratedFactV2(string? generation,string key,JsonElement submitted,string raw,string? submittedTitle)
     {
         if(generation is null||submitted.ValueKind!=JsonValueKind.Object||submittedTitle is null)return false;
@@ -94,16 +152,16 @@ public sealed partial class DiscoveryExecutionService
             if(Text(root,"schemaVersion")!="ai-job-extraction-v1")return false;
             var names=key switch {
                 "companyName"=>new[]{"employer"},"positionTitle"=>["title"],"location"=>["location","sharedLocation"],
-                "technologyStack"=>["technologies"],"experienceRequirements"=>["requirements","sharedRequirements"],
-                "applicationUrl"=>["applicationUrl"],"benefits"=>["sharedBenefits"],
+                "technologyStack"=>["technologies"],"experienceRequirements"=>["requirements","sharedRequirements","experienceYears"],
+                "applicationUrl"=>["applicationUrl"],"benefits"=>["sharedBenefits"],"experience"=>["experienceYears"],
                 "mentionedPublishedAt"=>["publishedAt"],_=>[key]};
             var spans=Array(submitted,"evidence");
             if(spans.Length is <1 or >40||!submitted.TryGetProperty("value",out var proposed))return false;
+            var modelVacancies=Array(root,"vacancies");
             // Bind claims to the original model vacancy, not any matching field
             // elsewhere in the generation. Root fields remain post-level only.
-            foreach(var vacancy in Array(root,"vacancies")){
-                if(!vacancy.TryGetProperty("title",out var title)||Text(title,"status") is not("POST_MENTIONED" or "VERIFIED")||Text(title,"value") is not {} modelTitle||
-                    !string.Equals(modelTitle,submittedTitle,StringComparison.OrdinalIgnoreCase))continue;
+            foreach(var vacancy in modelVacancies){
+                if(!vacancy.TryGetProperty("title",out var title)||Text(title,"status") is not("POST_MENTIONED" or "VERIFIED")||Text(title,"value") is not {} modelTitle)continue;
                 var titleSpans=Array(title,"evidence");
                 if(titleSpans.Length!=1||Text(titleSpans[0],"quote") is not {Length:>0} tq||tq.Contains('\n')||tq.Contains('\r')||
                     !Regex.IsMatch(modelTitle,@"\b(?:backend|frontend|fullstack|mobile|qa|pqa|devops|data|security|developer|engineer|designer|tester|analyst)\b",RegexOptions.IgnoreCase))continue;
@@ -119,28 +177,34 @@ public sealed partial class DiscoveryExecutionService
                 var line=raw[lineStart..lineEnd].TrimEnd('\r');
                 var heading=Regex.IsMatch(line,@"^\s*(?:[-*#]+\s*|\d+[.)]\s*)?"+Regex.Escape(modelTitle)+@"\s*(?::[^\r\n]*)?$",RegexOptions.IgnoreCase|RegexOptions.CultureInvariant);
                 var inline=Regex.IsMatch(line,@"^[\p{Lu}\p{N}][\p{L}\p{N} .&'\-]{0,79}?\s+(?:đang\s+)?(?:tuyển dụng|tuyển|is hiring|hiring)\s+"+Regex.Escape(modelTitle)+@"\s*(?:\([A-Za-z0-9#.+ /\-]{1,40}\))?(?:\s+(?:tại|in)\s+[\p{L}\p{N}][\p{L}\p{N} ,'\-]{0,79})?[.!]?\s*$",RegexOptions.CultureInvariant);
+                if(!string.Equals(modelTitle,submittedTitle,StringComparison.OrdinalIgnoreCase)&&
+                    !(modelVacancies.Length==1&&inline&&string.Equals(line.Trim(),submittedTitle.Trim(),StringComparison.OrdinalIgnoreCase)))continue;
                 if(!heading&&!inline||Regex.IsMatch(line,@"\b(?:not|never|no|without|previously|former|closed|paused|example|candidate)\b|không|chưa|chẳng|đóng|ngừng|từng|đã",RegexOptions.IgnoreCase))continue;
                 var scopeStart=inline?lineStart+line.IndexOf(modelTitle,StringComparison.OrdinalIgnoreCase):lineStart;
                 var end=headings.Where(n=>n>lineStart).DefaultIfEmpty(raw.Length).Min();
                 foreach(var scope in new[]{vacancy,root})foreach(var name in names){
                     if(scope.Equals(root)&&name is not("employer" or "sharedLocation" or "sharedRequirements" or "sharedBenefits" or "applicationUrl" or "publishedAt" or "recruitmentStatus"))continue;
                     if(!scope.TryGetProperty(name,out var fact)||Text(fact,"status") is not("POST_MENTIONED" or "VERIFIED")||
-                        !fact.TryGetProperty("value",out var original)||original.ValueKind==JsonValueKind.Null||Canonical(original)!=Canonical(proposed))continue;
+                        !fact.TryGetProperty("value",out var original)||original.ValueKind==JsonValueKind.Null)continue;
                     var originalSpans=Array(fact,"evidence");
+                    var exactValue=Canonical(original)==Canonical(proposed);
+                    var quoteValue=key is "experience" or "experienceRequirements" or "seniority" or "recruitmentStatus"&&
+                        name is "experienceYears" or "seniority" or "recruitmentStatus"&&
+                        proposed.ValueKind==JsonValueKind.String&&originalSpans.Length>0&&
+                        Text(originalSpans[0],"quote")==proposed.GetString()&&SchemaQuoteSupported(name,original,proposed.GetString());
+                    if(!exactValue&&!quoteValue)continue;
                     if(originalSpans.Length!=spans.Length||!originalSpans.Zip(spans).All(p=>VerifiedSpan(p.First,p.Second,raw)))continue;
                     var postLevel=scope.Equals(root);
                     var sharedStart=Regex.Matches(raw,@"(?im)^(?:yêu cầu chung|shared requirements|quyền lợi chung|shared benefits|địa chỉ chung|ứng tuyển chung)[^\n]*")
                         .Select(m=>m.Index).Where(n=>n>headings.Last()).DefaultIfEmpty(raw.Length).First();
                     if(!postLevel&&name!="title"&&spans.Any(s=>!(name=="seniority"&&s.GetProperty("end").GetInt32()<=headings[0])&&
                         (s.GetProperty("start").GetInt32()<scopeStart||s.GetProperty("end").GetInt32()>Math.Min(end,sharedStart))))continue;
-                    if(postLevel&&name is "sharedLocation" or "sharedRequirements" or "sharedBenefits" or "applicationUrl"&&headings.Length>1&&
+                    if(postLevel&&name is "sharedLocation" or "sharedRequirements" or "sharedBenefits" or "applicationUrl" or "recruitmentStatus"&&headings.Length>1&&
                         spans.Any(s=>s.GetProperty("start").GetInt32()>=headings[0]&&s.GetProperty("start").GetInt32()<sharedStart))continue;
-                    // V2 accepts only original literal claims. Existing STRICT
-                    // compatibility conversions are never extended to corrections.
                     if(key=="applicationUrl"){
                         if(proposed.ValueKind!=JsonValueKind.String||!DiscoveryReviewRules.SafeUrl(proposed.GetString())||
                             !spans.Any(s=>(Text(s,"quote")??"").Split((char[]?)null,StringSplitOptions.RemoveEmptyEntries).Contains(proposed.GetString())))continue;
-                    }else if(!LiteralClaim(proposed,spans))continue;
+                    }else if(!quoteValue&&!LiteralClaim(proposed,spans))continue;
                     if(key is "mandatorySkills" or "optionalSkills"&&!SkillClaimSupported(key,proposed,spans,raw))continue;
                     if(key=="mentionedPublishedAt"){
                         var date=proposed.GetString();

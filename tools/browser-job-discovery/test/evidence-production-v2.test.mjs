@@ -3,13 +3,20 @@ import assert from 'node:assert/strict';
 import {captureEvidence} from './fixtures/evidence-production-v2.mjs';
 import {extractRecruitmentPost} from '../src/ai-job-extraction.mjs';
 
-for(const scenario of ['exact','corrected','bytes','inline','multi','cross','ambiguous','fabricated','missing','unknown','conflict','rejected'])test(`offline worker V2: ${scenario}`,async()=>{
+for(const scenario of ['exact','corrected','bytes','inline','multi','three-roles','cross','ambiguous','fabricated','missing','unknown','conflict','rejected'])test(`offline worker V2: ${scenario}`,async()=>{
   const wire=await captureEvidence(scenario);const p=wire.processing.at(-1);assert.ok(p);assert.equal(p.evidencePolicy,'V2');
   for(const v of p.vacancies)for(const f of Object.values(v.fields))for(const e of f.evidence)assert.equal(wire.observation.rawContent.slice(e.start,e.end),e.quote);
   if(scenario==='unknown')assert.equal(wire.cacheReads,0);
   if(scenario==='fabricated')assert.ok(p.vacancies.every(v=>v.companyName!=='Fabricated Labs'));
   if(scenario==='ambiguous')assert.ok(p.vacancies.every(v=>v.fields.location.origin!=='GEMINI'));
   if(scenario==='cross')assert.ok(p.vacancies.filter(v=>v.positionTitle?.includes('Backend')).every(v=>!v.technologyStack?.includes('React')));
+  if(scenario==='three-roles'){
+    assert.equal(p.vacancies.length,3);
+    assert.deepEqual(p.vacancies.map(v=>v.positionTitle),['Intern Backend Developer','Intern Frontend Developer','Intern QA Tester']);
+    assert.deepEqual(p.vacancies[0].technologyStack,['.NET','C#']);
+    assert.deepEqual(p.vacancies[1].technologyStack,['React']);
+    assert.deepEqual(p.vacancies[2].technologyStack,['Postman']);
+  }
 });
 test('default remains strict and rejects unknown policy before any provider call',async()=>{
   const {observation,generation}=await captureEvidence();let calls=0;

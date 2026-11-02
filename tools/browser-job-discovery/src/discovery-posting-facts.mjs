@@ -5,12 +5,17 @@ export function supportedPostingFacts(raw){
   const money=/^(?:salary|lương)\s*:\s*((?:\d{1,3}(?:[.,]\d{3})+|\d+))(?:\s*[-–]\s*((?:\d{1,3}(?:[.,]\d{3})+|\d+)))?\s*(triệu\s+)?(VND|USD|EUR)(?:\s*\/\s*(tháng|month|năm|year|giờ|hour))?\s*$/iu;
   const lines=raw.split(/\r?\n/u),matches=lines.map(line=>({line,m:line.trim().match(money)})).filter(x=>x.m);
   for(const [key,pattern] of [
-    ['employmentType',/^employment type:\s*(FULL_TIME|PART_TIME|INTERNSHIP|CONTRACT)\s*$/iu],
-    ['workplaceType',/^workplace type:\s*(ONSITE|REMOTE|HYBRID)\s*$/iu],
+    ['employmentType',/^(?:employment type|hình thức làm việc)\s*:\s*(FULL[_ -]?TIME|PART[_ -]?TIME|INTERNSHIP|CONTRACT|TOÀN THỜI GIAN|BÁN THỜI GIAN|THỰC TẬP)\s*$/iu],
+    ['workplaceType',/^(?:workplace type|nơi làm việc|chế độ làm việc)\s*:\s*(ON[_ -]?SITE|REMOTE|HYBRID|TẠI VĂN PHÒNG|TỪ XA)\s*$/iu],
     ['notes',/^(?:application instructions|hướng dẫn ứng tuyển):\s*(\S[^\r\n]{0,3999})\s*$/iu]
   ]){
     const items=lines.map(line=>({line,m:line.trim().match(pattern)})).filter(x=>x.m);
-    if(items.length===1)out[key]={value:key==='notes'?items[0].m[1].trim():items[0].m[1].toUpperCase(),quote:items[0].line};
+    if(items.length===1){
+      const rawValue=items[0].m[1].trim(),token=rawValue.toUpperCase().replace(/[\s-]+/gu,'_');
+      const normalized=key==='employmentType'?({TOÀN_THỜI_GIAN:'FULL_TIME',BÁN_THỜI_GIAN:'PART_TIME',THỰC_TẬP:'INTERNSHIP'}[token]??token):
+        key==='workplaceType'?({ON_SITE:'ONSITE',TẠI_VĂN_PHÒNG:'ONSITE',TỪ_XA:'REMOTE'}[token]??token):rawValue;
+      out[key]={value:normalized,quote:items[0].line};
+    }
   }
   const labelled=lines.filter(line=>/^\s*(?:salary|lương)\s*:/iu.test(line));
   if(matches.length===1&&labelled.length===1){

@@ -46,6 +46,9 @@ export function observationEnriched(row:DiscoveryObservationDetail):boolean {
   return row.semanticState==='COMPLETED'&&row.vacancies.some(v=>Object.values(v.fields??{}).some(f=>
     f.origin==='GEMINI'&&f.status==='EXTRACTED'&&f.value!==null&&f.evidence?.some(e=>row.source.rawContent?.slice(e.start,e.end)===e.quote)));
 }
+export function observationHasConflict(row:DiscoveryObservationDetail):boolean {
+  return row.vacancies.some(v=>Object.values(v.fields??{}).some(f=>f.conflict===true));
+}
 export const jdFieldLabels:Record<string,string>={companyName:'Công ty',positionTitle:'Vị trí',location:'Địa điểm',technologyStack:'Công nghệ',
   experienceRequirements:'Yêu cầu',employmentType:'Hình thức làm việc',workplaceType:'Nơi làm việc',salaryMinimum:'Lương tối thiểu',salaryMaximum:'Lương tối đa',
   salaryCurrency:'Đơn vị tiền',salaryPeriod:'Kỳ lương',applicationEmail:'Email ứng tuyển',applicationUrl:'Link ứng tuyển',expiresAt:'Hạn ứng tuyển',notes:'Hướng dẫn / ghi chú',

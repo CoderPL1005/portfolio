@@ -8,6 +8,8 @@ export async function captureEvidence(scenario='corrected',policy='V2'){
   let raw='Hiring\nIntern Backend Developer\nPartner: TAX NET\nReference: 35 Lê Văn Thiêm 😀\nRequirements: C# and .NET\nBenefits: Lunch';
   if(scenario==='inline')raw=raw.replace('Hiring\nIntern Backend Developer','TAX NET tuyển dụng Intern Backend Developer');
   if(scenario==='multi'||scenario==='cross')raw+='\nIntern Frontend Developer\nRequirements: React';
+  if(scenario==='three-roles')raw+='\nIntern Frontend Developer\nRequirements: React\nIntern QA Tester\nRequirements: Postman';
+  if(scenario==='schema-quotes')raw+='\nExperience: 1 năm kinh nghiệm\nLevel: thực tập sinh';
   if(scenario==='ambiguous')raw+='\nReference: 35 Lê Văn Thiêm 😀';
   if(scenario==='conflict')raw='Company: Original Labs\nLocation: Hanoi\n'+raw;
   raw+='\nPublished on: 2026-10-01';
@@ -17,7 +19,16 @@ export async function captureEvidence(scenario='corrected',policy='V2'){
   const output={schemaVersion:'ai-job-extraction-v1',...Object.fromEntries(POST_FIELDS.map(k=>[k,unknown()])),
     employer:fact(scenario==='fabricated'?'Fabricated Labs':'TAX NET','TAX NET'),sharedLocation:fact('35 Lê Văn Thiêm 😀'),sharedBenefits:fact('Lunch'),
     publishedAt:fact('2026-10-01'),vacancies:[{...vacancy('Intern Backend Developer',['C#','.NET'],'C# and .NET'),mandatorySkills:fact(['C#'],'Requirements: C# and .NET')}]};
+  if(scenario==='schema-quotes'){
+    output.recruitmentStatus=fact('ANNOUNCED_UNVERIFIED','Hiring');
+    output.vacancies[0].experienceYears=fact(1,'1 năm kinh nghiệm');
+    output.vacancies[0].seniority=fact('INTERN','thực tập sinh');
+  }
   if(scenario==='multi'||scenario==='cross')output.vacancies.push(vacancy('Intern Frontend Developer',['React'],'React'));
+  if(scenario==='three-roles'){
+    output.vacancies.push(vacancy('Intern Frontend Developer',['React'],'React'));
+    output.vacancies.push(vacancy('Intern QA Tester',['Postman'],'Postman'));
+  }
   if(scenario==='cross')output.vacancies[0].technologies=fact(['React'],'React');
   if(scenario==='missing'){output.employer=unknown();output.sharedLocation=unknown();}
   if(scenario!=='exact'){
