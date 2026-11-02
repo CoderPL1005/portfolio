@@ -1,13 +1,20 @@
 name: Job Discovery Daily V1
 on:
   schedule:
-    # UTC schedule: 07:00, 10:00, 13:00, 16:00, 19:00, 22:00 in Vietnam (UTC+7)
+    # BUSINESS slots: 07:00, 10:00, 13:00, 16:00, 19:00, 22:00 Asia/Ho_Chi_Minh.
+    # GitHub cron is UTC and best-effort; may be delayed or dropped.
     - cron: '0 0 * * *'
     - cron: '0 3 * * *'
     - cron: '0 6 * * *'
     - cron: '0 9 * * *'
     - cron: '0 12 * * *'
     - cron: '0 15 * * *'
+    # One fallback per provider slot. Same immutable request ID, NEVER a sixth provider request.
+    - cron: '30 0 * * *'
+    - cron: '30 3 * * *'
+    - cron: '30 6 * * *'
+    - cron: '30 9 * * *'
+    - cron: '30 12 * * *'
 permissions:
   contents: read
 concurrency:
@@ -17,9 +24,35 @@ jobs:
   schedule:
     if: github.ref == 'refs/heads/main' && github.run_attempt == 1
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 6
     steps:
-      - name: Start one authorized daily slot (no retry)
+      - name: Reserved 22:00 slot (future CV-submission threshold)
+        if: github.event.schedule == '0 15 * * *'
+        run: |
+          echo 'RESERVED_SLOT_6: no API or provider request; threshold 5 submitted CVs not implemented.'
+
+      - name: Render preflight (safe GET; never requests provider)
+        if: github.event.schedule != '0 15 * * *'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Safe GET can be retried; a POST can NEVER be retried on unknown outcome.
+          curl --fail --silent --show-error --connect-timeout 20 --max-time 90 \
+            --retry 1 --retry-all-errors --retry-delay 5 \
+            --output "$RUNNER_TEMP/discovery-daily-health.json" \
+            'https://portfolio-api-forn.onrender.com/health'
+          python3 - "$RUNNER_TEMP/discovery-daily-health.json" <<'PY'
+          import json, sys
+          with open(sys.argv[1], encoding='utf-8') as f:
+              payload = json.load(f)
+          data = payload.get('data') or {}
+          if data.get('status') != 'Healthy' or data.get('discoveryMigrationsReady') is not True:
+              raise SystemExit('RENDER_PREFLIGHT_UNHEALTHY: no Daily POST sent')
+          print('RENDER_PREFLIGHT_HEALTHY: migration-ready; no provider request yet')
+          PY
+
+      - name: Start authorized daily slot once (no POST retry)
+        if: github.event.schedule != '0 15 * * *'
         env:
           DISCOVERY_WORKER_KEY: ${{ secrets.DISCOVERY_WORKER_KEY }}
           DAILY_SLOT: ${{ github.event.schedule }}
@@ -30,13 +63,36 @@ jobs:
           set -euo pipefail
           test -n "$DISCOVERY_WORKER_KEY"
           test -n "$DAILY_SLOT"
-          # Do not print sensitive headers or the response body in public runner logs.
-          status=$(curl --silent --show-error --retry 0 --max-time 110 \
+          set +e
+          status=$(curl --silent --show-error --retry 0 --connect-timeout 20 --max-time 110 \
             --output "$RUNNER_TEMP/discovery-daily-response.json" --write-out '%{http_code}' \
             --request POST 'https://portfolio-api-forn.onrender.com/api/v1/discovery-daily/start' \
             --header "X-Discovery-Worker-Key: $DISCOVERY_WORKER_KEY" \
             --header "X-GitHub-Run-Id: $GITHUB_RUN_ID" \
             --header "X-GitHub-Run-Attempt: $GITHUB_RUN_ATTEMPT" \
             --header "X-Discovery-Daily-Slot: $DAILY_SLOT")
-          echo "Daily scheduler HTTP status: $status"
-          test "$status" = 202
+          exit_code=$?
+          set -e
+          if [ "$exit_code" -ne 0 ]; then
+            echo "::error::DAILY_POST_OUTCOME_UNKNOWN curl_exit=$exit_code http=$status. Never retry this POST or provider. Inspect persisted execution first."
+            exit 1
+          fi
+          echo "Daily POST HTTP status: $status"
+          if [ "$status" != 202 ]; then
+            echo '::error::DAILY_API_REJECTED: no automatic retry; review backend logs and execution history.'
+            exit 1
+          fi
+          python3 - "$RUNNER_TEMP/discovery-daily-response.json" <<'PY'
+          import json, sys
+          with open(sys.argv[1], encoding='utf-8') as f:
+              payload = json.load(f)
+          data = payload.get('data') or {}
+          state = data.get('state')
+          success = {'QUEUED','DISPATCHING','CLAIMED','INGESTING','PARTIAL','SUCCEEDED',
+                     'ALREADY_CREATED','SKIPPED_ACTIVE','SKIPPED_DAILY_LIMIT',
+                     'SKIPPED_EXPIRED','DISABLED','RESERVED_FUTURE_CV_APPLICATION_THRESHOLD'}
+          print('DAILY_RESULT_STATE:', state if isinstance(state, str) else 'MISSING')
+          if state not in success:
+              raise SystemExit('DAILY_UNEXPECTED_STATE: inspect execution; no automatic retry')
+          # Do not print the full response, tokens, headers, or JD contents.
+          PY

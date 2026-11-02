@@ -54,6 +54,33 @@ public sealed class DiscoveryDailySlotsTests
         Assert.False(DiscoveryDailySlots.TryResolve("0 0 * * *; touch pwn", when, out _));
     }
 
+    [Theory]
+    [InlineData("30 0 * * *", 0)] [InlineData("30 3 * * *", 3)]
+    [InlineData("30 6 * * *", 6)] [InlineData("30 9 * * *", 9)]
+    [InlineData("30 12 * * *", 12)]
+    public void Backup_and_primary_share_the_same_request_id_and_window(string backup, int hour)
+    {
+        var now = new DateTimeOffset(2026, 11, 2, hour, 41, 0, TimeSpan.Zero);
+        Assert.True(DiscoveryDailySlots.IsKnownExpression(backup));
+        Assert.True(DiscoveryDailySlots.TryResolve(backup, now, out var plannedBackup));
+        Assert.True(DiscoveryDailySlots.TryResolve($"0 {hour} * * *", now, out var plannedPrimary));
+        Assert.Equal(plannedPrimary, plannedBackup);
+        Assert.Equal(DiscoveryDailySlots.RequestId(plannedPrimary), DiscoveryDailySlots.RequestId(plannedBackup));
+        Assert.Equal(DiscoveryDailySlots.Window(plannedPrimary), DiscoveryDailySlots.Window(plannedBackup));
+        Assert.Equal(DiscoveryDailySlots.Window(plannedBackup),
+            DiscoveryDailySlots.ForScheduledRequest(DiscoveryDailySlots.RequestId(plannedBackup), now));
+    }
+
+    [Fact]
+    public void Delayed_cron_is_known_but_cannot_create_an_execution_for_an_expired_window()
+    {
+        var tooLate = new DateTimeOffset(2026, 11, 2, 3, 12, 0, TimeSpan.Zero);
+        Assert.True(DiscoveryDailySlots.IsKnownExpression("0 0 * * *"));
+        Assert.False(DiscoveryDailySlots.TryResolve("0 0 * * *", tooLate, out _));
+        Assert.False(DiscoveryDailySlots.TryResolve("30 0 * * *", tooLate, out _));
+        Assert.False(DiscoveryDailySlots.IsKnownExpression("30 15 * * *")); // no backup for the zero-cost reserved slot
+    }
+
     [Fact]
     public void Each_slot_and_day_has_distinct_stable_request_id()
     {

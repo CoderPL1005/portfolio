@@ -13,8 +13,13 @@ public static class DiscoveryDailySlots
     private static readonly IReadOnlyDictionary<string, int> UtcHours = new Dictionary<string, int>(StringComparer.Ordinal)
     {
         ["0 0 * * *"] = 0, ["0 3 * * *"] = 3, ["0 6 * * *"] = 6,
-        ["0 9 * * *"] = 9, ["0 12 * * *"] = 12, ["0 15 * * *"] = 15
+        ["0 9 * * *"] = 9, ["0 12 * * *"] = 12, ["0 15 * * *"] = 15,
+        // Safeguard: a backup trigger uses EXACTLY the primary slot identity.
+        ["30 0 * * *"] = 0, ["30 3 * * *"] = 3, ["30 6 * * *"] = 6,
+        ["30 9 * * *"] = 9, ["30 12 * * *"] = 12
     };
+
+    public static bool IsKnownExpression(string? expression) => expression is not null && UtcHours.ContainsKey(expression);
 
     public static bool TryResolve(string? expression, DateTimeOffset now, out DateTimeOffset plannedUtc)
     {
@@ -75,7 +80,13 @@ public sealed partial class DiscoveryExecutionService
     {
         if (!Settings.DailyEnabled) return new { state = "DISABLED" };
         if (!DiscoveryDailySlots.TryResolve(scheduleExpression, clock.GetUtcNow(), out var planned))
+        {
+            // Schedules may arrive hours late. Never run an old window in a later slot.
+            // An explicit, recognized but expired cron is a safe no-provider skip.
+            if (DiscoveryDailySlots.IsKnownExpression(scheduleExpression))
+                return new { state = "SKIPPED_EXPIRED", providerRequests = 0 };
             throw Invalid("scheduleExpression");
+        }
 
         // Future rule: if fewer than FIVE CV submissions across the first FOUR slots,
         // broaden the search at 22:00. Application counting is not yet implemented,
