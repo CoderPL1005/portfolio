@@ -8,24 +8,95 @@ const MAX_CLOUDFLARE_DELAY_MS = 20 * 60_000;
 /** Maps Cloudflare's grouped cron to the already-authorized backend slot expression. */
 export function resolveScheduledSlot(cron, scheduledTime, nowMs = Date.now()) {
   const minute = cron === PRIMARY_CRON ? 0 : cron === FALLBACK_CRON ? 30 : null;
-  if (minute === null) return { state: 'UNRECOGNIZED_CRON' };
   const scheduled = new Date(scheduledTime);
-  if (!Number.isFinite(scheduled.getTime())) return { state: 'INVALID_SCHEDULED_TIME' };
+  const validTime = Number.isFinite(scheduled.getTime());
+  const actualMinute = validTime ? scheduled.getUTCMinutes() : null;
+  if (minute === null) {
+    return {
+      state: 'UNRECOGNIZED_CRON',
+      reason: 'UNRECOGNIZED_CRON_EXPRESSION',
+      expectedMinute: null,
+      actualMinute,
+    };
+  }
+  if (!validTime) {
+    return {
+      state: 'INVALID_SCHEDULED_TIME',
+      reason: 'INVALID_SCHEDULED_TIME_VALUE',
+      expectedMinute: minute,
+      actualMinute: null,
+    };
+  }
   const hour = scheduled.getUTCHours();
-  if (!ALLOWED_HOURS.has(hour) || (minute === 30 && hour === 15) ||
-      scheduled.getUTCMinutes() !== minute || scheduled.getUTCSeconds() !== 0 ||
-      scheduled.getUTCMilliseconds() !== 0) {
-    return { state: 'CRON_TIME_MISMATCH' };
+  if (!ALLOWED_HOURS.has(hour)) {
+    return {
+      state: 'CRON_TIME_MISMATCH',
+      reason: 'UNAUTHORIZED_UTC_HOUR',
+      expectedMinute: minute,
+      actualMinute,
+      actualHour: hour,
+    };
+  }
+  if (minute === 30 && hour === 15) {
+    return {
+      state: 'CRON_TIME_MISMATCH',
+      reason: 'RESERVED_SLOT_HAS_NO_FALLBACK',
+      expectedMinute: minute,
+      actualMinute,
+      actualHour: hour,
+    };
+  }
+  if (actualMinute !== minute) {
+    return {
+      state: 'CRON_TIME_MISMATCH',
+      reason: 'SCHEDULED_MINUTE_MISMATCH',
+      expectedMinute: minute,
+      actualMinute,
+      actualHour: hour,
+    };
   }
   const ageMs = nowMs - scheduled.getTime();
   if (ageMs < -60_000 || ageMs > MAX_CLOUDFLARE_DELAY_MS) {
-    return { state: 'SKIPPED_DELAYED', delayMs: ageMs };
+    return {
+      state: 'SKIPPED_DELAYED',
+      reason: ageMs < -60_000 ? 'FUTURE_SCHEDULED_TIME' : 'EXPIRED_SCHEDULED_TIME',
+      delayMs: ageMs,
+      expectedMinute: minute,
+      actualMinute,
+    };
   }
+  const canonical = new Date(Date.UTC(
+    scheduled.getUTCFullYear(),
+    scheduled.getUTCMonth(),
+    scheduled.getUTCDate(),
+    hour,
+    minute,
+    0,
+    0
+  ));
   return {
     state: 'READY',
     slot: `${minute} ${hour} * * *`,
-    scheduledUtc: scheduled.toISOString().replace('.000Z', 'Z'),
+    scheduledUtc: canonical.toISOString().replace('.000Z', 'Z'),
     kind: hour === 15 ? 'RESERVED' : minute === 0 ? 'PRIMARY' : 'FALLBACK',
+  };
+}
+
+/** Builds safe, secret-free diagnostic metadata for Cloudflare Observability logs. */
+export function buildScheduleDiagnostics(cron, scheduledTime, nowMs = Date.now(), evaluation = resolveScheduledSlot(cron, scheduledTime, nowMs)) {
+  const expectedCronMinute = cron === PRIMARY_CRON ? 0 : cron === FALLBACK_CRON ? 30 : null;
+  const parsed = new Date(scheduledTime);
+  const validParsed = Number.isFinite(parsed.getTime());
+  return {
+    cron: cron ?? null,
+    rawScheduledTime: scheduledTime ?? null,
+    parsedScheduledUtc: validParsed ? parsed.toISOString() : null,
+    actualInvocationUtc: new Date(nowMs).toISOString(),
+    expectedCronMinute,
+    actualParsedMinute: validParsed ? parsed.getUTCMinutes() : null,
+    canonicalScheduledUtc: evaluation.scheduledUtc ?? null,
+    state: evaluation.state,
+    rejectionReason: evaluation.state === 'READY' ? null : (evaluation.reason ?? evaluation.state),
   };
 }
 
@@ -35,7 +106,10 @@ export default {
     return new Response('Not found', { status: 404 });
   },
   async scheduled(controller, env) {
-    const item = resolveScheduledSlot(controller.cron, controller.scheduledTime);
+    const nowMs = Date.now();
+    const item = resolveScheduledSlot(controller.cron, controller.scheduledTime, nowMs);
+    const diagnostics = buildScheduleDiagnostics(controller.cron, controller.scheduledTime, nowMs, item);
+    console.log('SCHEDULER_DIAGNOSTICS', JSON.stringify(diagnostics));
     console.log('SCHEDULER_EVALUATION', JSON.stringify(item));
     if (item.state !== 'READY') return;
     if (env.DISPATCH_ENABLED !== 'true') {
