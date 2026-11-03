@@ -272,4 +272,42 @@ describe('Discovery Review',()=>{
     expect(card.textContent).toContain('Thu thập: 19:00 · 02/11/2026');
     expect(card.textContent).toContain('Ngày đăng:');
   });
+  it('renders yield counters, occurrence badge, expandable session history, collapseDuplicates toggle, and dateProvenance filter',()=>{
+    const {fixture,c,api}=mount();
+    const rich=listing();
+    rich.counts={...rich.counts,totalObservations:11,uniqueSourcePosts:7,newUniquePostsToday:5,repeatedPosts:2,unknownDatePosts:6,newRelevantVacancies:2,repeatedRelevantVacancies:1};
+    rich.results.items[0]={
+      ...rich.results.items[0],
+      occurrenceCount:3,
+      duplicateStatus:'CONTENT_UPDATED',
+      occurrences:[
+        {origin:'CLASSIFIER',candidateId:'synthetic-1',executionId:'11111111-1111-1111-1111-111111111111',itemIndex:0,runId:'run-1',collectedAt:'2026-11-02T12:00:00Z',contentHash:'h2',contentGroupHash:'g2',contentUpdated:true,reviewed:true},
+        {origin:'EXECUTION_OBSERVATION',candidateId:null,executionId:'22222222-2222-2222-2222-222222222222',itemIndex:2,runId:'run-0',collectedAt:'2026-11-02T09:00:00Z',contentHash:'h1',contentGroupHash:'g1',contentUpdated:false,reviewed:false}
+      ]
+    };
+    c.list.set(rich);fixture.detectChanges();
+    const el=fixture.nativeElement as HTMLElement;
+    const yieldCounters=el.querySelector('.yield-counters') as HTMLElement;
+    expect(yieldCounters).not.toBeNull();
+    expect(yieldCounters.textContent).toContain('Tổng lượt thu thập: 11');
+    expect(yieldCounters.textContent).toContain('Bài viết duy nhất: 7');
+    expect(yieldCounters.textContent).toContain('Bài mới hôm nay: 5');
+    expect(yieldCounters.textContent).toContain('Bài lặp lại: 2');
+    expect(yieldCounters.textContent).toContain('Chưa rõ ngày đăng: 6');
+    expect(yieldCounters.textContent).toContain('Vị trí phù hợp mới: 2');
+    expect(yieldCounters.textContent).toContain('Vị trí phù hợp lặp lại: 1');
+
+    const card=el.querySelector('.job-card') as HTMLElement;
+    expect(card.textContent).toContain('Đã xuất hiện 3 lần');
+    expect(card.textContent).toContain('Đã cập nhật nội dung');
+    expect(card.querySelector('.occurrence-details')?.textContent).toContain('Lịch sử xuất hiện (2 phiên)');
+    expect(card.querySelector('.occurrence-details')?.textContent).toContain('Có Human Review');
+
+    c.toggleDedupMode();fixture.detectChanges();
+    expect(c.collapseDuplicates).toBe(true);
+    expect(api.discovery).toHaveBeenLastCalledWith({page:1,pageSize:20,collapseDuplicates:true,...todayBounds});
+
+    c.dateProvenance='UNKNOWN_DATE';c.filter();fixture.detectChanges();
+    expect(api.discovery).toHaveBeenLastCalledWith({page:1,pageSize:20,collapseDuplicates:true,dateProvenance:'UNKNOWN_DATE',...todayBounds});
+  });
 });

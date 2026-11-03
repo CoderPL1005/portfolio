@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { JobPostExtractor } from '../src/core.mjs';
-import { buildCandidateTechnologyProfile, planFacebookQueries, resolveDiscoveryPolicy, queryYield } from '../src/candidate-technology-profile.mjs';
+import { buildCandidateTechnologyProfile, planFacebookQueries, resolveDiscoveryPolicy, resolveOneRequestPolicy, queryYield, normalizeQuery } from '../src/candidate-technology-profile.mjs';
+import { buildReviewItems as classifyReviewRows } from '../src/discovery-review.mjs';
 import { targetJobPreferences, preferencesFingerprint } from '../src/target-job-preferences.mjs';
 import { rankBackendOpportunities } from '../src/backend-matching.mjs';
 import { classifyProfile, beginExecution, claimPage, performPage, acknowledgePersistence } from '../src/pagination-orchestrator.mjs';
@@ -274,4 +275,69 @@ test('backend fallback-only page resumes core under identical preferences; a lat
   assert.equal(s.rankedOpportunities.find(v=>v.classification==='FALLBACK_MATCH').fallbackEligible,false);
   assert.equal(s.orchestration.newRelevantOpportunityIds.length,1);
   assert.doesNotMatch(JSON.stringify(s),/next-backend-page|synthetic-backend-pagination-key/u);
+});
+
+test('matching quality audit: T3SKY Backend Intern (.NET) with hashtag stack and mixed entry+junior seniority match without false positives',()=>{
+  const t3skyPost=[
+    '[T3SKY] Tuyển dụng Backend Intern (.NET)',
+    'Chào các bạn sinh viên/fresher CNTT đam mê lập trình!',
+    'T3SKY đang tìm kiếm Thực tập sinh Backend tham gia phát triển hệ thống.',
+    'Địa điểm làm việc: Cầu Giấy, Hà Nội (Full-time / Part-time)',
+    'Quyền lợi: Hỗ trợ thực tập + đào tạo bài bản từ mentor.',
+    'Ứng tuyển gửi CV về hr@t3sky.example.invalid',
+    '#t3sky #tuyendung #dotnet #csharp #aspnetcore #backend #intern #hanoi'
+  ].join('\n');
+
+  const extracted=extract(t3skyPost,'t3sky-1');
+  const classified=classifyProfile(extracted,profile(),prefs);
+  assert.equal(classified.match.classification,'TARGET_MATCH');
+  assert.equal(classified.vacancies[0].match.classification,'TARGET_MATCH');
+  assert.ok(classified.vacancies[0].match.demonstratedTechnologyHits.includes('.NET') || classified.vacancies[0].match.demonstratedTechnologyHits.includes('C#'));
+
+  const reviewRows=classifyReviewRows([{basic_info:{post_id:'7300001',post_text:t3skyPost,url:'https://www.facebook.com/fixture/posts/7300001'}}],{profile:profile(),targetJobPreferences:prefs});
+  assert.equal(reviewRows[0].contentValidity.status,'VALID_RECRUITMENT');
+  assert.equal(reviewRows[0].targetMatching.status,'TARGET_MATCH');
+
+  // Mixed entry-level + Junior range should match because Intern/Fresher is explicitly accepted
+  const mixedSeniority='Tuyển dụng Intern / Fresher / Junior .NET Backend Developer\nCông nghệ: C#, ASP.NET Core, SQL Server · Địa điểm: Hà Nội\nMô tả: Xây dựng RESTful API';
+  assert.equal(match(mixedSeniority).classification,'TARGET_MATCH');
+
+  // Genuine non-matches must remain NOT_MATCHED / INSUFFICIENT_DATA (never forced to TARGET_MATCH)
+  assert.equal(match('Tuyển dụng Junior / Senior .NET Backend Developer\nCông nghệ: C#, .NET\nĐịa điểm: Hà Nội').classification,'NOT_MATCHED');
+  assert.equal(match('Tuyển dụng Backend Intern (Java Spring Boot)\nCông nghệ: Java, Spring Boot\nĐịa điểm: Hà Nội').classification,'NOT_MATCHED');
+  assert.equal(match('[T3SKY] Tuyển dụng Backend Intern (.NET)\n#dotnet #csharp #backend #intern\nĐịa điểm: Quận 1, TP.HCM').classification,'NOT_MATCHED');
+  assert.equal(match('[T3SKY] Tuyển dụng Backend Intern (.NET)\n#dotnet #csharp #backend #intern').classification,'INSUFFICIENT_DATA');
+});
+
+test('persisted history planner rotates untried queries within a Vietnam day, safely reuses best yield when exhausted, honours frozen query',()=>{
+  const policy={portfolioSnapshot:snapshot()};
+  const first=resolveOneRequestPolicy(policy,prefs,[],{vietnamBusinessDate:'2026-11-02',slot:1});
+  assert.equal(first.maxRequests,1);assert.equal(first.maxCredits,1);
+  const fp=first.querySelection.profileFingerprint,tf=first.querySelection.targetPreferencesFingerprint;
+  const entry=(query,identity,slot,yieldCount,date='2026-11-02')=>({vietnamBusinessDate:date,slot,query,normalizedQueryIdentity:identity,
+    profileFingerprint:fp,targetPreferencesFingerprint:tf,pageNumber:1,creditsDeducted:1,rawObservationCount:5,uniquePostCount:5,
+    newUniquePosts:yieldCount,newRelevantOpportunities:yieldCount,duplicateRate:yieldCount?0:1});
+  const history=[entry(first.query,first.querySelection.normalizedQueryIdentity,1,0)];
+  const used=[first.querySelection.normalizedQueryIdentity];
+  for(let slot=2;slot<=5;slot++){
+    const p=resolveOneRequestPolicy(policy,prefs,history,{vietnamBusinessDate:'2026-11-02',slot});
+    assert.equal(p.querySelection.decision,'ROTATED_UNTRIED_TODAY');assert.equal(p.querySelection.usedToday,false);
+    assert.equal(used.includes(p.querySelection.normalizedQueryIdentity),false);
+    used.push(p.querySelection.normalizedQueryIdentity);history.push(entry(p.query,p.querySelection.normalizedQueryIdentity,slot,0));
+  }
+  assert.equal(new Set(used).size,5);
+  // Deterministic: same inputs produce the same selection.
+  assert.equal(resolveOneRequestPolicy(policy,prefs,history,{vietnamBusinessDate:'2026-11-02',slot:5}).query,
+    resolveOneRequestPolicy(policy,prefs,history,{vietnamBusinessDate:'2026-11-02',slot:5}).query);
+  // Previous day's usage does not block today's rotation.
+  const nextDay=resolveOneRequestPolicy(policy,prefs,history,{vietnamBusinessDate:'2026-11-03',slot:1});
+  assert.notEqual(nextDay.querySelection.decision,'ALL_ELIGIBLE_EXHAUSTED_SAFE_REUSE_BEST_YIELD');
+  // Exhausted: every candidate used today; reuse the best measured yield.
+  const all=planFacebookQueries(first.profile.technologyProfile,[],first.targetJobPreferences);
+  const exhausted=all.map((q,i)=>entry(q.query,q.identity,(i%5)+1,i===3?3:0));
+  const reused=resolveOneRequestPolicy(policy,prefs,exhausted,{vietnamBusinessDate:'2026-11-02',slot:5});
+  assert.equal(reused.querySelection.decision,'ALL_ELIGIBLE_EXHAUSTED_SAFE_REUSE_BEST_YIELD');
+  assert.equal(reused.querySelection.allEligibleUsedToday,true);assert.equal(reused.query,all[3].query);
+  const frozen=resolveOneRequestPolicy(policy,prefs,exhausted,{vietnamBusinessDate:'2026-11-02',slot:1,frozenQuery:all[1].query});
+  assert.equal(frozen.query,all[1].query);assert.equal(frozen.querySelection.decision,'FROZEN_SNAPSHOT_QUERY');
 });

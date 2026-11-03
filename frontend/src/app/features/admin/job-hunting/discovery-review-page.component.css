@@ -11,6 +11,10 @@
 .summary small { font-size: .7rem; color: var(--color-text-dim); }
 .summary strong { font: 600 1.9rem var(--font-heading); }
 .summary span { color: var(--color-text-muted); font-size: .85rem; }
+.yield-counters { display: flex; flex-wrap: wrap; gap: .6rem 1.1rem; padding: .75rem 1.1rem; background: var(--color-surface); border-radius: var(--radius-lg); font-size: .8rem; color: var(--color-text-muted); }
+.yield-counters strong { color: var(--color-text); font-weight: 600; }
+.occurrence-details { margin: .5rem 0; font-size: .8rem; color: var(--color-text-muted); }
+.occurrence-details ul { margin: .35rem 0 0; padding-left: 1.1rem; }
 .date-scope { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .75rem; padding: .75rem 1rem; background: var(--color-surface); border-radius: var(--radius-lg); }
 .date-scope-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
 .filter-tabs { margin: 0; padding: .3rem; background: var(--color-surface); border-radius: var(--radius-lg); width: fit-content; max-width: 100%; }

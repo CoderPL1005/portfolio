@@ -15,20 +15,40 @@ export function dailyObservationWindowFilter(observations, config) {
   const scope = config.dailySearch;
   if (config.triggerSource !== 'DAILY_SCHEDULED') {
     if (scope != null) throw new Stop('DISCOVERY_DAILY_FILTER_INVALID');
-    return observations;
+    return observations.map(row => {
+      const hasValidDate = typeof row.publishedAt === 'string' && Number.isFinite(Date.parse(row.publishedAt));
+      return {
+        ...row,
+        publishedAtProvenance: hasValidDate ? (row.publishedAtProvenance ?? 'VERIFIED_SUPPORTED_TIMESTAMP') : 'UNAVAILABLE_OR_UNVERIFIED',
+        windowMatchStatus: hasValidDate ? 'UNSCOPED_MANUAL' : 'UNKNOWN_DATE',
+        freshness: hasValidDate ? 'VERIFIED_SUPPORTED_TIMESTAMP' : 'UNKNOWN',
+        requestedSearchWindow: null
+      };
+    });
   }
   if (!scope || ![1, 2, 3, 4, 5].includes(scope.slot) || scope.timeZone !== 'Asia/Ho_Chi_Minh' ||
       typeof scope.startTime !== 'string' || typeof scope.endTime !== 'string')
     throw new Stop('DISCOVERY_DAILY_FILTER_INVALID');
   try { validateDateFilters({ startTime: scope.startTime, endTime: scope.endTime }); }
   catch { throw new Stop('DISCOVERY_DAILY_FILTER_INVALID'); }
+  const requestedSearchWindow = { slot: scope.slot, startTime: scope.startTime, endTime: scope.endTime, timeZone: scope.timeZone };
   return observations.filter(row => {
     if (!row.publishedAt) return true;
     const timestamp = Date.parse(row.publishedAt);
     if (!Number.isFinite(timestamp)) return true;
     const vietnamDay = new Date(timestamp + 7 * 60 * 60 * 1000).toISOString().slice(0, 10);
     return vietnamDay >= scope.startTime && vietnamDay <= scope.endTime;
-  }).map((row, index) => ({ ...row, itemIndex: index }));
+  }).map((row, index) => {
+    const hasValidDate = typeof row.publishedAt === 'string' && Number.isFinite(Date.parse(row.publishedAt));
+    return {
+      ...row,
+      itemIndex: index,
+      publishedAtProvenance: hasValidDate ? 'VERIFIED_SUPPORTED_TIMESTAMP' : 'UNAVAILABLE_OR_UNVERIFIED',
+      windowMatchStatus: hasValidDate ? 'VERIFIED_IN_WINDOW' : 'UNKNOWN_DATE',
+      freshness: hasValidDate ? 'VERIFIED_IN_WINDOW' : 'UNKNOWN',
+      requestedSearchWindow
+    };
+  });
 }
 const sha=value=>createHash('sha256').update(value,'utf8').digest('hex');
 const fields=['companyName','positionTitle','location','employmentType','workplaceType','salaryMinimum','salaryMaximum','salaryCurrency','salaryPeriod',
@@ -69,15 +89,29 @@ function deterministic(observation){
   });
   return {recruitment:job.structuredMatch?.recruitment===true,vacancies};
 }
-function observationsFrom(rows){
+export function observationsFrom(rows){
+  const seenIdentities = new Set();
+  const seenContentGroups = new Map();
   return rows.map((row,itemIndex)=>{
     const mapped=row&&typeof row==='object'?normalizeSocialApisItem(row):null;
     const basic=row&&typeof row==='object'&&Object.hasOwn(row,'basic_info')?row.basic_info:row;
     const raw=typeof basic?.post_text==='string'?basic.post_text:typeof row?.text==='string'?row.text:null;
     const originalUrl=typeof basic?.url==='string'?basic.url:typeof row?.url==='string'?row.url:null;
-    return {itemIndex,providerPostId:mapped?.sourceExternalId??null,sourceUrl:mapped?.sourceUrl??null,
+    const providerPostId=mapped?.sourceExternalId??null;
+    const sourceUrl=mapped?.sourceUrl??null;
+    const contentHash=raw===null?null:sha(raw);
+    const contentGroupHash=raw===null?null:sha(raw.normalize('NFC').replace(/\r\n?/gu,'\n').trim());
+    const providerPostIdentity=!mapped?.idUrlConflict&&providerPostId?`fb:id:${providerPostId}`:!mapped?.idUrlConflict&&sourceUrl?`fb:url:${sourceUrl}`:null;
+    const withinResponseDuplicatePost=providerPostIdentity!==null&&seenIdentities.has(providerPostIdentity);
+    if(providerPostIdentity!==null)seenIdentities.add(providerPostIdentity);
+    const priorContentIdentity=contentGroupHash!==null?seenContentGroups.get(contentGroupHash):undefined;
+    const withinResponseExactRepost=priorContentIdentity!==undefined&&priorContentIdentity!==providerPostIdentity;
+    if(contentGroupHash!==null&&!seenContentGroups.has(contentGroupHash))seenContentGroups.set(contentGroupHash,providerPostIdentity);
+    return {itemIndex,providerPostId,sourceUrl,
       providerSourceUrl:originalUrl!==null&&originalUrl.length<=2048?originalUrl:null,
-      rawContent:raw,contentHash:raw===null?null:sha(raw),publishedAt:mapped?.publishedAt??null,
+      providerPostIdentity,contentGroupHash,withinResponseDuplicatePost,withinResponseExactRepost,
+      rawContent:raw,contentHash,publishedAt:mapped?.publishedAt??null,
+      publishedAtProvenance:mapped?.publishedAtProvenance??(mapped?.publishedAt?'VERIFIED_SUPPORTED_TIMESTAMP':'UNAVAILABLE_OR_UNVERIFIED'),
       outcome:!row||typeof row!=='object'?'ITEM_NOT_OBJECT':mapped?.idUrlConflict?'POST_ID_URL_MISMATCH':
         !mapped?.sourceExternalId?'POST_ID_MISSING':!mapped?.sourceUrl?'POST_URL_INVALID_OR_UNSUPPORTED':!raw?'POST_TEXT_MISSING':'READY_FOR_EXTRACTION'};
   });
@@ -92,7 +126,16 @@ export async function runDiscoveryExecution({executionId,workflowRunId,runAttemp
   if(config.maxRequests!==1||config.maxCredits!==1||config.freePlanConfirmed!==true||config.noCashConfirmed!==true)throw new Stop('DISCOVERY_EXECUTION_LIMITS_INVALID');
   // Validate the frozen backend window BEFORE claiming a provider request.
   dailyObservationWindowFilter([],config);
-  const policy=config.portfolioSnapshot?resolveOneRequestPolicy({portfolioSnapshot:config.portfolioSnapshot},config.preferences):null;
+  const history=Array.isArray(config.queryHistory)?config.queryHistory:[];
+  const previousQueryIdentity=config.querySelection?.previousQueryIdentity??(history.length?history.at(-1)?.normalizedQueryIdentity??null:null);
+  const frozenQuery=typeof config.querySelection?.query==='string'&&config.querySelection.query.trim()?config.querySelection.query.trim()
+    :typeof config.query==='string'&&config.query.trim()?config.query.trim():null;
+  const policy=config.portfolioSnapshot?resolveOneRequestPolicy({portfolioSnapshot:config.portfolioSnapshot},config.preferences,history,{
+    vietnamBusinessDate:config.vietnamBusinessDate??config.dailySearch?.endTime??null,
+    slot:config.dailySearch?.slot??null,
+    previousQueryIdentity,
+    frozenQuery
+  }):null;
   const query=policy?.query??config.query;
   const accountingHeaders={};
   const transport=async(...args)=>{
@@ -137,7 +180,7 @@ export async function runDiscoveryExecution({executionId,workflowRunId,runAttemp
     reviewBundle:reviewItems.every(Boolean)?reviewExport(reviewItems,{runId:executionId,query}):null});
 }
 
-async function processObservations({executionId,observations,config,policy,providerOperation,backend}){
+export async function processObservations({executionId,observations,config,policy,providerOperation,backend}){
   const evidencePolicy=config.evidencePolicy??'STRICT';
   if(!['STRICT','V2'].includes(evidencePolicy))throw new Stop('DISCOVERY_EVIDENCE_POLICY_INVALID');
   const classificationFailures=new Set();
@@ -166,7 +209,7 @@ async function processObservations({executionId,observations,config,policy,provi
       (v.fields.salaryMinimum.value===null&&v.fields.salaryMaximum.value===null)||
       !v.fields.salaryCurrency.value||!v.fields.salaryPeriod.value||
       (!v.fields.applicationEmail.value&&!v.fields.applicationUrl.value));
-    if(incomplete&&!['UNKNOWN','CLAIMED'].includes(saved?.semanticState)&&review?.contentValidity.status==='VALID_RECRUITMENT'&&config.semanticEnabled&&providerOperation==='SUCCEEDED'&&observation.rawContent&&observation.rawContent.length<=24000&&observation.providerPostId&&observation.outcome==='READY_FOR_EXTRACTION'){
+    if(incomplete&&!observation.withinResponseDuplicatePost&&!['UNKNOWN','CLAIMED'].includes(saved?.semanticState)&&review?.contentValidity.status==='VALID_RECRUITMENT'&&config.semanticEnabled&&providerOperation==='SUCCEEDED'&&observation.rawContent&&observation.rawContent.length<=24000&&observation.providerPostId&&observation.outcome==='READY_FOR_EXTRACTION'){
       try{
         // Make classification durable even if generation or this process dies.
         if(backend.saveProcessing&&saved?.semanticState!=='COMPLETED')await backend.saveProcessing(executionId,{itemIndex:observation.itemIndex,contentHash:observation.contentHash,review,

@@ -35,9 +35,9 @@ public sealed class DiscoveryDailySlotsTests
     }
 
     [Theory]
-    [InlineData(0, 1, "2026-11-01", "2026-11-01")]
+    [InlineData(0, 1, "2026-11-01", "2026-11-02")]
     [InlineData(3, 2, "2026-11-01", "2026-11-02")]
-    [InlineData(6, 3, "2026-11-01", "2026-11-02")]
+    [InlineData(6, 3, "2026-11-02", "2026-11-02")]
     [InlineData(9, 4, "2026-11-02", "2026-11-02")]
     [InlineData(12, 5, "2026-11-02", "2026-11-02")]
     public void Windows_follow_local_Vietnam_calendar(int utcHour, int slot, string start, string end)
@@ -50,6 +50,29 @@ public sealed class DiscoveryDailySlotsTests
         Assert.Equal("Asia/Ho_Chi_Minh", window.TimeZone);
         Assert.Equal(window, DiscoveryDailySlots.ForScheduledRequest(DiscoveryDailySlots.RequestId(when), when));
         Assert.Equal(window, DiscoveryDailySlots.ForScheduledRequest(DiscoveryDailySlots.RequestId(when), when.AddMinutes(30)));
+    }
+
+    [Theory]
+    [InlineData("2026-12-31T17:00:00Z", 1, "2026-12-31", "2027-01-01", "2027-01-01")] // 00:00 Jan 1, 2027 ICT
+    [InlineData("2027-01-01T00:00:00Z", 1, "2026-12-31", "2027-01-01", "2027-01-01")] // 07:00 Jan 1, 2027 ICT
+    [InlineData("2027-01-01T06:00:00Z", 3, "2027-01-01", "2027-01-01", "2027-01-01")] // 13:00 Jan 1, 2027 ICT
+    [InlineData("2026-03-01T00:00:00Z", 1, "2026-02-28", "2026-03-01", "2026-03-01")] // 07:00 Mar 1, 2026 ICT
+    [InlineData("2026-03-01T06:00:00Z", 3, "2026-03-01", "2026-03-01", "2026-03-01")] // 13:00 Mar 1, 2026 ICT
+    public void Vietnam_calendar_handles_month_and_year_rollover_and_utc_day_differences(
+        string utcIso, int slot, string expectedStart, string expectedEnd, string expectedBusinessDate)
+    {
+        var instant = DateTimeOffset.Parse(utcIso);
+        Assert.Equal(expectedBusinessDate, DiscoveryDailySlots.VietnamBusinessDate(instant));
+        var bounds = DiscoveryDailySlots.VietnamBusinessDayBoundsUtc(instant);
+        Assert.Equal(TimeSpan.FromHours(24), bounds.EndUtc - bounds.StartUtc);
+        Assert.Equal(17, bounds.StartUtc.Hour); // 00:00+07:00 is 17:00 UTC previous calendar day
+        if (instant.Hour is 0 or 3 or 6 or 9 or 12)
+        {
+            var window = DiscoveryDailySlots.Window(instant);
+            Assert.Equal(slot, window.Slot);
+            Assert.Equal(expectedStart, window.StartTime);
+            Assert.Equal(expectedEnd, window.EndTime);
+        }
     }
 
     [Fact]
@@ -184,6 +207,72 @@ public sealed class DiscoveryDailySlotsTests
         Assert.Equal(1, await verifyDb.DiscoveryExecutionObservations.CountAsync(x => x.ExecutionId == priorExecId));
         Assert.Equal(1, await verifyDb.DiscoveryCandidates.CountAsync());
         Assert.Equal(1, await verifyDb.RawJobPostings.CountAsync(x => x.Id == rawPostId));
+    }
+
+    [Fact]
+    public async Task Scheduled_slots_rotate_persisted_queries_within_Vietnam_day_and_freeze_selection_for_fallback()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        await using var db = CreateDatabase(dbName);
+        await SeedPortfolioAndHistoryAsync(db, Guid.NewGuid(), Guid.NewGuid());
+        var pyId = Guid.NewGuid();
+        db.Technologies.Add(new Technology { Id = pyId, Name = "Python", Category = "Backend", IsActive = true });
+        db.Skills.Add(new Skill { Id = Guid.NewGuid(), Name = "Python", Category = "Backend", TechnologyId = pyId, ExperienceLevel = "USED", IsPublished = true });
+        var prefs = await db.CandidateJobPreferences.SingleAsync();
+        prefs.PreferredTechnologies = JsonDocument.Parse("[\"C#\", \".NET\", \"Python\"]");
+        prefs.AcceptableLocations = JsonDocument.Parse("[\"Hanoi\", \"Hà Nội\"]");
+        await db.SaveChangesAsync();
+
+        var clock = new FixedClock(new DateTimeOffset(2026, 11, 2, 0, 0, 0, TimeSpan.Zero));
+        var github = new CountingGitHubClient();
+        var service = CreateService(db, github, clock);
+
+        var selectedQueries = new List<string>();
+        var cronHours = new[] { (0, "0 0 * * *", "30 0 * * *"), (3, "0 3 * * *", "30 3 * * *"), (6, "0 6 * * *", "30 6 * * *"), (9, "0 9 * * *", "30 9 * * *"), (12, "0 12 * * *", "30 12 * * *") };
+
+        var first = true;
+        foreach (var (hour, primaryCron, fallbackCron) in cronHours)
+        {
+            clock.Now = new DateTimeOffset(2026, 11, 2, hour, 0, 0, TimeSpan.Zero);
+            var primaryResult = await service.StartScheduledAsync(primaryCron);
+            Assert.Equal("QUEUED", GetState(primaryResult));
+            var execId = GetExecutionId(primaryResult)!.Value;
+            var exec = await db.DiscoveryExecutions.SingleAsync(x => x.Id == execId);
+            using var configDoc = JsonDocument.Parse(exec.ConfigurationJson);
+            var query = configDoc.RootElement.GetProperty("query").GetString()!;
+            var decision = configDoc.RootElement.GetProperty("querySelection").GetProperty("decision").GetString()!;
+            Assert.NotNull(query);
+            Assert.Equal(first ? "EXPLORATION_PRIOR" : "ROTATED_UNTRIED_TODAY", decision);
+            first = false;
+            selectedQueries.Add(query);
+
+            // Simulate fallback at :30 — must return ALREADY_CREATED with identical frozen ConfigurationJson
+            clock.Now = new DateTimeOffset(2026, 11, 2, hour, 30, 0, TimeSpan.Zero);
+            var fallbackResult = await service.StartScheduledAsync(fallbackCron);
+            Assert.Equal("ALREADY_CREATED", GetState(fallbackResult));
+            Assert.Equal(execId, GetExecutionId(fallbackResult));
+            var execAfterFallback = await db.DiscoveryExecutions.SingleAsync(x => x.Id == execId);
+            Assert.Equal(exec.ConfigurationJson, execAfterFallback.ConfigurationJson);
+
+            // Complete execution so next slot can run
+            exec.State = "SUCCEEDED";
+            exec.ActiveKey = null;
+            db.DiscoveryExecutionAttempts.Add(new DiscoveryExecutionAttempt
+            {
+                Id = execId,
+                ExecutionId = execId,
+                WorkflowRunId = $"run-{hour}",
+                Outcome = "SUCCEEDED",
+                ActualRequests = 1,
+                CreditsDeducted = 1,
+                HttpStatus = 200,
+                ClaimedAt = clock.Now
+            });
+            await db.SaveChangesAsync();
+        }
+
+        // All 5 slots in the same Vietnam business day selected distinct queries without repeating query #1
+        Assert.Equal(5, selectedQueries.Distinct(StringComparer.OrdinalIgnoreCase).Count());
     }
 
     [Fact]

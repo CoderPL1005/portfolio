@@ -13,7 +13,11 @@ const technologyIdentity = name => fold(canonicalTechnology(name) ?? name);
 
 // C#.NET is a compound ecosystem spelling, not two independent requirements.
 // Keep this interpretation local to Backend matching, not the Portfolio data.
-const stackSearchText = text => text.replace(/(?<![\p{L}\p{N}])c#\s*\.net\b/giu,'.NET');
+const stackSearchText = text => text
+  .replace(/(?<![\p{L}\p{N}])c#\s*\.net\b/giu,'.NET')
+  .replace(/(?:#|\b)asp\.?net\s*core\b/giu,'ASP.NET Core')
+  .replace(/(?<![\p{L}\p{N}.])(?:#?dotnet|\.net)(?:\s*core|\s*\d+(?:\.\d+)?)?(?![\p{L}\p{N}])/giu,'.NET')
+  .replace(/#(?:c#|csharp)\b/giu,'C#');
 function requestedTechnologies(text, allowed) {
   let remaining=stackSearchText(text);
   const hits=new Set();
@@ -68,13 +72,14 @@ export function classifyBackendProfile(job, profile, input) {
     const incompatibleMandatory = explicitStack.filter(name => !allowed.some(a => technologyIdentity(a) === technologyIdentity(name)));
     const isFullStack = fullstack.test(title);
     const responsibilities=[mandatory,duties].join('\n');
-    const backendResponsibilities = backend.test(responsibilities) || /(?:build|develop|implement|xây dựng|phát triển|thiết kế).*(?:rest\s*apis?|server|api|backend|back-end)/iu.test(responsibilities);
-    const hasBackend = isFullStack ? prefs.allowFullStack && backendResponsibilities : backend.test(title) ||
-      /developer|engineer|lập trình/iu.test(title) && !frontend.test(title) && backendResponsibilities;
+    const singlePostBackendSignal = job.vacancies.length === 1 && !frontend.test(title) && backend.test([v.evidence?.body, job.postSections?.introduction].filter(Boolean).join('\n'));
+    const backendResponsibilities = backend.test(responsibilities) || singlePostBackendSignal || /(?:build|develop|implement|xây dựng|phát triển|thiết kế).*(?:rest\s*apis?|server|api|backend|back-end)/iu.test(responsibilities);
+    const hasBackend = isFullStack ? prefs.allowFullStack && backendResponsibilities : backend.test(title) || singlePostBackendSignal ||
+      /developer|engineer|lập trình|intern(?:ship)?|fresher|thực tập/iu.test(title) && !frontend.test(title) && backendResponsibilities;
     const isClosed = closed.test(body);
     const location = prefs.locations.some(l => locationIdentity(v.location ?? '').includes(locationIdentity(l)));
     const level = v.seniority.some(l => prefs.seniorities.some(p => seniorityIdentity(l) === seniorityIdentity(p)));
-    const forbiddenLevel = v.seniority.some(l => !prefs.seniorities.some(p => seniorityIdentity(l) === seniorityIdentity(p)));
+    const forbiddenLevel = !level && v.seniority.some(l => !prefs.seniorities.some(p => seniorityIdentity(l) === seniorityIdentity(p)));
     const experience = requiredExperience(v,mandatory);
     let classification = 'NOT_MATCHED', reason = 'NON_TARGET_ROLE';
     if (isClosed) reason = 'RECRUITMENT_CLOSED';

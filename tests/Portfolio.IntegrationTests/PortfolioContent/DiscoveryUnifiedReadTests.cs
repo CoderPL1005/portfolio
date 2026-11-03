@@ -208,4 +208,135 @@ public sealed class DiscoveryUnifiedReadTests(AuthApiFactory root):IClassFixture
         Assert.Equal(HttpStatusCode.Unauthorized,(await anonymous.GetAsync(RecoveryScenario.ReviewPath+"?includeObservations=true")).StatusCode);
         s.AssertOffline();
     }
+
+    [Fact] public async Task Cross_execution_dedup_tracks_occurrences_content_updates_reposts_date_provenance_and_preserves_raw_and_human_review()
+    {
+        using var s=await RecoveryScenario.Create(root,1);
+        var template=(await s.NormalResult()).ReviewBundle!.Items[0];
+        var exec1Id=s.Id;
+        var exec2Id=Guid.Parse("11111111-2222-4333-8444-555555555555");
+        var exec3Id=Guid.Parse("22222222-3333-4444-8555-666666666666");
+        var rawPostId=Guid.NewGuid();
+        var t1=new DateTimeOffset(2026,11,2,1,0,0,TimeSpan.Zero); // 08:00 ICT Nov 2
+        var t2=new DateTimeOffset(2026,11,2,4,0,0,TimeSpan.Zero); // 11:00 ICT Nov 2
+        var t3=new DateTimeOffset(2026,11,2,7,0,0,TimeSpan.Zero); // 14:00 ICT Nov 2
+        const string originalText="[T3SKY] Tuyển dụng Backend Intern (.NET) tại Hà Nội #dotnet #csharp #backend";
+        const string updatedText="[T3SKY] Tuyển dụng Backend Intern (.NET) tại Hà Nội (Updated deadline 30/11) #dotnet #csharp #backend";
+        var hash1=DiscoveryReviewRules.Hash(originalText);
+        var hash2=DiscoveryReviewRules.Hash(updatedText);
+
+        await s.Read(async db=>{
+            db.DiscoveryExecutionObservations.RemoveRange(db.DiscoveryExecutionObservations.Where(x=>x.ExecutionId==exec1Id));
+            db.RawJobPostings.Add(new(){Id=rawPostId,RawContent=originalText,ContentHash=hash1,Metadata=JsonDocument.Parse("{}")});
+            var exec1=await db.DiscoveryExecutions.SingleAsync(x=>x.Id==exec1Id);
+            exec1.CreatedAt=t1;exec1.UpdatedAt=t1;
+            var payload1=JsonSerializer.SerializeToNode(new {
+                itemIndex=0,providerPostId="post_t3sky_1",sourceUrl="https://www.facebook.com/fixture/posts/post_t3sky_1",
+                providerSourceUrl="https://www.facebook.com/fixture/posts/post_t3sky_1",rawContent=originalText,contentHash=hash1,contentGroupHash=hash1,
+                publishedAt="2026-11-02T00:30:00Z",publishedAtProvenance="VERIFIED_SUPPORTED_TIMESTAMP",windowMatchStatus="VERIFIED_IN_WINDOW",
+                outcome="READY_FOR_EXTRACTION",
+                processing=new {review=template with {
+                    ContentValidity=template.ContentValidity with {Status="VALID_RECRUITMENT"},
+                    TargetMatching=template.TargetMatching with {Status="TARGET_MATCH"}},vacancies=System.Array.Empty<object>()}
+            },DiscoveryReviewRules.Json)!.ToJsonString();
+            db.DiscoveryExecutionObservations.Add(new(){Id=Guid.NewGuid(),ExecutionId=exec1Id,ItemIndex=0,
+                SemanticState="NOT_REQUESTED",ContentHash=hash1,PayloadHash=DiscoveryReviewRules.Hash(payload1),PayloadJson=payload1});
+
+            // Add reviewed candidate for exec1 obs1
+            var candidateItem=template with {
+                ItemIndex=0,ProviderPostId="post_t3sky_1",SourceUrl="https://www.facebook.com/fixture/posts/post_t3sky_1",
+                RawContent=originalText,ContentHash=hash1,ContentGroupHash=hash1,PublishedAt=DateTimeOffset.Parse("2026-11-02T00:30:00Z"),
+                ContentValidity=template.ContentValidity with {Status="VALID_RECRUITMENT"},
+                TargetMatching=template.TargetMatching with {Status="TARGET_MATCH"}
+            };
+            var candPayload=JsonSerializer.Serialize(candidateItem,DiscoveryReviewRules.Json);
+            var cand=new DiscoveryCandidate{Id=Guid.NewGuid(),RunId=exec1Id.ToString(),Query=".NET Backend Intern Hanoi",PageNumber=1,ItemIndex=0,
+                ContentStatus="VALID_RECRUITMENT",TargetStatus="TARGET_MATCH",ContentGroupHash=hash1,Payload=candPayload,
+                PayloadHash=DiscoveryReviewRules.Hash(candPayload),IngestedAt=t1};
+            db.DiscoveryCandidates.Add(cand);
+            db.DiscoveryCandidateReviews.Add(new(){CandidateId=cand.Id,Version=1,Status="CONFIRMED",
+                ContentStatus="VALID_RECRUITMENT",TargetStatus="TARGET_MATCH",Notes="Verified T3SKY Intern post",
+                ReviewedAt=t1.AddMinutes(15),ReviewedByAdminId=AuthApiFactory.AdminId});
+
+            // Exec 2: Same post repeated with updated content + a second post with exact repost of originalText under different post_id and unknown date
+            db.DiscoveryExecutions.Add(new(){Id=exec2Id,ClientRequestId=Guid.NewGuid(),CreatedByAdminId=AuthApiFactory.AdminId,
+                State="PARTIAL",WorkflowRunId="20002",Version=1,CreatedAt=t2,UpdatedAt=t2});
+            var payload2A=JsonSerializer.SerializeToNode(new {
+                itemIndex=0,providerPostId="post_t3sky_1",sourceUrl="https://www.facebook.com/fixture/posts/post_t3sky_1",
+                providerSourceUrl="https://www.facebook.com/fixture/posts/post_t3sky_1",rawContent=updatedText,contentHash=hash2,contentGroupHash=hash2,
+                publishedAt="2026-11-02T00:30:00Z",publishedAtProvenance="VERIFIED_SUPPORTED_TIMESTAMP",windowMatchStatus="VERIFIED_IN_WINDOW",
+                outcome="READY_FOR_EXTRACTION",
+                processing=new {review=template with {
+                    ContentValidity=template.ContentValidity with {Status="VALID_RECRUITMENT"},
+                    TargetMatching=template.TargetMatching with {Status="TARGET_MATCH"}},vacancies=System.Array.Empty<object>()}
+            },DiscoveryReviewRules.Json)!.ToJsonString();
+            db.DiscoveryExecutionObservations.Add(new(){Id=Guid.NewGuid(),ExecutionId=exec2Id,ItemIndex=0,
+                SemanticState="NOT_REQUESTED",ContentHash=hash2,PayloadHash=DiscoveryReviewRules.Hash(payload2A),PayloadJson=payload2A});
+
+            var payload2B=JsonSerializer.SerializeToNode(new {
+                itemIndex=1,providerPostId="post_repost_99",sourceUrl="https://www.facebook.com/fixture/posts/post_repost_99",
+                providerSourceUrl="https://www.facebook.com/fixture/posts/post_repost_99",rawContent=originalText,contentHash=hash1,contentGroupHash=hash1,
+                publishedAt=(string?)null,publishedAtProvenance="UNAVAILABLE_OR_UNVERIFIED",windowMatchStatus="UNKNOWN_DATE",
+                outcome="READY_FOR_EXTRACTION",
+                processing=new {review=template with {
+                    ContentValidity=template.ContentValidity with {Status="VALID_RECRUITMENT"},
+                    TargetMatching=template.TargetMatching with {Status="TARGET_MATCH"}},vacancies=System.Array.Empty<object>()}
+            },DiscoveryReviewRules.Json)!.ToJsonString();
+            db.DiscoveryExecutionObservations.Add(new(){Id=Guid.NewGuid(),ExecutionId=exec2Id,ItemIndex=1,
+                SemanticState="NOT_REQUESTED",ContentHash=hash1,PayloadHash=DiscoveryReviewRules.Hash(payload2B),PayloadJson=payload2B});
+
+            // Exec 3: Same post_repost_99 repeated unchanged
+            db.DiscoveryExecutions.Add(new(){Id=exec3Id,ClientRequestId=Guid.NewGuid(),CreatedByAdminId=AuthApiFactory.AdminId,
+                State="PARTIAL",WorkflowRunId="20003",Version=1,CreatedAt=t3,UpdatedAt=t3});
+            db.DiscoveryExecutionObservations.Add(new(){Id=Guid.NewGuid(),ExecutionId=exec3Id,ItemIndex=0,
+                SemanticState="NOT_REQUESTED",ContentHash=hash1,PayloadHash=DiscoveryReviewRules.Hash(payload2B),PayloadJson=payload2B});
+
+            await db.SaveChangesAsync();
+        });
+
+        var before=await s.Snapshot();
+        var baseQuery=RecoveryScenario.ReviewPath+"?includeObservations=true&collectedFrom=2026-11-01T17:00:00.000Z&collectedBefore=2026-11-02T17:00:00.000Z";
+
+        // 1. Default (collapseDuplicates=false): all 4 observations visible, with occurrenceCount and duplicateStatus populated
+        var allData=await RecoveryScenario.Data(await s.Client.GetAsync(baseQuery));
+        var counts=allData.GetProperty("counts");
+        Assert.Equal(4,counts.GetProperty("total").GetInt32());
+        Assert.Equal(4,counts.GetProperty("totalObservations").GetInt32());
+        Assert.Equal(2,counts.GetProperty("uniqueSourcePosts").GetInt32());
+        Assert.Equal(2,counts.GetProperty("newUniquePostsToday").GetInt32());
+        Assert.Equal(2,counts.GetProperty("repeatedPosts").GetInt32());
+        Assert.Equal(1,counts.GetProperty("unknownDatePosts").GetInt32());
+        Assert.Equal(2,counts.GetProperty("newRelevantVacancies").GetInt32());
+        Assert.Equal(2,counts.GetProperty("repeatedRelevantVacancies").GetInt32());
+        Assert.Equal(1,counts.GetProperty("contentUpdatedPosts").GetInt32());
+        Assert.Equal(1,counts.GetProperty("exactContentReposts").GetInt32());
+
+        // 2. Collapsed mode (collapseDuplicates=true): 2 unique posts returned, preserving Human Review on post_t3sky_1 and listing all occurrences
+        var collapsedData=await RecoveryScenario.Data(await s.Client.GetAsync(baseQuery+"&collapseDuplicates=true"));
+        Assert.Equal(2,collapsedData.GetProperty("results").GetProperty("total").GetInt32());
+        var collapsedItems=collapsedData.GetProperty("results").GetProperty("items").EnumerateArray().ToArray();
+        var t3skyCard=collapsedItems.Single(x=>x.TryGetProperty("humanReview",out var hr)&&hr.ValueKind==JsonValueKind.Object);
+        Assert.Equal("CONFIRMED",t3skyCard.GetProperty("humanReview").GetProperty("status").GetString());
+        Assert.Equal("CONTENT_UPDATED",t3skyCard.GetProperty("duplicateStatus").GetString());
+        Assert.Equal(2,t3skyCard.GetProperty("occurrenceCount").GetInt32());
+        Assert.Equal(2,t3skyCard.GetProperty("occurrences").GetArrayLength());
+
+        var repostCard=collapsedItems.Single(x=>x.GetProperty("origin").GetString()=="EXECUTION_OBSERVATION");
+        Assert.Equal("EXACT_CONTENT_REPOST",repostCard.GetProperty("duplicateStatus").GetString());
+        Assert.True(repostCard.GetProperty("occurrenceCount").GetInt32()>=2);
+
+        // 3. Date provenance filter separates VERIFIED_DATE from UNKNOWN_DATE
+        var verifiedOnly=await RecoveryScenario.Data(await s.Client.GetAsync(baseQuery+"&dateProvenance=VERIFIED_DATE"));
+        Assert.Equal(2,verifiedOnly.GetProperty("results").GetProperty("total").GetInt32());
+        var unknownOnly=await RecoveryScenario.Data(await s.Client.GetAsync(baseQuery+"&dateProvenance=UNKNOWN_DATE"));
+        Assert.Equal(2,unknownOnly.GetProperty("results").GetProperty("total").GetInt32());
+
+        // 4. RawJobPosting.RawContent and historical observations remain 100% immutable
+        await s.Read(async db=>{
+            var rawPost=await db.RawJobPostings.SingleAsync(x=>x.Id==rawPostId);
+            Assert.Equal(originalText,rawPost.RawContent);
+            Assert.Equal(4,await db.DiscoveryExecutionObservations.CountAsync());
+        });
+        Assert.Equal(before,await s.Snapshot());s.AssertOffline();
+    }
 }

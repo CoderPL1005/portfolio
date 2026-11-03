@@ -181,6 +181,7 @@ export function normalizeSocialApisItem(row) {
   }
   const mapped = postId !== null || !!text?.trim() || link !== undefined;
   return { source: 'FACEBOOK', sourceExternalId: postId, sourceUrl: link?.post.url ?? null, rawContent: text, publishedAt,
+    publishedAtProvenance: publishedAt !== null ? 'VERIFIED_SUPPORTED_TIMESTAMP' : 'UNAVAILABLE_OR_UNVERIFIED',
     permalinkSourceField: link?.field ?? null, permalinkVerified: false, urlInferred: false,
     idUrlConflict: links.some(item => postId !== null && item.post.id !== postId),
     mappingStatus: !mapped ? 'UNRECOGNIZED_ITEM_FIELDS' : nested ? 'PARTIAL_OBSERVED_FIELDS'

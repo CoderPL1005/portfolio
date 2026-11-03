@@ -3,7 +3,7 @@ export const EXTRACTION_VERSION = 'vacancy-aware-v1.1';
 const unique = values => [...new Set(values)];
 const clean = value => value.normalize('NFC').replace(/\r\n?/gu, '\n').replace(/[*`]/gu, '').trim();
 const signalText = text => text.replace(/[\p{L}\p{N}._+%-]+@[\p{L}\p{N}.-]+\.[a-z]{2,}/giu, '').replace(/https?:\/\/\S+/giu, '');
-const roles = /developer|engineer|lập trình|\b(?:pqa|qa|tester|flutter|data label(?:ing)?)\b|nghiên cứu|an ninh|bảo mật/iu;
+const roles = /developer|engineer|lập trình|\b(?:pqa|qa|tester|flutter|data label(?:ing)?)\b|nghiên cứu|an ninh|bảo mật|(?:back[- ]?end|full[- ]?stack|front[- ]?end)\s+(?:intern(?:ship)?|fresher|junior|thực tập(?:\s+sinh)?)|(?:intern(?:ship)?|fresher|junior|thực tập(?:\s+sinh)?)\s+(?:back[- ]?end|full[- ]?stack|front[- ]?end)|(?:tuyển(?:\s+dụng)?|\bhiring\b)[^\n]{0,60}\b(?:back[- ]?end|full[- ]?stack|intern(?:ship)?|fresher|thực tập)/iu;
 const entry = /\b(?:intern(?:ship)?|fresher|junior|entry[- ]level)\b|thực tập/giu;
 const seniority = /\b(?:intern(?:ship)?|fresher|junior|entry[- ]level|middle|mid[- ]level|senior|lead|experienced)\b|thực tập/giu;
 const cities = /(?<![\p{L}\p{N}])(?:hà nội|ha noi|hanoi|hồ chí minh|ho chi minh|hcm|sài gòn|sai gon)(?![\p{L}\p{N}])/giu;
@@ -106,9 +106,9 @@ function extractRequirements(lines) {
       if (inline) result.push(inline);
       continue;
     }
-    if (!text || section === 'BENEFITS' || section === 'FOOTER' || section === 'RESPONSIBILITIES' || salary(text, 'CHECK') || location(text).city || contacts(text).contactEmail) continue;
+    if (!text || section === 'BENEFITS' || section === 'FOOTER' || section === 'RESPONSIBILITIES' || salary(text, 'CHECK') || location(text).city && !technologies(text).length || contacts(text).contactEmail) continue;
     if (/^(?:được |hỗ trợ|cơ hội|thưởng|lộ trình|đào tạo|training|free lunch|chúng |môi trường|nếu bạn|các bạn)/iu.test(text)) continue;
-    if (section === 'REQUIREMENTS' || /^(?:có |biết |nắm |hiểu |thành thạo|kiến thức|kinh nghiệm|tư duy|sẵn sàng|là sv|sv |sinh viên|đã có|đã tốt nghiệp|đã có thể|tiếng |đi làm|[≥>]\s*\d|\d+\s*(?:\+|tháng|năm)|experience|must |proficien|familiar|mandatory)/iu.test(text)) result.push(line);
+    if (section === 'REQUIREMENTS' || /^(?:có |biết |nắm |hiểu |thành thạo|kiến thức|kinh nghiệm|tư duy|sẵn sàng|là sv|sv |sinh viên|đã có|đã tốt nghiệp|đã có thể|tiếng |đi làm|[≥>]\s*\d|\d+\s*(?:\+|tháng|năm)|experience|must |proficien|familiar|mandatory|(?:tech\s*)?stack\s*[:：]|công nghệ\s*[:：]|ngôn ngữ\s*[:：]|kỹ năng\s*[:：]|skills?\s*[:：])/iu.test(text) || /^#[\p{L}\p{N}_.#+-]+(?:\s+#[\p{L}\p{N}_.#+-]+)*$/u.test(line.trim())) result.push(line);
   }
   return result.join('\n') || null;
 }
@@ -131,7 +131,8 @@ function employerMention(text) {
 
 function isHeading(line) {
   const candidate = labelText(line).replace(/^\d+[.)]\s*/u, '');
-  const explicitRoleTitle = /^(?:(?:intern(?:ship)?|fresher|junior|middle|senior)[\s/–-]+)*(?:(?:software|full[- ]?stack|backend|frontend|web|automation)[\s/–-]+)*(?:(?:\.net|asp\.net(?: core)?|c#|java|react|angular|flutter)[\s/–-]+)*(?:developer|engineer|pqa|qa|tester|lập trình)/iu.test(candidate);
+  const explicitRoleTitle = /^(?:(?:intern(?:ship)?|fresher|junior|middle|senior|thực tập(?:\s+sinh)?)[\s/–-]+)*(?:(?:software|full[- ]?stack|backend|back-end|frontend|front-end|web|automation)[\s/–-]+)*(?:(?:\.net|asp\.net(?: core)?|c#|java|react|angular|flutter|python|fastapi)[\s/–-]+)*(?:developer|engineer|pqa|qa|tester|lập trình|intern(?:ship)?|fresher|thực tập(?:\s+sinh)?)/iu.test(candidate) &&
+    /developer|engineer|pqa|qa|tester|lập trình|backend|back-end|full[- ]?stack|frontend|front-end|\.net|c#|python|fastapi|java|react|angular|flutter/iu.test(candidate);
   // A role mentioned in a sentence is not itself a role-title heading.
   if (/\b(?:mentors?|mentoring|mentored|coaches?|coaching)\b|(?:hướng dẫn|kèm cặp|dẫn dắt)\s+(?:nhân viên|các bạn|staff|team)/iu.test(candidate)) return false;
   if (!explicitRoleTitle && /[,，]|[.!。]\s*$|thích công việc|cẩn thận|trách nhiệm/iu.test(candidate) &&
@@ -141,10 +142,10 @@ function isHeading(line) {
       /^(?:có |biết |nắm |hiểu |thành thạo|được |hỗ trợ|cơ hội|là sv|sv |sinh viên|đã |tiếng |đi làm|must |proficien|familiar)/iu.test(candidate)) return false;
   if (/[?？]\s*$/u.test(line) || /^(?:what|why|how|when)\b/iu.test(line)) return false;
   if (/chúng (?:mình|tôi)|các bạn|tham gia|phát triển|training|đào tạo|có kinh nghiệm|nhờ|review cv|thảo luận|so sánh|bàn về|\bdiscussion\b|\bhow to\b/iu.test(line)) return false;
-  if (/tuyển(?: dụng)?\s*[:：]/iu.test(line) && technologies(line).some(t => ['.NET', 'C#', 'ASP.NET'].includes(t))) return true;
+  if (/tuyển(?: dụng)?\s*[:：]/iu.test(line) && technologies(line).some(t => ['.NET', 'C#', 'ASP.NET', 'ASP.NET Core', 'Python', 'FastAPI'].includes(t))) return true;
   if (!roles.test(line) || line.length > 180 || /^(?:yêu cầu|requirements?|skills?|kinh nghiệm|có |biết |sử dụng|thành thạo|ưu tiên|nắm |công nghệ|backend:|frontend:)/iu.test(line)) return false;
   return /^\s*(?:\d+[.)]|[-•▪✅👉])\s*/u.test(line) ||
-    /developer|engineer|\b(?:pqa|qa|tester|flutter)\b|lập trình|nghiên cứu|bảo mật/iu.test(line);
+    /developer|engineer|\b(?:pqa|qa|tester|flutter)\b|lập trình|nghiên cứu|bảo mật|(?:back[- ]?end|full[- ]?stack|front[- ]?end)\s+(?:intern(?:ship)?|fresher|junior|thực tập)|(?:intern(?:ship)?|fresher|junior|thực tập(?:\s+sinh)?)\s+(?:back[- ]?end|full[- ]?stack|front[- ]?end)|(?:tuyển(?:\s+dụng)?|\bhiring\b)[^\n]{0,60}\b(?:back[- ]?end|full[- ]?stack|intern(?:ship)?|fresher|thực tập)/iu.test(line);
 }
 
 /** One post remains one job. A vacancy never borrows another vacancy's stack or requirements. */
@@ -223,7 +224,7 @@ export function extractVacancies(body, { sourceUrl = null, publishedAt = null } 
     const mandatoryTechnologies = technologies(mandatoryText);
     const backendTechnology = value => ['.NET', 'C#', 'ASP.NET', 'ASP.NET Core'].includes(value);
     const primaryTechnologies = unique([...titleTechnologies, ...mandatoryTechnologies, ...technologies(mandatorySkills(backendResponsibilities??''))]);
-    const levels = unique(signalText(title ?? block).match(seniority) ?? (starts.length === 1 ? signalText(block).match(seniority) ?? commonSeniority : parentLevels));
+    const levels = unique([...(signalText(title ?? block).match(seniority) ?? []), ...(starts.length === 1 ? [...(signalText(block).match(seniority) ?? []), ...commonSeniority] : parentLevels)]);
     const hasEntryLevel = levels.some(level => /^(?:intern(?:ship)?|fresher|junior|entry[- ]level|thực tập)$/iu.test(level));
     const exp = experience(mandatoryText);
     // For compact provider posts without a title, retain explicit employer/stack

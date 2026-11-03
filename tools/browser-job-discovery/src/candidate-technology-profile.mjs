@@ -79,15 +79,23 @@ export function normalizeQuery(query) {
   for (const [canonical] of [...spellings].sort((a,b)=>b[0].length-a[0].length)) result=result.replace(technologyPattern(canonical,'giu'),canonical);
   return locationIdentity(result).replace(/\s+/gu,' ');
 }
-export function queryYield(history, query, profileFingerprint, targetFingerprint) {
-  const rows=history.filter(h=>h.profileFingerprint===profileFingerprint && h.targetPreferencesFingerprint===targetFingerprint && h.normalizedQueryIdentity===normalizeQuery(query));
-  const known=rows.filter(h=>typeof h.creditsDeducted==='number' && h.creditsDeducted>0);
-  const credits=known.reduce((s,h)=>s+h.creditsDeducted,0);
-  return { measuredPages:rows.length, depthSurveyed:Math.max(0,...rows.map(h=>h.pageNumber??0)),
-    score:credits ? known.reduce((s,h)=>s+(h.newRelevantOpportunities??0),0)/credits : null };
+export function queryYield(history, query, profileFingerprint, targetFingerprint, context = {}) {
+  const identity = normalizeQuery(query);
+  const rows = history.filter(h => h.profileFingerprint === profileFingerprint &&
+    h.targetPreferencesFingerprint === targetFingerprint &&
+    (h.normalizedQueryIdentity === identity || typeof h.query === 'string' && normalizeQuery(h.query) === identity));
+  const known = rows.filter(h => typeof h.creditsDeducted === 'number' && h.creditsDeducted > 0);
+  const credits = known.reduce((s, h) => s + h.creditsDeducted, 0);
+  const duplicateRates = rows.map(h => typeof h.duplicateRate === 'number' && Number.isFinite(h.duplicateRate) ? h.duplicateRate : null).filter(v => v !== null);
+  const recentDuplicateRate = duplicateRates.length ? duplicateRates.at(-1) : null;
+  const usedToday = !!context.vietnamBusinessDate && rows.some(h => h.vietnamBusinessDate === context.vietnamBusinessDate);
+  const repeatedImmediately = !!context.previousQueryIdentity && context.previousQueryIdentity === identity;
+  return { measuredPages: rows.length, depthSurveyed: Math.max(0, ...rows.map(h => h.pageNumber ?? 0)),
+    score: credits ? known.reduce((s, h) => s + (h.newRelevantOpportunities ?? 0), 0) / credits : null,
+    recentDuplicateRate, usedToday, repeatedImmediately };
 }
-export function planFacebookQueries(profile, history=[], targetPreferences) {
-  if (targetPreferences) return planBackendQueries(profile,history,targetJobPreferences(targetPreferences));
+export function planFacebookQueries(profile, history=[], targetPreferences, context={}) {
+  if (targetPreferences) return planBackendQueries(profile,history,targetJobPreferences(targetPreferences),context);
   const result=new Map();
   const used=profile.technologies.filter(t=>t.level==='USED').sort((a,b)=>
     Number(b.evidence.some(e=>e.kind==='EXPERIENCE'))-Number(a.evidence.some(e=>e.kind==='EXPERIENCE')) || (a.name<b.name?-1:1));
@@ -99,21 +107,28 @@ export function planFacebookQueries(profile, history=[], targetPreferences) {
     if(result.size>=32)break outer;
     const query=template(t,loc),identity=normalizeQuery(query);if(result.has(identity))continue;
     const evidencePriority=t.evidence.some(e=>e.kind==='EXPERIENCE')?3:t.evidence.some(e=>e.kind==='PROJECT')?2:1;
-    result.set(identity,{query,identity,technologyId:t.technologyId,evidencePriority,profileFingerprint:profile.fingerprint,...queryYield(history,query,profile.fingerprint)});
+    result.set(identity,{query,identity,technologyId:t.technologyId,evidencePriority,profileFingerprint:profile.fingerprint,...queryYield(history,query,profile.fingerprint,undefined,context)});
   }
-  return [...result.values()].map(c=>({...c,rankingValue:c.score??0.25,
-    rankingBasis:c.score===null?'UNMEASURED_EXPLORATION_PRIOR':'OBSERVED_NEW_RELEVANT_OPPORTUNITIES_PER_CREDIT'}))
-    .sort((a,b)=>b.rankingValue-a.rankingValue || b.evidencePriority-a.evidencePriority || (a.identity<b.identity?-1:1));
+  const allCandidates = [...result.values()];
+  const allUsedToday = allCandidates.length > 0 && allCandidates.every(c => c.usedToday);
+  return allCandidates.map(c=>{
+    const baseValue = c.score ?? 0.25;
+    const dupPenalty = typeof c.recentDuplicateRate === 'number' && c.recentDuplicateRate > 0 ? Math.min(0.24, c.recentDuplicateRate * 0.2) : 0;
+    const rankingValue = Math.max(0, baseValue - dupPenalty);
+    return {...c, rankingValue,
+      allEligibleUsedToday: allUsedToday,
+      rankingBasis: c.score === null ? 'UNMEASURED_EXPLORATION_PRIOR' : 'OBSERVED_NEW_RELEVANT_OPPORTUNITIES_PER_CREDIT'};
+  }).sort((a,b)=>Number(a.usedToday)-Number(b.usedToday) || Number(a.repeatedImmediately)-Number(b.repeatedImmediately) || b.rankingValue-a.rankingValue || b.evidencePriority-a.evidencePriority || (a.identity<b.identity?-1:1));
 }
 
-function planBackendQueries(profile,history,prefs) {
+function planBackendQueries(profile,history,prefs,context={}) {
   const result=new Map(), targetFingerprint=preferencesFingerprint(prefs);
   const add=(query,name=null) => {
     const identity=normalizeQuery(query); if(result.has(identity))return;
     const evidence=profile.technologies.find(t=>name && fold(t.name)===fold(name));
     result.set(identity,{query,identity,technologyId:evidence?.technologyId??null,
       evidenceLevel:evidence?.level??'UNVERIFIED',profileFingerprint:profile.fingerprint,
-      targetPreferencesFingerprint:targetFingerprint,...queryYield(history,query,profile.fingerprint,targetFingerprint)});
+      targetPreferencesFingerprint:targetFingerprint,...queryYield(history,query,profile.fingerprint,targetFingerprint,context)});
   };
   // Round-robin GROUPS before technologies/levels/locations. A catalogue full of
   // supporting USED tools cannot crowd out an explicitly accepted backend stack.
@@ -123,13 +138,23 @@ function planBackendQueries(profile,history,prefs) {
     const name=group.technologies[i]; if(name)add(`${name} Backend ${level} ${location}`,name);
   }
   add(`Backend Developer ${prefs.seniorities[0]} ${prefs.locations[0]}`);
-  return [...result.values()].map((c,index)=>({...c,explorationOrder:index,rankingValue:c.score??0.25,
-    rankingBasis:c.score===null?'UNMEASURED_EXPLORATION_PRIOR':'OBSERVED_NEW_RELEVANT_OPPORTUNITIES_PER_CREDIT'}))
-    .sort((a,b)=>b.rankingValue-a.rankingValue || a.explorationOrder-b.explorationOrder);
+  outer2: for(const level of prefs.seniorities) for(const location of prefs.locations) for(let i=0;i<width;i++) for(const group of prefs.stackGroups) {
+    if(result.size>=32)break outer2;
+    const name=group.technologies[i]; if(name)add(`Tuyển dụng ${name} Backend ${level} ${location}`,name);
+  }
+  const allCandidates = [...result.values()];
+  const allUsedToday = allCandidates.length > 0 && allCandidates.every(c => c.usedToday);
+  return allCandidates.map((c,index)=>{
+    const baseValue = c.score ?? 0.25;
+    const dupPenalty = typeof c.recentDuplicateRate === 'number' && c.recentDuplicateRate > 0 ? Math.min(0.24, c.recentDuplicateRate * 0.2) : 0;
+    const rankingValue = Math.max(0, baseValue - dupPenalty);
+    return {...c,explorationOrder:index,rankingValue,allEligibleUsedToday:allUsedToday,
+      rankingBasis:c.score===null?'UNMEASURED_EXPLORATION_PRIOR':'OBSERVED_NEW_RELEVANT_OPPORTUNITIES_PER_CREDIT'};
+  }).sort((a,b)=>Number(a.usedToday)-Number(b.usedToday) || Number(a.repeatedImmediately)-Number(b.repeatedImmediately) || b.rankingValue-a.rankingValue || a.explorationOrder-b.explorationOrder);
 }
 
 // Called only from init; resolving the same snapshot is stable across resumes.
-export function resolveDiscoveryPolicy(policy, query, history=[], {resume=false, previous}={}) {
+export function resolveDiscoveryPolicy(policy, query, history=[], {resume=false, previous, vietnamBusinessDate=null, previousQueryIdentity=null}={}) {
   const targetPreferences=policy.targetJobPreferences ? targetJobPreferences(policy.targetJobPreferences) : undefined;
   if (policy.planQueries!==undefined && typeof policy.planQueries!=='boolean') throw new Stop('INVALID_QUERY_PLANNER_FLAG');
   if (!policy.portfolioSnapshot) {
@@ -139,7 +164,7 @@ export function resolveDiscoveryPolicy(policy, query, history=[], {resume=false,
   const technologyProfile=buildCandidateTechnologyProfile(policy.portfolioSnapshot,targetPreferences ?? policy.profile??{});
   const profile={technologies:technologyProfile.technologies.filter(t=>t.level==='USED').map(t=>t.name),
     locations:technologyProfile.locations,seniorities:technologyProfile.seniorities, technologyProfile};
-  const candidates=planFacebookQueries(technologyProfile,history,targetPreferences);
+  const candidates=planFacebookQueries(technologyProfile,history,targetPreferences,{vietnamBusinessDate,previousQueryIdentity});
   // Never rerank/replace an in-progress query during continuation.
   const fixed=resume || previous && !previous.stopReason;
   if(!query?.trim() && !fixed && !policy.planQueries)throw new Stop('QUERY_REQUIRED_OR_ENABLE_PLANNER');
@@ -150,14 +175,24 @@ export function resolveDiscoveryPolicy(policy, query, history=[], {resume=false,
 
 // V1 uses the existing Portfolio boundary, never a fabricated technology profile.
 // One selected query does not imply coverage of the other planned stacks.
-export function resolveOneRequestPolicy(policy, preferences, history=[]) {
+export function resolveOneRequestPolicy(policy, preferences, history=[], context={}) {
   if(!policy?.portfolioSnapshot || policy.mode && policy.mode!=='development')throw new Stop('V1_PORTFOLIO_SNAPSHOT_REQUIRED');
-  const resolved=resolveDiscoveryPolicy({...policy,targetJobPreferences:preferences,planQueries:true},undefined,history);
-  const candidates=planFacebookQueries(resolved.profile.technologyProfile,history,resolved.targetJobPreferences);
-  const selected=candidates[0];
-  if(!selected)throw new Stop('V1_QUERY_PLAN_EMPTY');
-  return {...resolved,rotatingQuery:null,adaptiveQueries:[],maxRequests:1,maxCredits:1,
-    querySelection:{query:selected.query,rankingBasis:selected.rankingBasis,score:selected.score,
+  const resolved=resolveDiscoveryPolicy({...policy,targetJobPreferences:preferences,planQueries:true},undefined,history,context);
+  const candidates=planFacebookQueries(resolved.profile.technologyProfile,history,resolved.targetJobPreferences,context);
+  if(!candidates.length)throw new Stop('V1_QUERY_PLAN_EMPTY');
+  const frozenQuery=typeof context.frozenQuery==='string'&&context.frozenQuery.trim()?context.frozenQuery.trim():null;
+  const selected=frozenQuery?candidates.find(c=>c.identity===normalizeQuery(frozenQuery))??candidates[0]:candidates[0];
+  const rotatedFromSameDay=candidates.some(c=>c.usedToday)&&!selected.usedToday;
+  const decision=frozenQuery&&selected.identity===normalizeQuery(frozenQuery)?'FROZEN_SNAPSHOT_QUERY'
+    :selected.allEligibleUsedToday?'ALL_ELIGIBLE_EXHAUSTED_SAFE_REUSE_BEST_YIELD'
+    :rotatedFromSameDay?'ROTATED_UNTRIED_TODAY'
+    :selected.score!==null?'RANKED_BY_YIELD':'EXPLORATION_PRIOR';
+  return {...resolved,query:selected.query,rotatingQuery:null,adaptiveQueries:[],maxRequests:1,maxCredits:1,
+    querySelection:{query:selected.query,normalizedQueryIdentity:selected.identity,decision,
+      rankingBasis:selected.rankingBasis,score:selected.score,recentDuplicateRate:selected.recentDuplicateRate??null,
+      usedToday:selected.usedToday??false,allEligibleUsedToday:selected.allEligibleUsedToday??false,
+      vietnamBusinessDate:context.vietnamBusinessDate??null,slot:context.slot??null,
+      historyEntriesConsidered:Array.isArray(history)?history.length:0,
       evidenceLevel:selected.evidenceLevel,profileFingerprint:selected.profileFingerprint,
       targetPreferencesFingerprint:selected.targetPreferencesFingerprint,candidateCount:candidates.length,
       coverage:'ONE_QUERY_ONLY_NOT_ENTIRE_POOL'}};

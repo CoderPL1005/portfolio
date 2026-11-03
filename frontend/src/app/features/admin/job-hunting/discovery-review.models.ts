@@ -8,11 +8,16 @@ export interface DiscoveryReviewItem {
   sourceWarnings: string[]; classifierVersion: string; evaluatedAt: string;
   profileFingerprint?:string|null; preferencesFingerprint?:string|null;
 }
+export interface DiscoveryPostOccurrence {
+  origin: string; candidateId?: string | null; executionId?: string | null; itemIndex: number; runId: string;
+  collectedAt: string; contentHash?: string | null; contentGroupHash?: string | null; contentUpdated: boolean; reviewed: boolean;
+}
 export interface DiscoveryReviewDetail {
   id: string; runId: string; query: string; pageNumber: number; ingestedAt: string; duplicateCount: number; item: DiscoveryReviewItem;
   humanReview?: HumanReview;
   origin?: 'CLASSIFIER'; recovery?: null; originalQuery?:string|null; queryAvailability?:'AVAILABLE';
   observation?: DiscoveryObservationDetail | null;
+  providerPostIdentity?: string | null; occurrenceCount?: number; duplicateStatus?: string | null; occurrences?: DiscoveryPostOccurrence[] | null;
 }
 export interface DiscoveryRecoveryEnvelope {
   origin:'PERSISTED_OBSERVATION_RECOVERY';version:'recovery-review-v1';executionId:string;observationId:string;workflowRunId:string;
@@ -27,15 +32,18 @@ export interface DiscoveryRecoveryDetail {
   origin:'PERSISTED_OBSERVATION_RECOVERY';item:null;originalQuery:null;originalClassifierResult:null;queryAvailability:'UNAVAILABLE';
   recovery:DiscoveryRecoveryEnvelope;humanReview?:HumanReview;identityWarning:boolean;
   observation?: DiscoveryObservationDetail | null;
+  providerPostIdentity?: string | null; occurrenceCount?: number; duplicateStatus?: string | null; occurrences?: DiscoveryPostOccurrence[] | null;
 }
 export type DiscoveryReviewRecord=DiscoveryReviewDetail|DiscoveryRecoveryDetail;
 export interface DiscoveryObservationDetail {
   origin:'EXECUTION_OBSERVATION'; executionId:string; itemIndex:number; workflowRunId:string|null;
   collectedAt:string; executionState:string; semanticState:string; extractionError:string|null;
-  source:{itemIndex:number;providerPostId:string|null;sourceUrl:string|null;providerSourceUrl:string|null;rawContent:string|null;contentHash:string|null;publishedAt:string|null;outcome:string|null};
+  source:{itemIndex:number;providerPostId:string|null;sourceUrl:string|null;providerSourceUrl:string|null;rawContent:string|null;contentHash:string|null;publishedAt:string|null;publishedAtProvenance?:string|null;windowMatchStatus?:string|null;outcome:string|null};
   review:DiscoveryReviewItem|null; vacancies:DiscoveryExecutionVacancy[]; sourceWarnings:string[];
   candidateId:string|null; humanReview:HumanReview|null;
   linkedCandidateIds?:string[]|null;
+  providerPostIdentity?: string | null; occurrenceCount?: number; duplicateStatus?: string | null; occurrences?: DiscoveryPostOccurrence[] | null;
+  publishedAtProvenance?: string | null; windowMatchStatus?: string | null;
 }
 export type DiscoveryOpportunity=DiscoveryReviewRecord|DiscoveryObservationDetail;
 export interface HumanReview {
@@ -58,5 +66,11 @@ export interface DiscoveryQualityReport { counts:QualityCounts;observationLevel:
 }
 export interface DiscoveryReviewList<T extends DiscoveryOpportunity=DiscoveryReviewDetail> {
   results: PagedResult<T>;
-  counts: { total: number; valid: number; invalid: number; needsReview: number; targetMatch: number; identityWarnings: number; duplicateItems: number; reviewed?:number; unknown?:number };
+  counts: {
+    total: number; valid: number; invalid: number; needsReview: number; targetMatch: number;
+    identityWarnings: number; duplicateItems: number; reviewed?:number; unknown?:number;
+    totalObservations?: number; uniqueSourcePosts?: number; newUniquePostsToday?: number;
+    repeatedPosts?: number; unknownDatePosts?: number; newRelevantVacancies?: number;
+    repeatedRelevantVacancies?: number; contentUpdatedPosts?: number; exactContentReposts?: number;
+  };
 }

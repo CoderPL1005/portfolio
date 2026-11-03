@@ -47,6 +47,17 @@ public static class DiscoveryDailySlots
         return plannedUtc.Hour / 3 + 1;
     }
 
+    public static (DateTimeOffset StartUtc, DateTimeOffset EndUtc) VietnamBusinessDayBoundsUtc(DateTimeOffset instant)
+    {
+        var vietnam = instant.ToOffset(TimeSpan.FromHours(7));
+        var startVietnam = new DateTimeOffset(vietnam.Year, vietnam.Month, vietnam.Day, 0, 0, 0, TimeSpan.FromHours(7));
+        var startUtc = startVietnam.ToUniversalTime();
+        return (startUtc, startUtc.AddDays(1));
+    }
+
+    public static string VietnamBusinessDate(DateTimeOffset instant) =>
+        instant.ToOffset(TimeSpan.FromHours(7)).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
     public static DiscoveryDailySearchWindow Window(DateTimeOffset plannedUtc)
     {
         var slot = SlotNumber(plannedUtc);
@@ -54,8 +65,8 @@ public static class DiscoveryDailySlots
         var vietnam = plannedUtc.ToOffset(TimeSpan.FromHours(7));
         var today = DateOnly.FromDateTime(vietnam.Date);
         var yesterday = today.AddDays(-1);
-        var start = slot <= 3 ? yesterday : today;
-        var end = slot == 1 ? yesterday : today;
+        var start = slot <= 2 ? yesterday : today;
+        var end = today;
         return new DiscoveryDailySearchWindow(slot,
             start.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
             end.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
@@ -109,9 +120,9 @@ public sealed partial class DiscoveryExecutionService
             if (await db.DiscoveryExecutions.AnyAsync(x => x.ActiveKey != null, ct))
                 return new { state = "SKIPPED_ACTIVE", executionId = (Guid?)null, plannedUtc = planned };
 
-            var day = new DateTimeOffset(planned.Year, planned.Month, planned.Day, 0, 0, 0, TimeSpan.Zero);
+            var (dayStartUtc, dayEndUtc) = DiscoveryDailySlots.VietnamBusinessDayBoundsUtc(planned);
             if (await db.DiscoveryExecutions.CountAsync(x => x.TriggerSource == "DAILY_SCHEDULED" &&
-                x.CreatedAt >= day && x.CreatedAt < day.AddDays(1), ct) >= 6)
+                x.CreatedAt >= dayStartUtc && x.CreatedAt < dayEndUtc, ct) >= 6)
                 return new { state = "SKIPPED_DAILY_LIMIT", executionId = (Guid?)null, plannedUtc = planned };
 
             // BuildConfigurationAsync freezes the authorized day window. Scheduled Gemini is OFF.

@@ -58,6 +58,7 @@ export function buildReviewItemsFromObservations(rows, context = {}, budget) {
 function classifyReviewRows(rows, context, budget, persisted) {
   const evaluatedAt = context.evaluatedAt ?? new Date().toISOString();
   const seen = new Set();
+  const seenProviderIdentities = new Set();
   return rows.map((row, itemIndex) => {
     budget?.check();
     try {
@@ -76,6 +77,10 @@ function classifyReviewRows(rows, context, budget, persisted) {
     const providerPostId = normalized?.sourceExternalId && /^(?:\d{1,100}|pfbid[A-Za-z0-9]{1,200})$/u.test(normalized.sourceExternalId) ? normalized.sourceExternalId : null;
     if (!providerPostId) sourceWarnings.push('POST_ID_MISSING_OR_INVALID');
     if (!sourceUrl) sourceWarnings.push(rawUrl ? 'POST_URL_INVALID_OR_UNSUPPORTED' : 'POST_URL_MISSING');
+    const providerPostIdentity = !normalized?.idUrlConflict && providerPostId ? `fb:id:${providerPostId}`
+      : !normalized?.idUrlConflict && sourceUrl ? `fb:url:${sourceUrl}` : null;
+    if (providerPostIdentity && seenProviderIdentities.has(providerPostIdentity)) sourceWarnings.push('WITHIN_RESPONSE_DUPLICATE_POST');
+    if (providerPostIdentity) seenProviderIdentities.add(providerPostIdentity);
     const contentHash = rawContent === null ? null : hash(rawContent);
     const contentGroupHash = rawContent === null ? null : hash(rawContent.normalize('NFC').replace(/\r\n?/gu, '\n').trim());
     if (contentGroupHash && seen.has(contentGroupHash)) sourceWarnings.push('DUPLICATE_CONTENT');
@@ -93,7 +98,7 @@ function classifyReviewRows(rows, context, budget, persisted) {
       const nonJob = /khóa học|đăng ký học|tuyển sinh|course|chia sẻ kiến thức|hỏi đáp|tutorial|how to|review cv/iu;
       const questionPattern = /^\s*(?:có (?:công ty|ai|đơn vị)|ai biết|cho (?:em|mình) hỏi|where|how|what)[^\n]*\?/iu;
       const question = questionPattern.test(rawContent);
-      const title = /developer|engineer|lập trình|tester|\bpqa\b|nhân viên/iu;
+      const title = /developer|engineer|lập trình|tester|\bpqa\b|nhân viên|back[- ]?end|full[- ]?stack|front[- ]?end|\b(?:intern(?:ship)?|fresher|thực tập(?:\s+sinh)?)\b/iu;
       const seeker = seeking.test(rawContent), employer = hiring.test(rawContent) && title.test(rawContent);
       const reason = seeker && employer ? 'CONTRADICTORY_CONTENT' : seeker ? 'CANDIDATE_SEEKING_WORK'
         : closed.test(rawContent) ? 'RECRUITMENT_CLOSED' : question ? 'NON_RECRUITMENT_CONTENT' : employer ? 'EMPLOYER_HIRING'

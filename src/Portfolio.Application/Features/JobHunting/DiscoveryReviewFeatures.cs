@@ -23,13 +23,16 @@ public sealed record ImportDiscoveryReviewCommand(DiscoveryReviewImport Bundle) 
 public sealed record DiscoveryImportResult(int Inserted, int Unchanged);
 public sealed record GetDiscoveryReviewQuery(int Page = 1, int PageSize = 20, string? ContentStatus = null,
     string? TargetStatus = null, string? RunId = null, bool? IdentityWarning = null, bool? DuplicatesOnly = null, string? ReviewState = null,
-    DateTimeOffset? CollectedFrom = null, DateTimeOffset? CollectedBefore = null) : IRequest<DiscoveryReviewList>;
+    DateTimeOffset? CollectedFrom = null, DateTimeOffset? CollectedBefore = null, string? DateProvenance = null, bool CollapseDuplicates = false) : IRequest<DiscoveryReviewList>;
 public sealed record GetDiscoveryCandidateQuery(Guid Id) : IRequest<DiscoveryReviewDetail>;
+public sealed record DiscoveryPostOccurrence(string Origin, Guid? CandidateId, Guid? ExecutionId, int ItemIndex, string RunId,
+    DateTimeOffset CollectedAt, string? ContentHash, string? ContentGroupHash, bool ContentUpdated, bool Reviewed);
 public sealed record DiscoveryReviewDetail(Guid Id, string RunId, string Query, int PageNumber, DateTimeOffset IngestedAt,
     int DuplicateCount, DiscoveryReviewItem? Item, HumanReviewSummary HumanReview,
     string Origin = "CLASSIFIER", string? OriginalQuery = null, string QueryAvailability = "AVAILABLE",
     object? OriginalClassifierResult = null, DiscoveryRecoveryEnvelope? Recovery = null, bool IdentityWarning = false,
-    DiscoveryObservationRead? Observation = null);
+    DiscoveryObservationRead? Observation = null, string? ProviderPostIdentity = null, int OccurrenceCount = 1,
+    string? DuplicateStatus = null, DiscoveryPostOccurrence[]? Occurrences = null);
 public sealed record DiscoveryReviewCounts(int Total, int Valid, int Invalid, int NeedsReview, int TargetMatch, int IdentityWarnings, int DuplicateItems);
 public sealed record DiscoveryReviewList(PagedResult<DiscoveryReviewDetail> Results, DiscoveryReviewCounts Counts);
 
@@ -163,6 +166,7 @@ public sealed class GetDiscoveryReviewValidator : IRequestValidator<GetDiscovery
         if (r.TargetStatus is not null && !DiscoveryReviewRules.TargetStatuses.Contains(r.TargetStatus)) f.Add(new("targetStatus", "Invalid target status."));
         if (r.RunId?.Length > 100) f.Add(new("runId", "Invalid run ID."));
         if (r.CollectedFrom >= r.CollectedBefore) f.Add(new("collectedFrom", "Invalid collection date range."));
+        if (r.DateProvenance is not null && !new[] { "VERIFIED_DATE", "UNKNOWN_DATE" }.Contains(r.DateProvenance)) f.Add(new("dateProvenance", "Invalid date provenance filter."));
         if (r.ReviewState is not null && !new[] { "REVIEWED", "UNREVIEWED", "CONFIRMED", "CORRECTED", "UNCERTAIN", "REVIEWED_RECOVERY" }.Contains(r.ReviewState)) f.Add(new("reviewState", "Invalid review filter."));
         return Task.FromResult<IReadOnlyCollection<ValidationFailure>>(f);
     }
