@@ -11,12 +11,20 @@ import {supportedPostingFacts} from './discovery-posting-facts.mjs';
 // Search window is frozen by the backend for the authorized Vietnam daily slot.
 // Nondated/ambiguous posts remain visible for human review as UNKNOWN date,
 // while posts with a trustworthy timestamp outside the window are excluded.
+const EXPLICIT_OFFSET_REGEX = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})$/iu;
+export function parseExplicitOffsetTimestamp(text) {
+  if (typeof text !== 'string' || !EXPLICIT_OFFSET_REGEX.test(text.trim())) return null;
+  const timestamp = Date.parse(text);
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
 export function dailyObservationWindowFilter(observations, config) {
   const scope = config.dailySearch;
   if (config.triggerSource !== 'DAILY_SCHEDULED') {
     if (scope != null) throw new Stop('DISCOVERY_DAILY_FILTER_INVALID');
     return observations.map(row => {
-      const hasValidDate = typeof row.publishedAt === 'string' && Number.isFinite(Date.parse(row.publishedAt));
+      const parsedTimestamp = parseExplicitOffsetTimestamp(row.publishedAt);
+      const hasValidDate = parsedTimestamp !== null;
       return {
         ...row,
         publishedAtProvenance: hasValidDate ? (row.publishedAtProvenance ?? 'VERIFIED_SUPPORTED_TIMESTAMP') : 'UNAVAILABLE_OR_UNVERIFIED',
@@ -32,21 +40,25 @@ export function dailyObservationWindowFilter(observations, config) {
   try { validateDateFilters({ startTime: scope.startTime, endTime: scope.endTime }); }
   catch { throw new Stop('DISCOVERY_DAILY_FILTER_INVALID'); }
   const requestedSearchWindow = { slot: scope.slot, startTime: scope.startTime, endTime: scope.endTime, timeZone: scope.timeZone };
-  return observations.filter(row => {
-    if (!row.publishedAt) return true;
-    const timestamp = Date.parse(row.publishedAt);
-    if (!Number.isFinite(timestamp)) return true;
-    const vietnamDay = new Date(timestamp + 7 * 60 * 60 * 1000).toISOString().slice(0, 10);
-    return vietnamDay >= scope.startTime && vietnamDay <= scope.endTime;
-  }).map((row, index) => {
-    const hasValidDate = typeof row.publishedAt === 'string' && Number.isFinite(Date.parse(row.publishedAt));
+  return observations.map((row, index) => {
+    const parsedTimestamp = parseExplicitOffsetTimestamp(row.publishedAt);
+    const hasValidDate = parsedTimestamp !== null;
+    let windowMatchStatus = 'UNKNOWN_DATE';
+    if (hasValidDate) {
+      const vietnamDay = new Date(parsedTimestamp + 7 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      windowMatchStatus = (vietnamDay >= scope.startTime && vietnamDay <= scope.endTime)
+        ? 'VERIFIED_IN_WINDOW'
+        : 'OUT_OF_WINDOW';
+    }
+    const outcome = windowMatchStatus === 'OUT_OF_WINDOW' ? 'OUT_OF_WINDOW' : row.outcome;
     return {
       ...row,
       itemIndex: index,
       publishedAtProvenance: hasValidDate ? 'VERIFIED_SUPPORTED_TIMESTAMP' : 'UNAVAILABLE_OR_UNVERIFIED',
-      windowMatchStatus: hasValidDate ? 'VERIFIED_IN_WINDOW' : 'UNKNOWN_DATE',
-      freshness: hasValidDate ? 'VERIFIED_IN_WINDOW' : 'UNKNOWN',
-      requestedSearchWindow
+      windowMatchStatus,
+      freshness: windowMatchStatus === 'VERIFIED_IN_WINDOW' ? 'VERIFIED_IN_WINDOW' : windowMatchStatus === 'OUT_OF_WINDOW' ? 'OUT_OF_WINDOW' : 'UNKNOWN',
+      requestedSearchWindow,
+      outcome
     };
   });
 }
@@ -195,7 +207,7 @@ export async function processObservations({executionId,observations,config,polic
       classificationFailures.add(observation.itemIndex);review=null;reviewItems[observation.itemIndex]=null;
     }
     let extracted={vacancies:[]},semanticError=false,processingError=classificationFailures.has(observation.itemIndex)?'CLASSIFICATION_FAILED':null;
-    try { if(providerOperation==='SUCCEEDED'&&!processingError)extracted=deterministic(observation); }
+    try { if(providerOperation==='SUCCEEDED'&&!processingError&&observation.outcome!=='OUT_OF_WINDOW')extracted=deterministic(observation); }
     catch { processingError='DETERMINISTIC_EXTRACTION_FAILED'; }
     const saved=config.savedProcessing?.[observation.itemIndex];
     if(saved?.processing&&(saved.processing.evidencePolicy??'STRICT')!==evidencePolicy)throw new Stop('DISCOVERY_EVIDENCE_POLICY_CONFLICT');

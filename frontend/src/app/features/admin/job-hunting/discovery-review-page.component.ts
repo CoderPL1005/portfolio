@@ -157,6 +157,9 @@ import { DiscoveryExecutionComponent } from './discovery-execution.component';
               <span>Bài mới hôm nay: <strong>{{data.counts.newUniquePostsToday ?? 0}}</strong></span>
               <span>Bài lặp lại: <strong>{{data.counts.repeatedPosts ?? 0}}</strong></span>
               <span>Chưa rõ ngày đăng: <strong>{{data.counts.unknownDatePosts ?? 0}}</strong></span>
+              @if(data.counts.outOfWindowPosts !== undefined && data.counts.outOfWindowPosts > 0){
+                <span>Ngoài khung ngày: <strong>{{data.counts.outOfWindowPosts}}</strong></span>
+              }
               <span>Vị trí phù hợp mới: <strong>{{data.counts.newRelevantVacancies ?? 0}}</strong></span>
               <span>Vị trí phù hợp lặp lại: <strong>{{data.counts.repeatedRelevantVacancies ?? 0}}</strong></span>
             </section>
@@ -184,7 +187,7 @@ import { DiscoveryExecutionComponent } from './discovery-execution.component';
           <label>Mức độ phù hợp <select [(ngModel)]="targetStatus" (ngModelChange)="filter()"><option value="">Tất cả</option>@for(s of targetStatuses;track s){<option [value]="s">{{label(s)}}</option>}</select></label>
           <label>Phiên thu thập <input [(ngModel)]="runId" maxlength="100" /></label>
           <label>Ngày thu thập (giờ Việt Nam) <input type="date" [(ngModel)]="collectedDate" (ngModelChange)="filter()" /></label>
-          <label>Ngày đăng bài viết <select [(ngModel)]="dateProvenance" (ngModelChange)="filter()"><option value="">Tất cả nguồn ngày đăng</option><option value="VERIFIED_DATE">Có ngày đăng xác thực</option><option value="UNKNOWN_DATE">Chưa xác định ngày đăng</option></select></label>
+          <label>Ngày đăng bài viết <select [(ngModel)]="dateProvenance" (ngModelChange)="filter()"><option value="">Tất cả nguồn ngày đăng</option><option value="VERIFIED_DATE">Có ngày đăng xác thực</option><option value="UNKNOWN_DATE">Chưa xác định ngày đăng</option><option value="OUT_OF_WINDOW">Ngoài khung ngày tìm kiếm</option></select></label>
           <div class="checks"><label><input type="checkbox" [(ngModel)]="identityOnly" (ngModelChange)="filter()" /> Có cảnh báo nguồn</label>
           <label><input type="checkbox" [(ngModel)]="duplicatesOnly" (ngModelChange)="filter()" /> Có nội dung trùng</label>
           <label><input type="checkbox" [(ngModel)]="collapseDuplicates" (ngModelChange)="filter()" /> Chỉ hiển thị 1 thẻ đại diện cho bài trùng</label></div>
@@ -200,6 +203,7 @@ import { DiscoveryExecutionComponent } from './discovery-execution.component';
                   <div class="badges"><span class="status-badge">{{label(d.review?.contentValidity?.status ?? 'UNKNOWN')}}</span><span class="status-badge" [class.match]="d.review?.targetMatching?.status==='TARGET_MATCH'">{{label(d.review?.targetMatching?.status ?? 'UNKNOWN')}}</span>
                     @if(occurrenceCount(d) > 1){<span class="status-badge neutral">Đã xuất hiện {{occurrenceCount(d)}} lần</span>}
                     @if(duplicateStatusLabel(d);as dupLabel){<span class="status-badge neutral">{{dupLabel}}</span>}
+                    @if(d.windowMatchStatus === 'OUT_OF_WINDOW'){<span class="status-badge neutral">Ngoài khung ngày</span>}
                   </div>
                   <h2><a [routerLink]="observationLink(d)">{{observationTitle(d)}}</a></h2><p class="company">{{observationFact(d,'companyName') || 'Chưa xác định công ty'}}</p><p class="muted">{{observationFact(d,'location') || 'Chưa xác định địa điểm'}}</p>
                   <div class="job-tags">@if(observationTechnologies(d);as tech){<span>{{tech}}</span>}@if(observationSeniority(d);as level){<span>{{level}}</span>}</div>

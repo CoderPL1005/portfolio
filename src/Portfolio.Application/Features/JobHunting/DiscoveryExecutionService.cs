@@ -386,7 +386,22 @@ public sealed partial class DiscoveryExecutionService(IApplicationDbContext db, 
         }
         var seenPostIdsInRun = new HashSet<string>(StringComparer.Ordinal);
         var seenHashesInRun = new HashSet<string>(StringComparer.Ordinal);
-        int uniqueProviderPosts = 0, newUniquePosts = 0, exactDuplicates = 0, potentialReposts = 0, reliableInWindowPosts = 0, unknownDatePosts = 0, relevantUniqueVacancies = 0, newRelevantUniqueVacancies = 0;
+        int uniqueProviderPosts = 0, newUniquePosts = 0, exactDuplicates = 0, potentialReposts = 0, reliableInWindowPosts = 0, unknownDatePosts = 0, outOfWindowPosts = 0, relevantUniqueVacancies = 0, newRelevantUniqueVacancies = 0;
+
+        JsonElement configElem;
+        try { configElem = JsonSerializer.Deserialize<JsonElement>(execution.ConfigurationJson); }
+        catch (JsonException) { configElem = JsonSerializer.SerializeToElement(new { }); }
+
+        string? slotStartTime = null;
+        string? slotEndTime = null;
+        int? slotNumber = null;
+        if (configElem.ValueKind == JsonValueKind.Object && configElem.TryGetProperty("dailySearch", out var ds) && ds.ValueKind == JsonValueKind.Object)
+        {
+            slotStartTime = Text(ds, "startTime");
+            slotEndTime = Text(ds, "endTime");
+            if (ds.TryGetProperty("slot", out var sl) && sl.TryGetInt32(out var sn)) slotNumber = sn;
+        }
+
         foreach (var o in observations)
         {
             try
@@ -396,8 +411,35 @@ public sealed partial class DiscoveryExecutionService(IApplicationDbContext db, 
                 var pid = Text(root, "providerPostId") ?? Text(root, "sourceUrl");
                 var ch = o.ContentHash ?? Text(root, "contentHash");
                 var pub = Text(root, "publishedAt");
-                var hasDate = pub is not null && DateTimeOffset.TryParse(pub, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out _);
-                if (hasDate) reliableInWindowPosts++; else unknownDatePosts++;
+                var prov = Text(root, "publishedAtProvenance");
+                var winStatus = Text(root, "windowMatchStatus");
+
+                var hasValidUtcDate = GetDiscoveryOpportunitiesHandler.TryParseExplicitOffsetTimestamp(pub, out var parsedPub);
+
+                bool isVerifiedInWindow = false;
+                bool isOutOfWindow = winStatus == "OUT_OF_WINDOW";
+
+                if (hasValidUtcDate && prov == "VERIFIED_SUPPORTED_TIMESTAMP")
+                {
+                    if (slotNumber is >= 1 and <= 5 && !string.IsNullOrEmpty(slotStartTime) && !string.IsNullOrEmpty(slotEndTime))
+                    {
+                        var vnDate = parsedPub.ToOffset(TimeSpan.FromHours(7)).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+                        var inBounds = string.CompareOrdinal(vnDate, slotStartTime) >= 0 && string.CompareOrdinal(vnDate, slotEndTime) <= 0;
+                        if (inBounds && winStatus == "VERIFIED_IN_WINDOW")
+                        {
+                            isVerifiedInWindow = true;
+                        }
+                        else
+                        {
+                            isOutOfWindow = true;
+                        }
+                    }
+                }
+
+                if (isVerifiedInWindow) reliableInWindowPosts++;
+                else if (isOutOfWindow) outOfWindowPosts++;
+                else unknownDatePosts++;
+
                 var isUniqueInRun = pid is not null ? seenPostIdsInRun.Add(pid) : ch is null || seenHashesInRun.Add(ch);
                 if (isUniqueInRun) uniqueProviderPosts++; else exactDuplicates++;
                 var isHistoricalDup = (pid is not null && priorPostIds.Contains(pid)) || (ch is not null && priorContentHashes.Contains(ch));
@@ -420,9 +462,6 @@ public sealed partial class DiscoveryExecutionService(IApplicationDbContext db, 
         }
         var credits = attempt?.CreditsDeducted;
         var newRelevantPerCredit = credits is > 0 ? Math.Round((decimal)newRelevantUniqueVacancies / credits.Value, 4) : (decimal?)null;
-        JsonElement configElem;
-        try { configElem = JsonSerializer.Deserialize<JsonElement>(execution.ConfigurationJson); }
-        catch (JsonException) { configElem = JsonSerializer.SerializeToElement(new { }); }
         var querySelection = configElem.ValueKind == JsonValueKind.Object && configElem.TryGetProperty("querySelection", out var qsElem) ? qsElem.Clone() : (JsonElement?)null;
         var results = observations.Select(o => new { itemIndex = o.ItemIndex, rawJobPostingId = o.RawJobPostingId,
             observation = JsonSerializer.Deserialize<JsonElement>(o.PayloadJson),
@@ -447,6 +486,7 @@ public sealed partial class DiscoveryExecutionService(IApplicationDbContext db, 
                 potentialReposts,
                 reliableInWindowPosts,
                 unknownDatePosts,
+                outOfWindowPosts,
                 relevantUniqueVacancies,
                 newRelevantUniqueVacancies,
                 creditsDeducted = credits,

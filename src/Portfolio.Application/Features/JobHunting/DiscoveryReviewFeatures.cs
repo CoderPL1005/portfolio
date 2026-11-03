@@ -166,7 +166,7 @@ public sealed class GetDiscoveryReviewValidator : IRequestValidator<GetDiscovery
         if (r.TargetStatus is not null && !DiscoveryReviewRules.TargetStatuses.Contains(r.TargetStatus)) f.Add(new("targetStatus", "Invalid target status."));
         if (r.RunId?.Length > 100) f.Add(new("runId", "Invalid run ID."));
         if (r.CollectedFrom >= r.CollectedBefore) f.Add(new("collectedFrom", "Invalid collection date range."));
-        if (r.DateProvenance is not null && !new[] { "VERIFIED_DATE", "UNKNOWN_DATE" }.Contains(r.DateProvenance)) f.Add(new("dateProvenance", "Invalid date provenance filter."));
+        if (r.DateProvenance is not null && !new[] { "VERIFIED_DATE", "UNKNOWN_DATE", "OUT_OF_WINDOW" }.Contains(r.DateProvenance)) f.Add(new("dateProvenance", "Invalid date provenance filter."));
         if (r.ReviewState is not null && !new[] { "REVIEWED", "UNREVIEWED", "CONFIRMED", "CORRECTED", "UNCERTAIN", "REVIEWED_RECOVERY" }.Contains(r.ReviewState)) f.Add(new("reviewState", "Invalid review filter."));
         return Task.FromResult<IReadOnlyCollection<ValidationFailure>>(f);
     }

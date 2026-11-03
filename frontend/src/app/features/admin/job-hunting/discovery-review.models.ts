@@ -70,7 +70,7 @@ export interface DiscoveryReviewList<T extends DiscoveryOpportunity=DiscoveryRev
     total: number; valid: number; invalid: number; needsReview: number; targetMatch: number;
     identityWarnings: number; duplicateItems: number; reviewed?:number; unknown?:number;
     totalObservations?: number; uniqueSourcePosts?: number; newUniquePostsToday?: number;
-    repeatedPosts?: number; unknownDatePosts?: number; newRelevantVacancies?: number;
+    repeatedPosts?: number; unknownDatePosts?: number; outOfWindowPosts?: number; newRelevantVacancies?: number;
     repeatedRelevantVacancies?: number; contentUpdatedPosts?: number; exactContentReposts?: number;
   };
 }

@@ -15,7 +15,7 @@ public sealed record DiscoveryObservationRead(string Origin,Guid ExecutionId,int
     string? ProviderPostIdentity=null,int OccurrenceCount=1,string? DuplicateStatus=null,DiscoveryPostOccurrence[]? Occurrences=null,
     string PublishedAtProvenance="UNAVAILABLE_OR_UNVERIFIED",string WindowMatchStatus="UNKNOWN_DATE");
 public sealed record DiscoveryOpportunityCounts(int Total,int Valid,int Invalid,int NeedsReview,int TargetMatch,int IdentityWarnings,int DuplicateItems,int Reviewed,int Unknown,
-    int TotalObservations=0,int UniqueSourcePosts=0,int NewUniquePostsToday=0,int RepeatedPosts=0,int UnknownDatePosts=0,int NewRelevantVacancies=0,int RepeatedRelevantVacancies=0,int ContentUpdatedPosts=0,int ExactContentReposts=0);
+    int TotalObservations=0,int UniqueSourcePosts=0,int NewUniquePostsToday=0,int RepeatedPosts=0,int UnknownDatePosts=0,int NewRelevantVacancies=0,int RepeatedRelevantVacancies=0,int ContentUpdatedPosts=0,int ExactContentReposts=0,int OutOfWindowPosts=0);
 public sealed record DiscoveryOpportunityList(PagedResult<object> Results,DiscoveryOpportunityCounts Counts);
 public sealed record GetDiscoveryOpportunitiesQuery(GetDiscoveryReviewQuery Filters,Guid? ExecutionId=null,int? ItemIndex=null):IRequest<DiscoveryOpportunityList>;
 public sealed class GetDiscoveryOpportunitiesValidator:IRequestValidator<GetDiscoveryOpportunitiesQuery>
@@ -30,7 +30,7 @@ public sealed class GetDiscoveryOpportunitiesValidator:IRequestValidator<GetDisc
 public sealed class GetDiscoveryOpportunitiesHandler(IApplicationDbContext db):IRequestHandler<GetDiscoveryOpportunitiesQuery,DiscoveryOpportunityList>
 {
     private sealed record Row(object Value,string RunId,DateTimeOffset At,string? Content,string? Target,string? Group,string? ContentHash,
-        string? ProviderIdentity,bool Identity,bool HasVerifiedDate,HumanReviewSummary? Human,DiscoveryObservationRead? Observation,
+        string? ProviderIdentity,bool Identity,bool HasVerifiedDate,DateTimeOffset? PublishedAtUtc,HumanReviewSummary? Human,DiscoveryObservationRead? Observation,
         int OccurrenceCount=1,string? DuplicateStatus=null,DiscoveryPostOccurrence[]? Occurrences=null,DateTimeOffset FirstAt=default);
     private static string? Text(JsonElement value,string key)=>value.ValueKind==JsonValueKind.Object&&value.TryGetProperty(key,out var field)&&field.ValueKind==JsonValueKind.String?field.GetString():null;
     private static string? Group(string? raw)=>raw is null?null:DiscoveryReviewRules.Hash(raw.Normalize().Replace("\r\n","\n").Replace('\r','\n').Trim());
@@ -42,10 +42,21 @@ public sealed class GetDiscoveryOpportunitiesHandler(IApplicationDbContext db):I
         if(!string.IsNullOrWhiteSpace(sourceUrl)&&DiscoveryReviewRules.SafeUrl(sourceUrl))return "fb:url:"+sourceUrl;
         return null;
     }
+    internal static bool TryParseExplicitOffsetTimestamp(string? text, out DateTimeOffset parsedUtc)
+    {
+        parsedUtc = default;
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        if (!System.Text.RegularExpressions.Regex.IsMatch(text, @"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})$", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+            return false;
+        if (!DateTimeOffset.TryParse(text, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var parsed))
+            return false;
+        parsedUtc = parsed.ToUniversalTime();
+        return true;
+    }
     private static bool SameDate(DateTimeOffset? date,JsonElement source)
     {
         var text=Text(source,"publishedAt");
-        return text is null?date is null:DateTimeOffset.TryParse(text,System.Globalization.CultureInfo.InvariantCulture,System.Globalization.DateTimeStyles.None,out var parsed)&&date==parsed;
+        return text is null?date is null:TryParseExplicitOffsetTimestamp(text, out var parsed)&&date==parsed;
     }
     private static DiscoveryObservationRead Read(DiscoveryExecution e,DiscoveryExecutionObservation o,DiscoveryExecutionVacancy[] vacancies)
     {
@@ -71,7 +82,7 @@ public sealed class GetDiscoveryOpportunitiesHandler(IApplicationDbContext db):I
         var idMismatch=outcome=="POST_ID_URL_MISMATCH"||review?.SourceWarnings?.Contains("POST_ID_URL_MISMATCH")==true;
         if(idMismatch&&!warnings.Contains("POST_ID_URL_MISMATCH"))warnings.Add("POST_ID_URL_MISMATCH");
         var pubText=Text(payload,"publishedAt");
-        var hasValidDate=pubText is not null&&DateTimeOffset.TryParse(pubText,System.Globalization.CultureInfo.InvariantCulture,System.Globalization.DateTimeStyles.None,out _);
+        var hasValidDate=TryParseExplicitOffsetTimestamp(pubText, out var parsedPubUtc);
         var provenance=Text(payload,"publishedAtProvenance")??(hasValidDate?"VERIFIED_SUPPORTED_TIMESTAMP":"UNAVAILABLE_OR_UNVERIFIED");
         var windowStatus=Text(payload,"windowMatchStatus")??(hasValidDate?"VERIFIED_IN_WINDOW":"UNKNOWN_DATE");
         var postId=Text(payload,"providerPostId");var sourceUrl=Text(payload,"sourceUrl");
@@ -123,16 +134,23 @@ public sealed class GetDiscoveryOpportunitiesHandler(IApplicationDbContext db):I
             var postId=detail.Item?.ProviderPostId??detail.Recovery?.ProviderPostId??(observation is not null?Text(observation.Source,"providerPostId"):null);
             var sourceUrl=detail.Item?.SourceUrl??detail.Recovery?.SourceUrl??(observation is not null?Text(observation.Source,"sourceUrl"):null);
             var providerIdentity=BuildProviderIdentity(postId,sourceUrl,idConflict);
-            var hasVerifiedDate=observation is not null ? (Text(observation.Source,"publishedAt")!=null&&observation.PublishedAtProvenance=="VERIFIED_SUPPORTED_TIMESTAMP") : (detail.Item?.PublishedAt??detail.Recovery?.PublishedAt).HasValue;
+            var pubStr=observation is not null?Text(observation.Source,"publishedAt"):null;
+            DateTimeOffset? publishedAtUtc=TryParseExplicitOffsetTimestamp(pubStr, out var parsedUtc)?parsedUtc:detail.Item?.PublishedAt??detail.Recovery?.PublishedAt;
+            var hasVerifiedDate=observation is not null ? (pubStr!=null&&observation.PublishedAtProvenance=="VERIFIED_SUPPORTED_TIMESTAMP"&&publishedAtUtc.HasValue) : (detail.Item?.PublishedAt??detail.Recovery?.PublishedAt).HasValue;
             var rawText=detail.Item?.RawContent??detail.Recovery?.RawContent??(observation is not null?Text(observation.Source,"rawContent"):null);
             var contentHash=detail.Item?.ContentHash??detail.Recovery?.ContentHash??(observation is not null?Text(observation.Source,"contentHash"):null);
             detail=detail with {Observation=observation,ProviderPostIdentity=providerIdentity};
             rows.Add(new(detail,c.RunId,collectedAt,detail.Item?.ContentValidity.Status,detail.Item?.TargetMatching.Status,
-                Group(rawText),contentHash,providerIdentity,idConflict,hasVerifiedDate,detail.HumanReview,observation));
+                Group(rawText),contentHash,providerIdentity,idConflict,hasVerifiedDate,publishedAtUtc,detail.HumanReview,observation));
         }
-        foreach(var o in projected.Where(o=>!used.Contains((o.ExecutionId,o.ItemIndex))))rows.Add(new(o,o.ExecutionId.ToString(),o.CollectedAt,
-            o.Review?.ContentValidity?.Status,o.Review?.TargetMatching?.Status,Group(Text(o.Source,"rawContent")),Text(o.Source,"contentHash"),
-            o.ProviderPostIdentity,o.SourceWarnings.Contains("POST_ID_URL_MISMATCH"),Text(o.Source,"publishedAt")!=null&&o.PublishedAtProvenance=="VERIFIED_SUPPORTED_TIMESTAMP",null,o));
+        foreach(var o in projected.Where(o=>!used.Contains((o.ExecutionId,o.ItemIndex)))){
+            var oPubStr=Text(o.Source,"publishedAt");
+            DateTimeOffset? oPublishedAtUtc=TryParseExplicitOffsetTimestamp(oPubStr, out var oParsedUtc)?oParsedUtc:null;
+            var oHasVerifiedDate=oPublishedAtUtc.HasValue&&o.PublishedAtProvenance=="VERIFIED_SUPPORTED_TIMESTAMP";
+            rows.Add(new(o,o.ExecutionId.ToString(),o.CollectedAt,
+                o.Review?.ContentValidity?.Status,o.Review?.TargetMatching?.Status,Group(Text(o.Source,"rawContent")),Text(o.Source,"contentHash"),
+                o.ProviderPostIdentity,o.SourceWarnings.Contains("POST_ID_URL_MISMATCH"),oHasVerifiedDate,oPublishedAtUtc,null,o));
+        }
         var groups=rows.Where(x=>x.Group is not null).GroupBy(x=>x.Group!).ToDictionary(g=>g.Key,g=>g.Count());
         var providerGroups=rows.Where(x=>x.ProviderIdentity is not null).GroupBy(x=>x.ProviderIdentity!,StringComparer.Ordinal).ToDictionary(g=>g.Key,g=>g.OrderBy(r=>r.At).ToArray(),StringComparer.Ordinal);
         var contentGroups=rows.Where(x=>x.Group is not null).GroupBy(x=>x.Group!,StringComparer.Ordinal).ToDictionary(g=>g.Key,g=>g.OrderBy(r=>r.At).ToArray(),StringComparer.Ordinal);
@@ -176,11 +194,14 @@ public sealed class GetDiscoveryOpportunitiesHandler(IApplicationDbContext db):I
         }).ToArray();
 
         var f=request.Filters;IEnumerable<Row> filtered=enrichedRows;
+        var boundaryFrom=f.CollectedFrom??DiscoveryDailySlots.VietnamBusinessDayBoundsUtc(DateTimeOffset.UtcNow).StartUtc;
+        var boundaryBefore=f.CollectedBefore??boundaryFrom.AddDays(1);
         if(f.RunId is not null)filtered=filtered.Where(x=>x.RunId==f.RunId||x.Observation?.ExecutionId.ToString()==f.RunId||x.Observation?.WorkflowRunId==f.RunId);
         if(f.CollectedFrom.HasValue)filtered=filtered.Where(x=>x.At>=f.CollectedFrom.Value);
         if(f.CollectedBefore.HasValue)filtered=filtered.Where(x=>x.At<f.CollectedBefore.Value);
-        if(f.DateProvenance=="VERIFIED_DATE")filtered=filtered.Where(x=>x.HasVerifiedDate);
-        else if(f.DateProvenance=="UNKNOWN_DATE")filtered=filtered.Where(x=>!x.HasVerifiedDate);
+        if(f.DateProvenance=="VERIFIED_DATE")filtered=filtered.Where(x=>x.HasVerifiedDate && (x.Observation==null || x.Observation.WindowMatchStatus != "OUT_OF_WINDOW"));
+        else if(f.DateProvenance=="UNKNOWN_DATE")filtered=filtered.Where(x=>!x.HasVerifiedDate || x.Observation?.WindowMatchStatus == "UNKNOWN_DATE");
+        else if(f.DateProvenance=="OUT_OF_WINDOW")filtered=filtered.Where(x=>x.Observation?.WindowMatchStatus == "OUT_OF_WINDOW");
         if(f.ContentStatus is not null)filtered=filtered.Where(x=>x.Content==f.ContentStatus||f.ContentStatus=="NEEDS_REVIEW"&&x.Content is null);
         if(f.TargetStatus is not null)filtered=filtered.Where(x=>x.Target==f.TargetStatus);
         if(f.IdentityWarning.HasValue)filtered=filtered.Where(x=>x.Identity==f.IdentityWarning);
@@ -203,13 +224,13 @@ public sealed class GetDiscoveryOpportunitiesHandler(IApplicationDbContext db):I
             return ordered[0];
         }).ToArray();
 
-        var boundaryFrom=f.CollectedFrom??DiscoveryDailySlots.VietnamBusinessDayBoundsUtc(DateTimeOffset.UtcNow).StartUtc;
         var totalObservations=allFiltered.Length;
         var uniqueSourcePosts=dedupGroups.Length;
-        var newUniquePostsToday=collapsed.Count(x=>x.FirstAt>=boundaryFrom);
+        var newUniquePostsToday=collapsed.Count(x=>x.HasVerifiedDate && (x.Observation==null || x.Observation.WindowMatchStatus != "OUT_OF_WINDOW") && x.PublishedAtUtc.HasValue && x.PublishedAtUtc.Value>=boundaryFrom && x.PublishedAtUtc.Value<boundaryBefore && x.FirstAt>=boundaryFrom);
         var repeatedPosts=allFiltered.Length-newUniquePostsToday;
-        var unknownDatePosts=collapsed.Count(x=>!x.HasVerifiedDate);
-        var newRelevantVacancies=collapsed.Count(x=>x.Target=="TARGET_MATCH"&&x.FirstAt>=boundaryFrom);
+        var unknownDatePosts=collapsed.Count(x=>!x.HasVerifiedDate || x.Observation?.WindowMatchStatus == "UNKNOWN_DATE");
+        var outOfWindowPosts=collapsed.Count(x=>x.Observation?.WindowMatchStatus=="OUT_OF_WINDOW");
+        var newRelevantVacancies=collapsed.Count(x=>x.HasVerifiedDate && (x.Observation==null || x.Observation.WindowMatchStatus != "OUT_OF_WINDOW") && x.PublishedAtUtc.HasValue && x.PublishedAtUtc.Value>=boundaryFrom && x.PublishedAtUtc.Value<boundaryBefore && x.Target=="TARGET_MATCH" && x.FirstAt>=boundaryFrom);
         var repeatedRelevantVacancies=allFiltered.Count(x=>x.Target=="TARGET_MATCH")-newRelevantVacancies;
         var contentUpdatedPosts=collapsed.Count(x=>x.DuplicateStatus=="CONTENT_UPDATED");
         var exactReposts=collapsed.Count(x=>x.DuplicateStatus=="EXACT_CONTENT_REPOST");
@@ -220,7 +241,7 @@ public sealed class GetDiscoveryOpportunitiesHandler(IApplicationDbContext db):I
             selected.Count(x=>x.Identity),selected.Count(x=>x.OccurrenceCount>1||(x.Group is not null&&groups[x.Group]>1)),selected.Count(Reviewed),selected.Count(x=>x.Content is null),
             TotalObservations:totalObservations,UniqueSourcePosts:uniqueSourcePosts,NewUniquePostsToday:newUniquePostsToday,
             RepeatedPosts:repeatedPosts,UnknownDatePosts:unknownDatePosts,NewRelevantVacancies:newRelevantVacancies,
-            RepeatedRelevantVacancies:Math.Max(0,repeatedRelevantVacancies),ContentUpdatedPosts:contentUpdatedPosts,ExactContentReposts:exactReposts);
+            RepeatedRelevantVacancies:Math.Max(0,repeatedRelevantVacancies),ContentUpdatedPosts:contentUpdatedPosts,ExactContentReposts:exactReposts,OutOfWindowPosts:outOfWindowPosts);
         static string SessionKey(Row x)=>x.Observation?.ExecutionId.ToString()??x.RunId;
         var sessionAt=selected.GroupBy(SessionKey,StringComparer.Ordinal).ToDictionary(g=>g.Key,g=>g.Max(r=>r.At),StringComparer.Ordinal);
         var page=selected.OrderByDescending(x=>sessionAt[SessionKey(x)]).ThenBy(SessionKey,StringComparer.Ordinal)

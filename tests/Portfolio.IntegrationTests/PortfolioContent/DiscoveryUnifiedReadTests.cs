@@ -303,11 +303,12 @@ public sealed class DiscoveryUnifiedReadTests(AuthApiFactory root):IClassFixture
         Assert.Equal(4,counts.GetProperty("total").GetInt32());
         Assert.Equal(4,counts.GetProperty("totalObservations").GetInt32());
         Assert.Equal(2,counts.GetProperty("uniqueSourcePosts").GetInt32());
-        Assert.Equal(2,counts.GetProperty("newUniquePostsToday").GetInt32());
-        Assert.Equal(2,counts.GetProperty("repeatedPosts").GetInt32());
+        // post_t3sky_1 is verified in-window, post_repost_99 has unknown date and is not counted as new verified post
+        Assert.Equal(1,counts.GetProperty("newUniquePostsToday").GetInt32());
+        Assert.Equal(3,counts.GetProperty("repeatedPosts").GetInt32());
         Assert.Equal(1,counts.GetProperty("unknownDatePosts").GetInt32());
-        Assert.Equal(2,counts.GetProperty("newRelevantVacancies").GetInt32());
-        Assert.Equal(2,counts.GetProperty("repeatedRelevantVacancies").GetInt32());
+        Assert.Equal(1,counts.GetProperty("newRelevantVacancies").GetInt32());
+        Assert.Equal(3,counts.GetProperty("repeatedRelevantVacancies").GetInt32());
         Assert.Equal(1,counts.GetProperty("contentUpdatedPosts").GetInt32());
         Assert.Equal(1,counts.GetProperty("exactContentReposts").GetInt32());
 
@@ -338,5 +339,249 @@ public sealed class DiscoveryUnifiedReadTests(AuthApiFactory root):IClassFixture
             Assert.Equal(4,await db.DiscoveryExecutionObservations.CountAsync());
         });
         Assert.Equal(before,await s.Snapshot());s.AssertOffline();
+    }
+
+    [Fact] public async Task March_observation_returned_in_november_has_out_of_window_date_and_is_excluded_from_fresh_counts()
+    {
+        using var s=await RecoveryScenario.Create(root,1);
+        var execId=s.Id;
+        var tNov3=new DateTimeOffset(2026,11,3,9,0,0,TimeSpan.Zero); // 16:00 ICT Nov 3
+        const string marchContent="[Old Corp] Tuyển dụng C# Backend Fresher đăng từ tháng 3";
+        const string currentContent="[Fresh Corp] Tuyển dụng C# Backend Fresher hôm nay 3/11";
+        const string unknownContent="[Unknown Corp] Tuyển dụng C# Backend Fresher không ghi ngày";
+        var marchHash=DiscoveryReviewRules.Hash(marchContent);
+        var currentHash=DiscoveryReviewRules.Hash(currentContent);
+        var unknownHash=DiscoveryReviewRules.Hash(unknownContent);
+
+        await s.Read(async db=>{
+            db.DiscoveryExecutionObservations.RemoveRange(db.DiscoveryExecutionObservations.Where(x=>x.ExecutionId==execId));
+            var exec=await db.DiscoveryExecutions.SingleAsync(x=>x.Id==execId);
+            exec.CreatedAt=tNov3;exec.UpdatedAt=tNov3;
+            exec.ConfigurationJson=JsonSerializer.Serialize(new {
+                maxRequests=1,maxCredits=1,triggerSource="DAILY_SCHEDULED",
+                dailySearch=new {slot=4,startTime="2026-11-03",endTime="2026-11-03",timeZone="Asia/Ho_Chi_Minh"}
+            });
+
+            // Post 1: Observation with March 18 publication date returned in November execution (OUT_OF_WINDOW)
+            var marchPayload=JsonSerializer.SerializeToNode(new {
+                itemIndex=0,providerPostId="march_post_18",sourceUrl="https://www.facebook.com/fixture/posts/march_post_18",
+                providerSourceUrl="https://www.facebook.com/fixture/posts/march_post_18",rawContent=marchContent,
+                contentHash=marchHash,contentGroupHash=marchHash,
+                publishedAt="2026-03-18T09:00:00Z",publishedAtProvenance="VERIFIED_SUPPORTED_TIMESTAMP",
+                windowMatchStatus="OUT_OF_WINDOW",
+                outcome="OUT_OF_WINDOW",
+                processing=new {review=new {
+                    itemIndex=0,providerPostId="march_post_18",sourceUrl="https://www.facebook.com/fixture/posts/march_post_18",
+                    rawContent=marchContent,contentHash=marchHash,contentGroupHash=marchHash,
+                    publishedAt="2026-03-18T09:00:00Z",
+                    contentValidity=new {status="VALID_RECRUITMENT",reasonCodes=new[]{"SYNTHETIC_REVIEW"},explanation="Valid",evidenceSnippets=Array.Empty<string>()},
+                    targetMatching=new {status="TARGET_MATCH",reasonCodes=new[]{"SYNTHETIC_REVIEW"},explanation="Matched",evidenceSnippets=Array.Empty<string>()},
+                    verificationStatus="NOT_CHECKED",extracted=new{},missingFields=Array.Empty<string>(),sourceWarnings=Array.Empty<string>(),
+                    classifierVersion="content-first-v1",evaluatedAt=tNov3
+                },vacancies=Array.Empty<object>()}
+            },DiscoveryReviewRules.Json)!.ToJsonString();
+
+            // Post 2: Current verified post within November 3 window (VERIFIED_IN_WINDOW)
+            var currentPayload=JsonSerializer.SerializeToNode(new {
+                itemIndex=1,providerPostId="current_nov_post",sourceUrl="https://www.facebook.com/fixture/posts/current_nov_post",
+                providerSourceUrl="https://www.facebook.com/fixture/posts/current_nov_post",rawContent=currentContent,
+                contentHash=currentHash,contentGroupHash=currentHash,
+                publishedAt="2026-11-03T07:00:00Z",publishedAtProvenance="VERIFIED_SUPPORTED_TIMESTAMP",
+                windowMatchStatus="VERIFIED_IN_WINDOW",
+                outcome="READY_FOR_EXTRACTION",
+                processing=new {review=new {
+                    itemIndex=1,providerPostId="current_nov_post",sourceUrl="https://www.facebook.com/fixture/posts/current_nov_post",
+                    rawContent=currentContent,contentHash=currentHash,contentGroupHash=currentHash,
+                    publishedAt="2026-11-03T07:00:00Z",
+                    contentValidity=new {status="VALID_RECRUITMENT",reasonCodes=new[]{"SYNTHETIC_REVIEW"},explanation="Valid",evidenceSnippets=Array.Empty<string>()},
+                    targetMatching=new {status="TARGET_MATCH",reasonCodes=new[]{"SYNTHETIC_REVIEW"},explanation="Matched",evidenceSnippets=Array.Empty<string>()},
+                    verificationStatus="NOT_CHECKED",extracted=new{},missingFields=Array.Empty<string>(),sourceWarnings=Array.Empty<string>(),
+                    classifierVersion="content-first-v1",evaluatedAt=tNov3
+                },vacancies=Array.Empty<object>()}
+            },DiscoveryReviewRules.Json)!.ToJsonString();
+
+            // Post 3: Post without published date from provider (UNKNOWN_DATE)
+            var unknownPayload=JsonSerializer.SerializeToNode(new {
+                itemIndex=2,providerPostId="unknown_date_post",sourceUrl="https://www.facebook.com/fixture/posts/unknown_date_post",
+                providerSourceUrl="https://www.facebook.com/fixture/posts/unknown_date_post",rawContent=unknownContent,
+                contentHash=unknownHash,contentGroupHash=unknownHash,
+                publishedAt=(string?)null,publishedAtProvenance="UNAVAILABLE_OR_UNVERIFIED",
+                windowMatchStatus="UNKNOWN_DATE",
+                outcome="READY_FOR_EXTRACTION",
+                processing=new {review=new {
+                    itemIndex=2,providerPostId="unknown_date_post",sourceUrl="https://www.facebook.com/fixture/posts/unknown_date_post",
+                    rawContent=unknownContent,contentHash=unknownHash,contentGroupHash=unknownHash,
+                    publishedAt=(string?)null,
+                    contentValidity=new {status="VALID_RECRUITMENT",reasonCodes=new[]{"SYNTHETIC_REVIEW"},explanation="Valid",evidenceSnippets=Array.Empty<string>()},
+                    targetMatching=new {status="TARGET_MATCH",reasonCodes=new[]{"SYNTHETIC_REVIEW"},explanation="Matched",evidenceSnippets=Array.Empty<string>()},
+                    verificationStatus="NOT_CHECKED",extracted=new{},missingFields=Array.Empty<string>(),sourceWarnings=Array.Empty<string>(),
+                    classifierVersion="content-first-v1",evaluatedAt=tNov3
+                },vacancies=Array.Empty<object>()}
+            },DiscoveryReviewRules.Json)!.ToJsonString();
+
+            db.DiscoveryExecutionObservations.Add(new(){Id=Guid.NewGuid(),ExecutionId=execId,ItemIndex=0,
+                SemanticState="NOT_REQUESTED",ContentHash=marchHash,PayloadHash=DiscoveryReviewRules.Hash(marchPayload),PayloadJson=marchPayload});
+            db.DiscoveryExecutionObservations.Add(new(){Id=Guid.NewGuid(),ExecutionId=execId,ItemIndex=1,
+                SemanticState="NOT_REQUESTED",ContentHash=currentHash,PayloadHash=DiscoveryReviewRules.Hash(currentPayload),PayloadJson=currentPayload});
+            db.DiscoveryExecutionObservations.Add(new(){Id=Guid.NewGuid(),ExecutionId=execId,ItemIndex=2,
+                SemanticState="NOT_REQUESTED",ContentHash=unknownHash,PayloadHash=DiscoveryReviewRules.Hash(unknownPayload),PayloadJson=unknownPayload});
+            await db.SaveChangesAsync();
+        });
+
+        var queryNov3=RecoveryScenario.ReviewPath+"?includeObservations=true&collectedFrom=2026-11-02T17:00:00.000Z&collectedBefore=2026-11-03T17:00:00.000Z";
+        var data=await RecoveryScenario.Data(await s.Client.GetAsync(queryNov3));
+        var counts=data.GetProperty("counts");
+
+        // All 3 raw observations are preserved and auditable in Admin
+        Assert.Equal(3,counts.GetProperty("total").GetInt32());
+        Assert.Equal(3,counts.GetProperty("totalObservations").GetInt32());
+        Assert.Equal(3,counts.GetProperty("uniqueSourcePosts").GetInt32());
+
+        // Strict date validation: ONLY current post is counted in newUniquePostsToday and newRelevantVacancies
+        Assert.Equal(1,counts.GetProperty("newUniquePostsToday").GetInt32());
+        Assert.Equal(1,counts.GetProperty("newRelevantVacancies").GetInt32());
+        Assert.Equal(1,counts.GetProperty("unknownDatePosts").GetInt32());
+        Assert.Equal(1,counts.GetProperty("outOfWindowPosts").GetInt32());
+
+        // Filter tests: VERIFIED_DATE returns only the 1 in-window post
+        var verifiedData=await RecoveryScenario.Data(await s.Client.GetAsync(queryNov3+"&dateProvenance=VERIFIED_DATE"));
+        Assert.Equal(1,verifiedData.GetProperty("results").GetProperty("total").GetInt32());
+        var verifiedItems=verifiedData.GetProperty("results").GetProperty("items").EnumerateArray().ToArray();
+        Assert.Equal("current_nov_post",verifiedItems[0].GetProperty("source").GetProperty("providerPostId").GetString());
+
+        // Filter tests: UNKNOWN_DATE returns only the 1 unknown-date post
+        var unknownData=await RecoveryScenario.Data(await s.Client.GetAsync(queryNov3+"&dateProvenance=UNKNOWN_DATE"));
+        Assert.Equal(1,unknownData.GetProperty("results").GetProperty("total").GetInt32());
+        var unknownItems=unknownData.GetProperty("results").GetProperty("items").EnumerateArray().ToArray();
+        Assert.Equal("unknown_date_post",unknownItems[0].GetProperty("source").GetProperty("providerPostId").GetString());
+
+        // Filter tests: OUT_OF_WINDOW returns only the 1 March 18 post
+        var outOfWindowData=await RecoveryScenario.Data(await s.Client.GetAsync(queryNov3+"&dateProvenance=OUT_OF_WINDOW"));
+        Assert.Equal(1,outOfWindowData.GetProperty("results").GetProperty("total").GetInt32());
+        var outOfWindowItems=outOfWindowData.GetProperty("results").GetProperty("items").EnumerateArray().ToArray();
+        Assert.Equal("march_post_18",outOfWindowItems[0].GetProperty("source").GetProperty("providerPostId").GetString());
+
+        s.AssertOffline();
+    }
+
+    [Fact] public async Task Nov2_post_collected_in_nov3_slot1_is_verified_in_window_for_execution_but_excluded_from_new_today()
+    {
+        using var s=await RecoveryScenario.Create(root,1);
+        var execId=s.Id;
+        var tNov3Slot1=new DateTimeOffset(2026,11,3,0,0,0,TimeSpan.Zero); // 07:00 ICT Nov 3
+        const string nov2Content="[Nov 2 Corp] Tuyển dụng C# Backend Fresher đăng ngày 2/11";
+        const string nov3Content="[Nov 3 Corp] Tuyển dụng C# Backend Fresher đăng ngày 3/11";
+        var nov2Hash=DiscoveryReviewRules.Hash(nov2Content);
+        var nov3Hash=DiscoveryReviewRules.Hash(nov3Content);
+
+        await s.Read(async db=>{
+            db.DiscoveryExecutionObservations.RemoveRange(db.DiscoveryExecutionObservations.Where(x=>x.ExecutionId==execId));
+            var exec=await db.DiscoveryExecutions.SingleAsync(x=>x.Id==execId);
+            exec.CreatedAt=tNov3Slot1;exec.UpdatedAt=tNov3Slot1;
+            exec.ConfigurationJson=JsonSerializer.Serialize(new {
+                maxRequests=1,maxCredits=1,triggerSource="DAILY_SCHEDULED",
+                dailySearch=new {slot=1,startTime="2026-11-02",endTime="2026-11-03",timeZone="Asia/Ho_Chi_Minh"}
+            });
+
+            // Post 1: Published Nov 2 at 10:00 UTC (17:00 ICT Nov 2) -> in slot 1 window (yesterday + today)
+            var nov2Payload=JsonSerializer.SerializeToNode(new {
+                itemIndex=0,providerPostId="nov2_post",sourceUrl="https://www.facebook.com/fixture/posts/nov2_post",
+                providerSourceUrl="https://www.facebook.com/fixture/posts/nov2_post",rawContent=nov2Content,
+                contentHash=nov2Hash,contentGroupHash=nov2Hash,
+                publishedAt="2026-11-02T10:00:00Z",publishedAtProvenance="VERIFIED_SUPPORTED_TIMESTAMP",
+                windowMatchStatus="VERIFIED_IN_WINDOW",
+                outcome="READY_FOR_EXTRACTION",
+                processing=new {review=new {
+                    itemIndex=0,providerPostId="nov2_post",sourceUrl="https://www.facebook.com/fixture/posts/nov2_post",
+                    rawContent=nov2Content,contentHash=nov2Hash,contentGroupHash=nov2Hash,
+                    publishedAt="2026-11-02T10:00:00Z",
+                    contentValidity=new {status="VALID_RECRUITMENT",reasonCodes=new[]{"SYNTHETIC_REVIEW"},explanation="Valid",evidenceSnippets=Array.Empty<string>()},
+                    targetMatching=new {status="TARGET_MATCH",reasonCodes=new[]{"SYNTHETIC_REVIEW"},explanation="Matched",evidenceSnippets=Array.Empty<string>()},
+                    verificationStatus="NOT_CHECKED",extracted=new{},missingFields=Array.Empty<string>(),sourceWarnings=Array.Empty<string>(),
+                    classifierVersion="content-first-v1",evaluatedAt=tNov3Slot1
+                },vacancies=Array.Empty<object>()}
+            },DiscoveryReviewRules.Json)!.ToJsonString();
+
+            // Post 2: Published Nov 3 at 01:00 UTC (08:00 ICT Nov 3) -> in slot 1 window (today)
+            var nov3Payload=JsonSerializer.SerializeToNode(new {
+                itemIndex=1,providerPostId="nov3_post",sourceUrl="https://www.facebook.com/fixture/posts/nov3_post",
+                providerSourceUrl="https://www.facebook.com/fixture/posts/nov3_post",rawContent=nov3Content,
+                contentHash=nov3Hash,contentGroupHash=nov3Hash,
+                publishedAt="2026-11-03T01:00:00Z",publishedAtProvenance="VERIFIED_SUPPORTED_TIMESTAMP",
+                windowMatchStatus="VERIFIED_IN_WINDOW",
+                outcome="READY_FOR_EXTRACTION",
+                processing=new {review=new {
+                    itemIndex=1,providerPostId="nov3_post",sourceUrl="https://www.facebook.com/fixture/posts/nov3_post",
+                    rawContent=nov3Content,contentHash=nov3Hash,contentGroupHash=nov3Hash,
+                    publishedAt="2026-11-03T01:00:00Z",
+                    contentValidity=new {status="VALID_RECRUITMENT",reasonCodes=new[]{"SYNTHETIC_REVIEW"},explanation="Valid",evidenceSnippets=Array.Empty<string>()},
+                    targetMatching=new {status="TARGET_MATCH",reasonCodes=new[]{"SYNTHETIC_REVIEW"},explanation="Matched",evidenceSnippets=Array.Empty<string>()},
+                    verificationStatus="NOT_CHECKED",extracted=new{},missingFields=Array.Empty<string>(),sourceWarnings=Array.Empty<string>(),
+                    classifierVersion="content-first-v1",evaluatedAt=tNov3Slot1
+                },vacancies=Array.Empty<object>()}
+            },DiscoveryReviewRules.Json)!.ToJsonString();
+
+            db.DiscoveryExecutionObservations.Add(new(){Id=Guid.NewGuid(),ExecutionId=execId,ItemIndex=0,
+                SemanticState="NOT_REQUESTED",ContentHash=nov2Hash,PayloadHash=DiscoveryReviewRules.Hash(nov2Payload),PayloadJson=nov2Payload});
+            db.DiscoveryExecutionObservations.Add(new(){Id=Guid.NewGuid(),ExecutionId=execId,ItemIndex=1,
+                SemanticState="NOT_REQUESTED",ContentHash=nov3Hash,PayloadHash=DiscoveryReviewRules.Hash(nov3Payload),PayloadJson=nov3Payload});
+            await db.SaveChangesAsync();
+        });
+
+        // Query Nov 3 reporting window: 2026-11-02T17:00:00Z to 2026-11-03T17:00:00Z
+        var queryNov3=RecoveryScenario.ReviewPath+"?includeObservations=true&collectedFrom=2026-11-02T17:00:00.000Z&collectedBefore=2026-11-03T17:00:00.000Z";
+        var data=await RecoveryScenario.Data(await s.Client.GetAsync(queryNov3));
+        var counts=data.GetProperty("counts");
+
+        // Both observations collected in this run are preserved and visible
+        Assert.Equal(2,counts.GetProperty("total").GetInt32());
+        Assert.Equal(2,counts.GetProperty("totalObservations").GetInt32());
+
+        // Nov 2 post is NOT out of window for its execution slot!
+        Assert.Equal(0,counts.GetProperty("outOfWindowPosts").GetInt32());
+
+        // BUT Nov 2 post was published yesterday, so only Nov 3 post counts as newUniquePostsToday for Nov 3!
+        Assert.Equal(1,counts.GetProperty("newUniquePostsToday").GetInt32());
+        Assert.Equal(1,counts.GetProperty("newRelevantVacancies").GetInt32());
+
+        // Both posts have verified dates and are NOT out of window, so both match VERIFIED_DATE
+        var verifiedData=await RecoveryScenario.Data(await s.Client.GetAsync(queryNov3+"&dateProvenance=VERIFIED_DATE"));
+        Assert.Equal(2,verifiedData.GetProperty("results").GetProperty("total").GetInt32());
+
+        // OUT_OF_WINDOW filter returns 0
+        var outOfWindowData=await RecoveryScenario.Data(await s.Client.GetAsync(queryNov3+"&dateProvenance=OUT_OF_WINDOW"));
+        Assert.Equal(0,outOfWindowData.GetProperty("results").GetProperty("total").GetInt32());
+
+        s.AssertOffline();
+    }
+
+    [Fact] public void Strict_utc_timestamp_validation_rejects_missing_timezone_and_malformed_and_respects_ict_midnight()
+    {
+        // 1. Valid UTC and explicit offsets
+        Assert.True(GetDiscoveryOpportunitiesHandler.TryParseExplicitOffsetTimestamp("2026-11-03T07:00:00Z", out var t1));
+        Assert.Equal(new DateTimeOffset(2026, 11, 3, 7, 0, 0, TimeSpan.Zero), t1);
+
+        Assert.True(GetDiscoveryOpportunitiesHandler.TryParseExplicitOffsetTimestamp("2026-11-03T14:00:00+07:00", out var t2));
+        Assert.Equal(new DateTimeOffset(2026, 11, 3, 7, 0, 0, TimeSpan.Zero), t2);
+
+        Assert.True(GetDiscoveryOpportunitiesHandler.TryParseExplicitOffsetTimestamp("2026-11-03T02:00:00-05:00", out var t3));
+        Assert.Equal(new DateTimeOffset(2026, 11, 3, 7, 0, 0, TimeSpan.Zero), t3);
+
+        // 2. Ambiguous timezone-free strings must be rejected
+        Assert.False(GetDiscoveryOpportunitiesHandler.TryParseExplicitOffsetTimestamp("2026-11-03 14:00:00", out _));
+        Assert.False(GetDiscoveryOpportunitiesHandler.TryParseExplicitOffsetTimestamp("2026-11-03T14:00:00", out _));
+        Assert.False(GetDiscoveryOpportunitiesHandler.TryParseExplicitOffsetTimestamp("2026-11-03", out _));
+        Assert.False(GetDiscoveryOpportunitiesHandler.TryParseExplicitOffsetTimestamp("malformed-timestamp", out _));
+        Assert.False(GetDiscoveryOpportunitiesHandler.TryParseExplicitOffsetTimestamp(null, out _));
+        Assert.False(GetDiscoveryOpportunitiesHandler.TryParseExplicitOffsetTimestamp("", out _));
+
+        // 3. ICT midnight boundary
+        // 2026-11-02T16:59:59Z is 23:59:59 ICT Nov 2 -> Vietnam day is 2026-11-02
+        Assert.True(GetDiscoveryOpportunitiesHandler.TryParseExplicitOffsetTimestamp("2026-11-02T16:59:59Z", out var preMidnight));
+        Assert.Equal("2026-11-02", preMidnight.ToOffset(TimeSpan.FromHours(7)).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture));
+
+        // 2026-11-02T17:00:00Z is 00:00:00 ICT Nov 3 -> Vietnam day is 2026-11-03
+        Assert.True(GetDiscoveryOpportunitiesHandler.TryParseExplicitOffsetTimestamp("2026-11-02T17:00:00Z", out var postMidnight));
+        Assert.Equal("2026-11-03", postMidnight.ToOffset(TimeSpan.FromHours(7)).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture));
     }
 }
