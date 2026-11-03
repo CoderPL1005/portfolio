@@ -161,7 +161,21 @@ public sealed class DiscoveryExecutionResetPostgresTests
                 CREATE TABLE job_application_documents(id uuid PRIMARY KEY,job_application_id uuid REFERENCES job_applications(id));
                 CREATE TABLE job_application_events(id uuid PRIMARY KEY,job_application_id uuid REFERENCES job_applications(id));
                 CREATE TABLE raw_job_posting_attachments(id uuid PRIMARY KEY,raw_job_posting_id uuid REFERENCES raw_job_postings(id));
-                CREATE TABLE discovery_candidates(id uuid PRIMARY KEY);
+                CREATE TABLE discovery_candidates(
+                    id uuid PRIMARY KEY,
+                    run_id varchar(100) NOT NULL DEFAULT '',
+                    query varchar(300) NOT NULL DEFAULT '',
+                    candidate_origin varchar(40) NOT NULL DEFAULT 'CLASSIFIER',
+                    page_number int NOT NULL DEFAULT 1,
+                    item_index int NOT NULL DEFAULT 0,
+                    content_status varchar(30) NOT NULL DEFAULT 'VALID_RECRUITMENT',
+                    target_status varchar(30) NOT NULL DEFAULT 'TARGET_MATCH',
+                    content_group_hash varchar(64),
+                    identity_warning boolean NOT NULL DEFAULT false,
+                    payload_hash varchar(64) NOT NULL DEFAULT '',
+                    payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+                    ingested_at timestamptz NOT NULL DEFAULT now()
+                );
                 CREATE TABLE discovery_candidate_reviews(id uuid PRIMARY KEY,candidate_id uuid REFERENCES discovery_candidates(id));
                 CREATE TABLE discovery_candidate_review_events(id uuid PRIMARY KEY,candidate_id uuid REFERENCES discovery_candidates(id));
                 CREATE TABLE unrelated_portfolio(id int PRIMARY KEY);
